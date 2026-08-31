@@ -1,7 +1,7 @@
 // apps/clinician-app/app/sfu/[roomId]/ErxComposer.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card } from '@/components/ui';
 
 import {
@@ -14,11 +14,23 @@ import {
 import type { ICD10Hit, RxNormHit, LabTestHit } from '@/src/hooks/useAutocomplete';
 
 import type { PatientAllergyBrief, PatientProfile } from './patientContext';
-import type { BuildSendToPayerInput } from '@/lib/sendToPayer';
 
 type ToastKind = 'info' | 'success' | 'warning' | 'error';
+type OrderState = 'empty' | 'draft' | 'issued';
+type OrderScope = 'medications' | 'labs';
 
 export type SoapState = {
+  // Canonical Clinical Note fields. The legacy s/o/a/p keys remain for bounded
+  // compatibility with Insight and older draft caches; they are derived from
+  // these fields rather than owning Orders or Conclusions.
+  clinicalNote?: string;
+  presentingComplaint?: string;
+  hpi?: string;
+  symptoms?: string;
+  relevantHistory?: string;
+  objectiveFindings?: string;
+  clinicalReasoning?: string;
+  riskAssessment?: string;
   s: string;
   o: string;
   a: string;
@@ -72,27 +84,13 @@ export type ErxSummaryLab = {
 export type ErxSummary = {
   meds: ErxSummaryMed[];
   labs: ErxSummaryLab[];
+  // Optional at the public type boundary for backward-compatible SFU skins.
+  // This composer still emits all four lifecycle fields on every summary update.
+  medicationState?: OrderState;
+  labState?: OrderState;
+  medicationDraftCount?: number;
+  labDraftCount?: number;
 };
-
-// Tiny parser for sig strings like "500 mg PO TID x7d"
-function parseSig(sig: string) {
-  const parts = sig.trim().split(/\s+/);
-  if (!parts.length) return { dose: '', route: '', freq: '', duration: '' };
-  const dose = parts.slice(0, 2).join(' ');
-  const route = parts[2] || '';
-  const freq = parts[3] || '';
-  const durIdx = parts.findIndex((p) => /^x?\d+/i.test(p));
-  const duration = durIdx >= 0 ? parts.slice(durIdx).join(' ') : '';
-  return { dose, route, freq, duration };
-}
-
-const LOCAL_ICD10_SUGGESTIONS: string[] = [
-  'J20.9 — Acute bronchitis, unspecified',
-  'R50.9 — Fever, unspecified',
-  'R05.9 — Cough, unspecified',
-  'I10 — Essential (primary) hypertension',
-  'E11.9 — Type 2 diabetes mellitus without complications',
-];
 
 type ErxComposerProps = {
   dense: boolean;
@@ -116,13 +114,93 @@ type ErxComposerProps = {
   allergyContextAvailable?: boolean;
   simulation?: boolean;
   currentMedicationNames?: string[];
+  // Legacy compatibility input: indexed ICD-10 lookup is now internal to the composer.
   icd10Suggestions?: string[];
   onToast: (body: string, kind?: ToastKind, title?: string) => void;
   onAudit: (action: string, extra?: Record<string, unknown>) => void;
   onSummaryChange?: (summary: ErxSummary) => void;
 };
 
-type ErxResult = { id: string; status: string; dispenseCode: string; error?: string };
+type ErxResult = {
+  id: string;
+  status: string;
+  dispenseCode: string;
+  error?: string;
+  scope?: OrderScope;
+};
+
+const EMPTY_RX: RxRow = {
+  drug: '', strength: '', form: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0,
+};
+const EMPTY_LAB: LabRow = { test: '', priority: '', specimen: '', icd: '', instructions: '' };
+
+function parseSig(sig: string) {
+  const parts = sig.trim().split(/\s+/);
+  if (!parts.length) return { dose: '', route: '', freq: '', duration: '' };
+  const dose = parts.slice(0, 2).join(' ');
+  const route = parts[2] || '';
+  const freq = parts[3] || '';
+  const durIdx = parts.findIndex((p) => /^x?\d+/i.test(p));
+  const duration = durIdx >= 0 ? parts.slice(durIdx).join(' ') : '';
+  return { dose, route, freq, duration };
+}
+
+function inferStrengthAndForm(label: string) {
+  const text = String(label || '').trim();
+  const strength = text.match(/\b\d+(?:\.\d+)?\s*(?:mcg|micrograms?|mg|g|kg|units?|iu|mmol|mEq)(?:\s*\/\s*(?:mL|L|dose|actuation))?\b/i)?.[0] || '';
+  const formPatterns = [
+    'Extended Release Oral Tablet', 'Delayed Release Oral Tablet', 'Oral Disintegrating Tablet',
+    'Sublingual Tablet', 'Buccal Tablet', 'Oral Tablet', 'Oral Capsule', 'Oral Solution',
+    'Oral Suspension', 'Injectable Solution', 'Injection', 'Inhalation Solution', 'Inhalation Powder',
+    'Metered Dose Inhaler', 'Transdermal Patch', 'Topical Cream', 'Topical Ointment', 'Topical Gel',
+    'Eye Drops', 'Ophthalmic Solution', 'Ear Drops', 'Nasal Spray', 'Suppository', 'Vaginal Tablet',
+    'Tablet', 'Capsule', 'Solution', 'Suspension', 'Cream', 'Ointment', 'Gel', 'Patch', 'Spray', 'Drops',
+  ];
+  const lower = text.toLowerCase();
+  const form = formPatterns.find((candidate) => lower.includes(candidate.toLowerCase())) || '';
+  return { strength, form };
+}
+
+function normalizeForMatch(value: unknown) {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function isActiveAllergy(a: PatientAllergyBrief) {
+  const s = normalizeForMatch(a.status);
+  if (!s) return true;
+  if (s.includes('entered in error')) return false;
+  return !(s.includes('resolved') || s.includes('inactive'));
+}
+
+function isSevereAllergy(a: PatientAllergyBrief) {
+  const s = normalizeForMatch(a.severity);
+  return s.includes('severe') || s.includes('critical') || s.includes('high');
+}
+
+function validMedicationRows(rows: RxRow[]) {
+  return rows.filter((row) => row.drug.trim());
+}
+function validLabRows(rows: LabRow[]) {
+  return rows.filter((row) => row.test.trim());
+}
+
+function extractMaxScheduleFromRows(rows: RxRow[]) {
+  let maxFound: number | null = null;
+  for (const row of rows) {
+    const text = `${row.drug || ''} ${row.notes || ''} ${row.freq || ''} ${row.duration || ''}`.toLowerCase();
+    const match = text.match(/schedule\s*([1-8])/i);
+    if (!match) continue;
+    const value = Number(match[1]);
+    if (Number.isFinite(value)) maxFound = maxFound == null ? value : Math.max(maxFound, value);
+  }
+  return maxFound;
+}
+
+function stateBadge(state: OrderState) {
+  if (state === 'issued') return 'Issued to patient';
+  if (state === 'draft') return 'Draft saved';
+  return 'No authored order';
+}
 
 export default function ErxComposer({
   dense,
@@ -137,21 +215,23 @@ export default function ErxComposer({
   allergyContextAvailable = false,
   simulation = false,
   currentMedicationNames = [],
-  icd10Suggestions,
   onToast,
   onAudit,
   onSummaryChange,
 }: ErxComposerProps) {
-  const [rxRows, setRxRows] = useState<RxRow[]>([
-    { drug: '', strength: '', form: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0 },
-  ]);
-  const [labRows, setLabRows] = useState<LabRow[]>([
-    { test: '', priority: '', specimen: '', icd: '', instructions: '' },
-  ]);
-
+  const [activeOrderTab, setActiveOrderTab] = useState<OrderScope>('medications');
+  const [rxRows, setRxRows] = useState<RxRow[]>([{ ...EMPTY_RX }]);
+  const [labRows, setLabRows] = useState<LabRow[]>([{ ...EMPTY_LAB }]);
+  const [medicationState, setMedicationState] = useState<OrderState>('empty');
+  const [labState, setLabState] = useState<OrderState>('empty');
   const [erxResult, setErxResult] = useState<ErxResult | null>(null);
-  const [erxSubmitting, setErxSubmitting] = useState(false);
-  const [claimSubmitting, setClaimSubmitting] = useState(false);
+  const [busyScope, setBusyScope] = useState<OrderScope | null>(null);
+  const [previewScope, setPreviewScope] = useState<OrderScope | null>(null);
+  const [draftHydrated, setDraftHydrated] = useState(simulation || !encounterId);
+  const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const hydratingRef = useRef(true);
+  const previousMedSignature = useRef('');
+  const previousLabSignature = useRef('');
 
   const [operational, setOperational] = useState<null | {
     canPrescribe?: boolean;
@@ -161,39 +241,43 @@ export default function ErxComposer({
     riskFlags?: string[];
   }>(null);
 
-  const erxLabs: LabRow[] = useMemo(
-    () => labRows.filter((l) => (l.test || '').trim().length > 0),
-    [labRows]
+  const medsToAuthor = useMemo(() => validMedicationRows(rxRows), [rxRows]);
+  const labsToAuthor = useMemo(() => validLabRows(labRows), [labRows]);
+  const medSignature = useMemo(() => JSON.stringify(medsToAuthor), [medsToAuthor]);
+  const labSignature = useMemo(() => JSON.stringify(labsToAuthor), [labsToAuthor]);
+
+  const severeAllergies = useMemo(
+    () => (patientAllergies || []).filter((a) => isActiveAllergy(a) && isSevereAllergy(a)),
+    [patientAllergies],
+  );
+  const recentAllergyReactions = useMemo(() => {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    return (patientAllergies || []).filter((a: any) => {
+      const raw = a.recordedAt || a.createdAt || a.updatedAt;
+      if (!raw) return false;
+      const t = Date.parse(raw);
+      return Number.isFinite(t) && t >= cutoff;
+    });
+  }, [patientAllergies]);
+  const currentMedicationSet = useMemo(
+    () => new Set(currentMedicationNames.map(normalizeForMatch).filter(Boolean)),
+    [currentMedicationNames],
   );
 
-  function normalizeForMatch(value: unknown) {
-    return String(value ?? '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, ' ')
-      .trim()
-      .replace(/\s+/g, ' ');
+  function currentMedicationMatch(drug: string) {
+    const normalized = normalizeForMatch(drug);
+    if (!normalized) return null;
+    for (const current of currentMedicationSet) {
+      if (normalized === current || normalized.includes(current) || current.includes(normalized)) return current;
+    }
+    return null;
   }
 
-  function isActiveAllergy(a: PatientAllergyBrief) {
-    const s = normalizeForMatch(a.status);
-    if (!s) return true;
-    if (s.includes('entered in error')) return false;
-    if (s.includes('resolved') || s.includes('inactive')) return false;
-    return true;
-  }
-
-  function isSevereAllergy(a: PatientAllergyBrief) {
-    const s = normalizeForMatch(a.severity);
-    return s.includes('severe') || s.includes('critical') || s.includes('high');
-  }
-
-  const allergyConflictsForRows = (rows: RxRow[]) => {
+  function allergyConflictsForRows(rows: RxRow[]) {
     const allergies = (patientAllergies || []).filter(isActiveAllergy);
-
     return rows.flatMap((rx, medicationIndex) => {
       const drug = normalizeForMatch(rx.drug);
       if (!drug) return [];
-
       return allergies
         .filter((all) => {
           const substance = normalizeForMatch(all.substance);
@@ -208,92 +292,69 @@ export default function ErxComposer({
           status: all.status ?? null,
         }));
     });
-  };
-
-  const severeAllergies = useMemo(
-    () => (patientAllergies || []).filter((a) => isActiveAllergy(a) && isSevereAllergy(a)),
-    [patientAllergies],
-  );
-
-  const recentAllergyReactions = useMemo(() => {
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-
-    return (patientAllergies || []).filter((a: any) => {
-      const raw = a.recordedAt || a.createdAt || a.updatedAt;
-      if (!raw) return false;
-      const t = Date.parse(raw);
-      return Number.isFinite(t) && t >= cutoff;
-    });
-  }, [patientAllergies]);
-
-
-  const currentMedicationSet = useMemo(
-    () =>
-      new Set(
-        currentMedicationNames
-          .map((name) => normalizeForMatch(name))
-          .filter(Boolean),
-      ),
-    [currentMedicationNames],
-  );
-
-  function currentMedicationMatch(drug: string) {
-    const normalized = normalizeForMatch(drug);
-    if (!normalized) return null;
-
-    for (const current of currentMedicationSet) {
-      if (
-        normalized === current ||
-        normalized.includes(current) ||
-        current.includes(normalized)
-      ) {
-        return current;
-      }
-    }
-
-    return null;
   }
-
 
   useEffect(() => {
     let alive = true;
-
-    async function loadOperational() {
+    void (async () => {
       try {
-        const res = await fetch('/api/me', {
-          method: 'GET',
-          cache: 'no-store',
-          credentials: 'same-origin',
-        });
-
+        const res = await fetch('/api/me', { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
         const js = await res.json().catch(() => null as any);
         if (!alive) return;
-
-        const nextOperational =
+        setOperational(
           js?.clinician?.operational && typeof js.clinician.operational === 'object'
             ? js.clinician.operational
             : js?.clinician?.activation && typeof js.clinician.activation === 'object'
               ? js.clinician.activation
-              : null;
-
-        setOperational(nextOperational);
+              : null,
+        );
       } catch {
-        if (!alive) return;
-        setOperational(null);
+        if (alive) setOperational(null);
       }
-    }
-
-    void loadOperational();
-    return () => {
-      alive = false;
-    };
+    })();
+    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
+    if (simulation || !encounterId) {
+      hydratingRef.current = false;
+      setDraftHydrated(true);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/erx`, { cache: 'no-store' });
+        const js = await res.json().catch(() => null as any);
+        if (!alive) return;
+        if (res.ok && js?.draft) {
+          const meds = Array.isArray(js.draft.medications) ? js.draft.medications : [];
+          const labs = Array.isArray(js.draft.labs) ? js.draft.labs : [];
+          if (meds.length) {
+            setRxRows(meds.map((row: any) => ({ ...EMPTY_RX, ...row, refills: Number(row?.refills || 0) })));
+            setMedicationState('draft');
+          }
+          if (labs.length) {
+            setLabRows(labs.map((row: any) => ({ ...EMPTY_LAB, ...row })));
+            setLabState('draft');
+          }
+        }
+      } catch {
+        // The local UI remains usable; a visible save failure appears on the next write.
+      } finally {
+        if (alive) {
+          hydratingRef.current = false;
+          setDraftHydrated(true);
+        }
+      }
+    })();
+    return () => { alive = false; };
+  }, [encounterId, simulation]);
+
+  useEffect(() => {
     if (!onSummaryChange) return;
-    const meds = rxRows
-      .filter((r) => (r.drug || '').trim())
-      .map<ErxSummaryMed>((r) => ({
+    onSummaryChange({
+      meds: medsToAuthor.map((r) => ({
         drug: r.drug,
         strength: r.strength || undefined,
         form: r.form || undefined,
@@ -301,749 +362,319 @@ export default function ErxComposer({
         route: r.route || undefined,
         freq: r.freq || undefined,
         duration: r.duration || undefined,
-      }));
-    const labs = erxLabs.map<ErxSummaryLab>((l) => ({
-      test: l.test,
-      priority: l.priority || undefined,
-      specimen: l.specimen || undefined,
-      icd: l.icd || undefined,
-      code: l.catalogCode || undefined,
-      codeSystem: l.catalogSystem || undefined,
-    }));
-    onSummaryChange({ meds, labs });
-  }, [rxRows, erxLabs, onSummaryChange]);
+      })),
+      labs: labsToAuthor.map((l) => ({
+        test: l.test,
+        priority: l.priority || undefined,
+        specimen: l.specimen || undefined,
+        icd: l.icd || undefined,
+        code: l.catalogCode || undefined,
+        codeSystem: l.catalogSystem || undefined,
+      })),
+      medicationState,
+      labState,
+      medicationDraftCount: medicationState === 'draft' ? medsToAuthor.length : 0,
+      labDraftCount: labState === 'draft' ? labsToAuthor.length : 0,
+    });
+  }, [labState, labsToAuthor, medicationState, medsToAuthor, onSummaryChange]);
 
-  const addRxRow = () =>
-    setRxRows((r) => [
-      ...r,
-      { drug: '', strength: '', form: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0 },
-    ]);
-  const removeRxRow = (i: number) =>
-    setRxRows((r) => r.filter((_, j) => j !== i));
-
-  const addLabRow = () =>
-    setLabRows((r) => [
-      ...r,
-      { test: '', priority: '', specimen: '', icd: '', instructions: '' },
-    ]);
-  const removeLabRow = (i: number) =>
-    setLabRows((r) => r.filter((_, j) => j !== i));
-
-  function extractMaxScheduleFromRows(rows: RxRow[]) {
-    let maxFound: number | null = null;
-    for (const row of rows) {
-      const text = `${row.drug || ''} ${row.notes || ''} ${row.freq || ''} ${row.duration || ''}`.toLowerCase();
-      const m = text.match(/schedule\s*([1-8])/i);
-      if (m) {
-        const n = Number(m[1]);
-        if (Number.isFinite(n)) {
-          maxFound = maxFound == null ? n : Math.max(maxFound, n);
-        }
-      }
-    }
-    return maxFound;
+  function payloadFor(scope: OrderScope, action: 'save-draft' | 'finalize') {
+    return {
+      action,
+      scope,
+      encounterId,
+      patientId,
+      patientName: profile.name || appt.patientName,
+      clinicianId,
+      clinicianName: appt.clinicianName,
+      reason: appt.reason,
+      medications: scope === 'medications' ? medsToAuthor : [],
+      labs: scope === 'labs' ? labsToAuthor : [],
+      allergies: (patientAllergies || []).map((a) => ({
+        substance: a.substance, severity: a.severity, reaction: a.reaction, status: a.status,
+      })),
+      note: soap.clinicalNote || soap.clinicalReasoning || soap.a || '',
+    };
   }
 
-  const sendErx = async () => {
-    const medsToSend = rxRows.filter((r) => r.drug && r.drug.trim().length > 0);
-    const labsToSend = labRows.filter((l) => l.test && l.test.trim().length > 0);
-
-    if (operational?.canPrescribe === false) {
-      onToast(
-        'You are not currently cleared to prescribe on Ambulant+.',
-        'error',
-        'Prescribing blocked'
-      );
-      onAudit('erx.send.blocked', {
-        reason: 'canPrescribe_false',
-        blockers: operational?.blockers ?? [],
-        riskFlags: operational?.riskFlags ?? [],
-      });
-      return;
+  async function persistScope(
+    scope: OrderScope,
+    action: 'save-draft' | 'finalize',
+    opts: { quiet?: boolean } = {},
+  ) {
+    const rows = scope === 'medications' ? medsToAuthor : labsToAuthor;
+    if (!rows.length) {
+      if (!opts.quiet) onToast(`Add at least one ${scope === 'medications' ? 'medication' : 'lab test'} first.`, 'warning', 'Nothing to save');
+      return false;
     }
 
-    const requestedMaxSchedule = extractMaxScheduleFromRows(medsToSend);
-    if (
-      requestedMaxSchedule != null &&
-      typeof operational?.maxRxSchedule === 'number' &&
-      requestedMaxSchedule > operational.maxRxSchedule
-    ) {
-      onToast(
-        `This prescription exceeds your current prescribing authority (max schedule ${operational.maxRxSchedule}).`,
-        'error',
-        'Prescribing limit exceeded'
-      );
-      onAudit('erx.send.blocked', {
-        reason: 'max_schedule_exceeded',
-        requestedMaxSchedule,
-        maxRxSchedule: operational.maxRxSchedule,
-      });
-      return;
-    }
-
-    if (!encounterId) {
-      onToast('Cannot send eRx: encounterId is missing in the URL.', 'error', 'eRx error');
-      return;
-    }
-
-    if (medsToSend.length === 0 && labsToSend.length === 0) {
-      onToast(
-        'Add at least one medication or lab request before sending eRx.',
-        'warning',
-        'Nothing to send'
-      );
-      return;
-    }
-
-    if (!simulation && medsToSend.length > 0 && !allergyContextAvailable) {
-      onToast(
-        'Prescription blocked because the patient allergy record could not be verified. Refresh authorised patient context before prescribing.',
-        'error',
-        'Allergy context unavailable',
-      );
-      onAudit('erx.send.blocked', { reason: 'ALLERGY_CONTEXT_UNAVAILABLE' });
-      return;
-    }
-
-    const allergyConflicts = allergyConflictsForRows(medsToSend);
-    const hasCollision = allergyConflicts.length > 0;
-
-    if (hasCollision) {
-      onToast(
-        `Prescription blocked: ${allergyConflicts[0].drug} conflicts with recorded allergy ${allergyConflicts[0].substance}.`,
-        'error',
-        'Allergy conflict'
-      );
-
-      onAudit('erx.send.blocked', {
-        reason: 'ALLERGY_CONFLICT',
-        conflicts: allergyConflicts,
-        allergySource: allergiesFromLive ? 'live' : 'manual',
-      });
-
-      return;
-    }
-
-    if (simulation) {
-      const simulatedId = `sim-erx-${Date.now()}`;
-      setErxResult({
-        id: simulatedId,
-        status: 'SIMULATION DRAFT',
-        dispenseCode: 'NOT FOR DISPENSING',
-      });
-      onToast(
-        'Simulation eRx finalized locally. No pharmacy, laboratory, payer, or production patient record was updated.',
-        'success',
-        'Simulation eRx'
-      );
-      onAudit('erx.simulation.finalize', {
-        rxCount: medsToSend.length,
-        labCount: labsToSend.length,
-        simulatedId,
-      });
-      return;
-    }
-
-    setErxSubmitting(true);
-    try {
-      const payload = {
-        encounterId,
-        patientId,
-        patientName: profile.name || appt.patientName,
-        clinicianId,
-        clinicianName: appt.clinicianName,
-        reason: appt.reason,
-        medications: medsToSend,
-        labs: labsToSend,
-        allergies: (patientAllergies || []).map((a) => ({
-          substance: a.substance,
-          severity: a.severity,
-          reaction: a.reaction,
-          status: a.status,
-        })),
-        note: soap.p || '',
-        authorization: {
-          canPrescribe: operational?.canPrescribe ?? null,
-          prescribingMode: operational?.prescribingMode ?? null,
-          maxRxSchedule: operational?.maxRxSchedule ?? null,
-          blockers: operational?.blockers ?? [],
-          riskFlags: operational?.riskFlags ?? [],
-        },
-      };
-
-      const res = await fetch(
-        `/api/encounters/${encodeURIComponent(encounterId)}/erx`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(payload),
-        }
-      );
-
-      const js = await res.json().catch(() => null as any);
-
-      if (!res.ok) {
-        const msg =
-          (js as any)?.message || (js as any)?.error || `HTTP ${res.status}`;
-        setErxResult({
-          id: String((js as any)?.id ?? (js as any)?.erxId ?? ''),
-          status: 'Error',
-          dispenseCode: String(
-            (js as any)?.dispenseCode ?? (js as any)?.code ?? ''
-          ),
-          error: msg,
-        });
-        onToast(`Failed to send eRx: ${msg}`, 'error', 'eRx error');
-        onAudit('erx.send.error', {
-          rxCount: medsToSend.length,
-          labCount: labsToSend.length,
-          allergyCollision: hasCollision,
-          allergySource: allergiesFromLive ? 'live' : 'manual',
-          statusCode: res.status,
-          message: msg,
-        });
-        return;
+    if (action === 'finalize' && scope === 'medications') {
+      if (operational?.canPrescribe === false) {
+        onToast('You are not currently cleared to prescribe on Ambulant+.', 'error', 'Prescribing blocked');
+        return false;
       }
-
-      const erx: ErxResult = {
-        id: String((js as any)?.id ?? (js as any)?.erxId ?? ''),
-        status: (js as any)?.status || 'Created',
-        dispenseCode: String(
-          (js as any)?.dispenseCode ?? (js as any)?.code ?? 'Pending'
-        ),
-      };
-      setErxResult(erx);
-
-      onToast('eRx submitted for this encounter.', 'success', 'eRx sent');
-      onAudit('erx.send', {
-        rxCount: medsToSend.length,
-        labCount: labsToSend.length,
-        allergyCollision: hasCollision,
-        allergySource: allergiesFromLive ? 'live' : 'manual',
-        erxId: erx.id,
-        status: erx.status,
-        authorization: {
-          canPrescribe: operational?.canPrescribe ?? null,
-          prescribingMode: operational?.prescribingMode ?? null,
-          maxRxSchedule: operational?.maxRxSchedule ?? null,
-        },
-      });
-    } catch (err: any) {
-      const msg = err?.message || 'Unknown error';
-      setErxResult({
-        id: '',
-        status: 'Error',
-        dispenseCode: '',
-        error: msg,
-      });
-      onToast('Failed to send eRx.', 'error', 'eRx error');
-      onAudit('erx.send.error', {
-        rxCount: rxRows.length,
-        labCount: labRows.length,
-        allergyCollision: hasCollision,
-        allergySource: allergiesFromLive ? 'live' : 'manual',
-        message: msg,
-      });
-    } finally {
-      setErxSubmitting(false);
+      const incomplete = medsToAuthor.find((row) => !row.strength.trim() || !row.form.trim());
+      if (incomplete) {
+        onToast(`Strength and dosage form are required before issuing ${incomplete.drug}.`, 'error', 'Prescription incomplete');
+        return false;
+      }
+      const requestedMaxSchedule = extractMaxScheduleFromRows(medsToAuthor);
+      if (requestedMaxSchedule != null && typeof operational?.maxRxSchedule === 'number' && requestedMaxSchedule > operational.maxRxSchedule) {
+        onToast(`This prescription exceeds your current prescribing authority (max schedule ${operational.maxRxSchedule}).`, 'error', 'Prescribing limit exceeded');
+        return false;
+      }
+      if (!simulation && !allergyContextAvailable) {
+        onToast('Prescription blocked because the authorised allergy record could not be verified.', 'error', 'Allergy context unavailable');
+        return false;
+      }
+      const conflicts = allergyConflictsForRows(medsToAuthor);
+      if (conflicts.length) {
+        onToast(`Prescription blocked: ${conflicts[0].drug} conflicts with recorded allergy ${conflicts[0].substance}.`, 'error', 'Allergy conflict');
+        onAudit('erx.issue.blocked', { reason: 'ALLERGY_CONFLICT', conflicts, allergySource: allergiesFromLive ? 'live' : 'manual' });
+        return false;
+      }
     }
-  };
 
-  const sendClaimToPayer = async () => {
     if (simulation) {
-      onToast('Claims are disabled in simulation.', 'warning', 'Simulation — no claim');
-      onAudit('claim.simulation.blocked', { encounterId });
-      return;
+      if (scope === 'medications') setMedicationState(action === 'finalize' ? 'issued' : 'draft');
+      else setLabState(action === 'finalize' ? 'issued' : 'draft');
+      setAutosaveState('saved');
+      if (action === 'finalize') {
+        const simulatedId = `sim-${scope === 'medications' ? 'erx' : 'lab'}-${Date.now()}`;
+        setErxResult({ id: simulatedId, status: 'SIMULATION — NOT FOR CLINICAL FULFILMENT', dispenseCode: 'NOT FOR DISPENSING', scope });
+        if (!opts.quiet) onToast(
+          `Simulated ${scope === 'medications' ? 'prescription' : 'lab order'} finalized. No production patient record, CarePort, MedReach, pharmacy or laboratory was updated.`,
+          'success',
+          'Simulation order',
+        );
+      }
+      return true;
     }
-
-    const medsToSend = rxRows.filter((r) => r.drug && r.drug.trim().length > 0);
-    const labsToSend = erxLabs;
 
     if (!encounterId) {
-      onToast('Cannot send claim: encounterId is missing in the URL.', 'error', 'Claim error');
-      return;
+      if (!opts.quiet) onToast('No encounter is attached to this consultation.', 'error', 'Order unavailable');
+      return false;
     }
 
-    if (medsToSend.length === 0 && labsToSend.length === 0) {
-      onToast(
-        'Nothing billable yet. Add at least one medication or lab test before sending a claim.',
-        'warning',
-        'No billable items'
-      );
-      return;
-    }
-
-    const payload: BuildSendToPayerInput = {
-      encounterId,
-      patient: {
-        id: profile.id,
-        name: profile.name,
-        dob: profile.dob ?? null,
-        gender: profile.gender ?? null,
-      },
-      clinician: {
-        id: clinicianId,
-        name: appt.clinicianName,
-      },
-      diagnoses: {
-        code: soap.icd10Code || undefined,
-        text: soap.a || appt.reason || 'Unspecified diagnosis',
-      },
-      meds: medsToSend.map((r) => ({
-        drug: r.drug,
-        dose: r.dose,
-        route: r.route,
-        freq: r.freq,
-        duration: r.duration,
-        qty: r.qty,
-        refills: r.refills,
-        icd10: undefined,
-        unitPriceZar: null,
-      })),
-      labs: labsToSend.map((l) => ({
-        test: l.test,
-        priority: l.priority,
-        specimen: l.specimen,
-        icd: l.icd,
-        instructions: l.instructions,
-        unitPriceZar: null,
-      })),
-      startedAt: appt.when,
-      endedAt: new Date().toISOString(),
-      notes: soap.p || null,
-    };
-
-    setClaimSubmitting(true);
+    if (!opts.quiet) setBusyScope(scope);
+    else setAutosaveState('saving');
     try {
-      const res = await fetch('/api/gateway/send-to-payer', {
+      const res = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/erx`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payloadFor(scope, action)),
       });
+      const js = await res.json().catch(() => null as any);
+      if (!res.ok || !js?.ok) throw new Error(js?.message || js?.error || `HTTP ${res.status}`);
 
-      const js: any = await res.json().catch(() => null);
+      if (scope === 'medications') setMedicationState(action === 'finalize' ? 'issued' : 'draft');
+      else setLabState(action === 'finalize' ? 'issued' : 'draft');
+      setAutosaveState('saved');
 
-      if (!res.ok || !js?.ok) {
-        const msg = js?.error || js?.message || `HTTP ${res.status}`;
-        onToast(
-          `Failed to send claim to payer: ${msg}`,
-          'error',
-          'Claim error'
-        );
-        onAudit('claim.send.error', {
-          encounterId,
-          rxCount: medsToSend.length,
-          labCount: labsToSend.length,
-          statusCode: res.status,
-          gatewayResponse: js,
+      if (action === 'finalize') {
+        const first = scope === 'medications' ? js?.medications?.[0] : js?.labs?.[0];
+        setErxResult({
+          id: String(first?.id || ''), status: String(js?.status || 'issued'),
+          dispenseCode: String(first?.dispenseCode || 'Patient action required'), scope,
         });
-        return;
+        if (!opts.quiet) onToast(
+          `${scope === 'medications' ? 'Prescription' : 'Lab order'} issued to the patient record. No ${scope === 'medications' ? 'CarePort' : 'MedReach'} marketplace request was sent; the patient chooses if and when to route it.`,
+          'success',
+          'Issued to patient',
+        );
+        onAudit(scope === 'medications' ? 'erx.issued_to_patient' : 'lab.issued_to_patient', {
+          encounterId, count: rows.length, marketplaceDispatched: false, fulfilmentOwner: 'patient',
+        });
+      } else if (!opts.quiet) {
+        onToast(`${scope === 'medications' ? 'Prescription' : 'Lab'} draft saved to the encounter.`, 'success', 'Draft saved');
       }
-
-      onToast('Claim submitted to payer.', 'success', 'Claim sent');
-      onAudit('claim.send', {
-        encounterId,
-        rxCount: medsToSend.length,
-        labCount: labsToSend.length,
-        forwarded: js.forwarded ?? true,
-      });
-    } catch (err: any) {
-      onToast('Failed to send claim to payer.', 'error', 'Claim error');
-      onAudit('claim.send.error', {
-        encounterId,
-        message: err?.message || String(err),
-      });
+      return true;
+    } catch (error: any) {
+      setAutosaveState('error');
+      if (!opts.quiet) onToast(error?.message || 'Order could not be saved.', 'error', 'Save failed');
+      return false;
     } finally {
-      setClaimSubmitting(false);
+      if (!opts.quiet) setBusyScope(null);
     }
-  };
+  }
 
-  const effectiveIcdSuggestions = icd10Suggestions?.length
-    ? icd10Suggestions
-    : LOCAL_ICD10_SUGGESTIONS;
+  // Debounced server-backed recovery. Finalization remains a separate explicit act.
+  useEffect(() => {
+    if (!draftHydrated || hydratingRef.current) return;
+    if (previousMedSignature.current === medSignature) return;
+    previousMedSignature.current = medSignature;
+    if (!medsToAuthor.length) {
+      setMedicationState('empty');
+      return;
+    }
+    setMedicationState((state) => state === 'issued' ? 'draft' : state === 'empty' ? 'draft' : state);
+    const id = window.setTimeout(() => { void persistScope('medications', 'save-draft', { quiet: true }); }, 1200);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftHydrated, medSignature]);
 
+  useEffect(() => {
+    if (!draftHydrated || hydratingRef.current) return;
+    if (previousLabSignature.current === labSignature) return;
+    previousLabSignature.current = labSignature;
+    if (!labsToAuthor.length) {
+      setLabState('empty');
+      return;
+    }
+    setLabState((state) => state === 'issued' ? 'draft' : state === 'empty' ? 'draft' : state);
+    const id = window.setTimeout(() => { void persistScope('labs', 'save-draft', { quiet: true }); }, 1200);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftHydrated, labSignature]);
+
+  const addRxRow = () => setRxRows((rows) => [...rows, { ...EMPTY_RX }]);
+  const removeRxRow = (index: number) => setRxRows((rows) => rows.filter((_, i) => i !== index));
+  const addLabRow = () => setLabRows((rows) => [...rows, { ...EMPTY_LAB }]);
+  const removeLabRow = (index: number) => setLabRows((rows) => rows.filter((_, i) => i !== index));
 
   return (
-    <Card
-      title="eRx Composer"
-      dense={dense}
-      gradient
-      toolbar={
-        <div className="flex gap-2">
-          <button
-            className="text-xs px-2 py-1 border rounded disabled:opacity-60"
-            onClick={sendErx}
-            disabled={erxSubmitting || operational?.canPrescribe === false}
-          >
-            {erxSubmitting ? 'Sending…' : simulation ? 'Finalize simulated eRx' : 'Send eRx'}
-          </button>
-          <button
-            className="text-xs px-2 py-1 border rounded disabled:opacity-60"
-            onClick={sendClaimToPayer}
-            disabled={claimSubmitting || simulation}
-          >
-            {claimSubmitting ? 'Sending claim…' : 'Send Claim'}
-          </button>
+    <Card title="Orders" dense={dense} gradient>
+      <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+        <div className="font-semibold text-slate-900">Clinician authorship only</div>
+        <div className="mt-1 leading-relaxed">
+          Finalizing an order issues it to the patient record. It does not send a marketplace request. The patient later decides whether to use CarePort or MedReach and chooses among available providers based on stock, price, ETA, proximity or preference.
         </div>
-      }
-    >
-      {severeAllergies.length > 0 ? (
-        <div className="mb-2 rounded border border-rose-300 bg-rose-50 px-2 py-2 text-[11px] text-rose-900">
-          <div className="font-semibold">Severe allergy on record</div>
-          <div className="mt-1">
-            {severeAllergies
-              .slice(0, 3)
-              .map((a) => `${a.substance}${a.reaction ? ` — ${a.reaction}` : ''}`)
-              .join(', ')}
-            {severeAllergies.length > 3 ? ` +${severeAllergies.length - 3} more` : ''}
-          </div>
-        </div>
-      ) : null}
-
-      {patientAllergies && patientAllergies.length > 0 ? (
-        <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-2 text-[11px] text-amber-900">
-          <div className="font-semibold">Recorded allergies</div>
-          <div className="mt-1">
-            {patientAllergies
-              .filter(isActiveAllergy)
-              .slice(0, 5)
-              .map((a) => {
-                const sev = a.severity ? ` (${a.severity})` : '';
-                const rxn = a.reaction ? ` — ${a.reaction}` : '';
-                return `${a.substance}${sev}${rxn}`;
-              })
-              .join(', ') || 'No active allergies recorded'}
-          </div>
-          {recentAllergyReactions.length > 0 ? (
-            <div className="mt-1 text-amber-800">
-              Recent reactions in last 30 days: {recentAllergyReactions.length}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {!simulation && !allergyContextAvailable ? (
-        <div className="mb-2 rounded border border-rose-300 bg-rose-50 px-2 py-2 text-[11px] text-rose-900">
-          <div className="font-semibold">Allergy verification unavailable</div>
-          <div className="mt-1">Medication prescribing is fail-closed until the authorised allergy record is available. Lab ordering remains available.</div>
-        </div>
-      ) : null}
-
-      {operational?.canPrescribe === false ? (
-        <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-900">
-          Prescribing is currently disabled for this clinician profile.
-        </div>
-      ) : null}
-
-
-      {simulation ? (
-        <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
-          SIMULATION — NOT FOR DISPENSING / NOT FOR CLINICAL FULFILMENT. Finalizing here does not dispatch to CarePort, MedReach, a payer, or the production patient record.
-        </div>
-      ) : null}
-
-      <div className="text-xs text-gray-500 mb-2">
-        Add one or more drugs and optional lab tests. This screen authors the encounter record only. Marketplace initiation and payment selection must happen in the patient app.
       </div>
 
-      <datalist id="icd10-suggest">
-        {effectiveIcdSuggestions.map((c) => (
-          <option key={c} value={c} />
-        ))}
-      </datalist>
+      <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
+        <button type="button" onClick={() => setActiveOrderTab('medications')} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${activeOrderTab === 'medications' ? 'bg-slate-900 text-white' : 'border bg-white text-slate-700'}`}>
+          eRx · {stateBadge(medicationState)}
+        </button>
+        <button type="button" onClick={() => setActiveOrderTab('labs')} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${activeOrderTab === 'labs' ? 'bg-slate-900 text-white' : 'border bg-white text-slate-700'}`}>
+          Labs · {stateBadge(labState)}
+        </button>
+        <span className={`ml-auto text-[11px] ${autosaveState === 'error' ? 'text-rose-700' : 'text-slate-500'}`}>
+          {autosaveState === 'saving' ? 'Saving draft…' : autosaveState === 'saved' ? 'Server draft saved' : autosaveState === 'error' ? 'Draft save needs attention' : ''}
+        </span>
+      </div>
 
-      {/* Medications */}
-      {rxRows.map((r, i) => (
-        <div key={i} className="mt-2 space-y-2 border rounded p-2 bg:white bg-white">
-          <RxDrugInput
-            row={r}
-            onChange={(row) =>
-              setRxRows((all) => all.map((y, j) => (j === i ? row : y)))
-            }
-          />
-
-          {currentMedicationMatch(r.drug) ? (
-            <div className="inline-flex w-fit rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
-              Currently recorded medication
-            </div>
-          ) : r.drug.trim() ? (
-            <div className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
-              No current-medication match
+      {activeOrderTab === 'medications' ? (
+        <div className="space-y-3">
+          {severeAllergies.length > 0 ? (
+            <div className="rounded border border-rose-300 bg-rose-50 px-2 py-2 text-[11px] text-rose-900">
+              <div className="font-semibold">Severe allergy on record</div>
+              <div className="mt-1">{severeAllergies.slice(0, 3).map((a) => `${a.substance}${a.reaction ? ` — ${a.reaction}` : ''}`).join(', ')}</div>
+              {recentAllergyReactions.length ? <div className="mt-1">Recent allergy/reaction entries in last 30 days: {recentAllergyReactions.length}</div> : null}
             </div>
           ) : null}
 
-          <div className="grid md:grid-cols-8 gap-2">
-            <input
-              className="border rounded px-2 py-1"
-              placeholder="Strength (e.g. 500 mg)"
-              value={r.strength}
-              onChange={(e) =>
-                setRxRows((x) =>
-                  x.map((y, j) => (j === i ? { ...y, strength: e.target.value } : y))
-                )
-              }
-            />
-            <input
-              className="border rounded px-2 py-1"
-              placeholder="Form (tablet, capsule…)"
-              value={r.form}
-              onChange={(e) =>
-                setRxRows((x) =>
-                  x.map((y, j) => (j === i ? { ...y, form: e.target.value } : y))
-                )
-              }
-            />
-            <input
-              className="border rounded px-2 py-1"
-              placeholder="Dose (e.g. 1 tablet)"
-              value={r.dose}
-              onChange={(e) =>
-                setRxRows((x) =>
-                  x.map((y, j) => (j === i ? { ...y, dose: e.target.value } : y))
-                )
-              }
-            />
-            <input
-              className="border rounded px-2 py-1"
-              placeholder="Route"
-              value={r.route}
-              onChange={(e) =>
-                setRxRows((x) =>
-                  x.map((y, j) => (j === i ? { ...y, route: e.target.value } : y))
-                )
-              }
-            />
-            <input
-              className="border rounded px-2 py-1"
-              placeholder="Frequency"
-              value={r.freq}
-              onChange={(e) =>
-                setRxRows((x) =>
-                  x.map((y, j) => (j === i ? { ...y, freq: e.target.value } : y))
-                )
-              }
-            />
-            <input
-              className="border rounded px-2 py-1"
-              placeholder="Duration"
-              value={r.duration}
-              onChange={(e) =>
-                setRxRows((x) =>
-                  x.map((y, j) =>
-                    j === i ? { ...y, duration: e.target.value } : y
-                  )
-                )
-              }
-            />
-            <input
-              className="border rounded px-2 py-1"
-              placeholder="Qty"
-              value={r.qty}
-              onChange={(e) =>
-                setRxRows((x) =>
-                  x.map((y, j) => (j === i ? { ...y, qty: e.target.value } : y))
-                )
-              }
-            />
-            <input
-              className="border rounded px-2 py-1"
-              type="number"
-              placeholder="Refills"
-              value={r.refills}
-              onChange={(e) =>
-                setRxRows((x) =>
-                  x.map((y, j) =>
-                    j === i
-                      ? { ...y, refills: Number(e.target.value) || 0 }
-                      : y
-                  )
-                )
-              }
-            />
-          </div>
-
-          {r.sigSuggestions && r.sigSuggestions.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {r.sigSuggestions.slice(0, 6).map((sugg, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  className="text-[11px] px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100"
-                  onClick={() => {
-                    const parsed = parseSig(sugg);
-                    setRxRows((rows) =>
-                      rows.map((row, j) =>
-                        j === i
-                          ? {
-                              ...row,
-                              dose: row.dose || parsed.dose || row.dose,
-                              route: row.route || parsed.route || row.route,
-                              freq: row.freq || parsed.freq || sugg,
-                              duration:
-                                row.duration || parsed.duration || row.duration,
-                            }
-                          : row
-                      )
-                    );
-                  }}
-                >
-                  {sugg}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="grid grid-cols-12 gap-2 items-center">
-            <input
-              className="border rounded px-2 py-1 col-span-10"
-              placeholder="Notes (optional)"
-              value={r.notes || ''}
-              onChange={(e) =>
-                setRxRows((x) =>
-                  x.map((y, j) =>
-                    j === i ? { ...y, notes: e.target.value } : y
-                  )
-                )
-              }
-            />
-            <div className="col-span-2 flex justify-end">
-              <button
-                className="px-2 py-1 border rounded text-xs"
-                onClick={() => removeRxRow(i)}
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-        </div>
-      ))}
-
-      <div className="pt-2 flex flex-wrap gap-2 items-center">
-        <button className="px-2 py-1 border rounded text-xs" onClick={addRxRow}>
-          Add drug
-        </button>
-        <div className="text-[11px] text-gray-500">
-          After encounter authoring, the patient must open CarePort or MedReach from the patient app to choose fulfillment mode, sponsor use, and payment method.
-        </div>
-      </div>
-
-      {/* Laboratory */}
-      <div className="text-sm font-semibold mt-4">Laboratory</div>
-      <div className="text-xs text-gray-500 mb-1">
-        Test name on its own line; then Priority, Specimen, ICD-10 on one row; optional instructions below.
-      </div>
-
-      {labRows.map((r, i) => (
-        <div key={i} className="mt-2 space-y-2 border rounded p-2 bg-white">
-          <LabTestInput
-            row={r}
-            onChange={(row) =>
-              setLabRows((all) => all.map((item, index) => (index === i ? row : item)))
-            }
-          />
-          <div className="grid md:grid-cols-4 gap-2 items-center">
-            <select
-              className="border rounded px-2 py-1"
-              value={r.priority}
-              onChange={(e) =>
-                setLabRows((x) =>
-                  x.map((y, j) =>
-                    j === i
-                      ? {
-                          ...y,
-                          priority: e.target.value as LabRow['priority'],
-                        }
-                      : y
-                  )
-                )
-              }
-            >
-              <option value="">Priority</option>
-              <option value="Routine">Routine</option>
-              <option value="Urgent">Urgent</option>
-              <option value="Stat">Stat</option>
-            </select>
-            <input
-              className="border rounded px-2 py-1"
-              placeholder="Specimen (e.g., blood, urine)"
-              value={r.specimen}
-              onChange={(e) =>
-                setLabRows((x) =>
-                  x.map((y, j) =>
-                    j === i ? { ...y, specimen: e.target.value } : y
-                  )
-                )
-              }
-            />
-            <Icd10Input
-              value={r.icd}
-              onChange={(code, label) =>
-                setLabRows((x) =>
-                  x.map((y, j) =>
-                    j === i ? { ...y, icd: code || label } : y
-                  )
-                )
-              }
-              placeholder="ICD-10 (optional)"
-            />
-            <div className="flex justify-end">
-              <button
-                className="px-2 py-1 border rounded text-xs"
-                onClick={() => removeLabRow(i)}
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-          <input
-            className="border rounded px-2 py-1 w-full"
-            placeholder="Instructions / clinical info (optional)"
-            value={r.instructions || ''}
-            onChange={(e) =>
-              setLabRows((x) =>
-                x.map((y, j) =>
-                  j === i ? { ...y, instructions: e.target.value } : y
-                )
-              )
-            }
-          />
-        </div>
-      ))}
-
-      <div className="pt-2 flex flex-wrap gap-2">
-        <button className="px-2 py-1 border rounded text-xs" onClick={addLabRow}>
-          Add test
-        </button>
-      </div>
-
-      {erxResult && (
-        <div className="mt-3 border rounded p-3 bg-white text-sm">
-          {erxResult.error ? (
-            <div className="text-red-600">
-              <div className="font-semibold mb-1">eRx Error</div>
-              <div>{erxResult.error}</div>
-              {erxResult.id && (
-                <div className="mt-1 text-xs text-gray-600">
-                  eRx ID (from server):{' '}
-                  <span className="font-mono">{erxResult.id}</span>
+          {rxRows.map((row, index) => {
+            const currentMatch = currentMedicationMatch(row.drug);
+            return (
+              <div key={index} className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+                <RxDrugInput row={row} onChange={(next) => setRxRows((rows) => rows.map((value, i) => i === index ? next : value))} />
+                {currentMatch ? <div className="text-[11px] text-amber-700">Matches a current medication. Review whether this is an intended continuation or duplicate.</div> : null}
+                <div className="grid gap-2 md:grid-cols-4">
+                  <input className="border rounded px-2 py-1" placeholder="Strength (e.g. 500 mg)" value={row.strength} onChange={(e) => setRxRows((rows) => rows.map((value, i) => i === index ? { ...value, strength: e.target.value } : value))} />
+                  <input className="border rounded px-2 py-1" placeholder="Form (e.g. tablet)" value={row.form} onChange={(e) => setRxRows((rows) => rows.map((value, i) => i === index ? { ...value, form: e.target.value } : value))} />
+                  <input className="border rounded px-2 py-1" placeholder="Dose (e.g. 1 tablet)" value={row.dose} onChange={(e) => setRxRows((rows) => rows.map((value, i) => i === index ? { ...value, dose: e.target.value } : value))} />
+                  <input className="border rounded px-2 py-1" placeholder="Route" value={row.route} onChange={(e) => setRxRows((rows) => rows.map((value, i) => i === index ? { ...value, route: e.target.value } : value))} />
+                  <input className="border rounded px-2 py-1" placeholder="Frequency" value={row.freq} onChange={(e) => setRxRows((rows) => rows.map((value, i) => i === index ? { ...value, freq: e.target.value } : value))} />
+                  <input className="border rounded px-2 py-1" placeholder="Duration" value={row.duration} onChange={(e) => setRxRows((rows) => rows.map((value, i) => i === index ? { ...value, duration: e.target.value } : value))} />
+                  <input className="border rounded px-2 py-1" placeholder="Quantity" value={row.qty} onChange={(e) => setRxRows((rows) => rows.map((value, i) => i === index ? { ...value, qty: e.target.value } : value))} />
+                  <input className="border rounded px-2 py-1" type="number" min={0} placeholder="Repeats" value={row.refills} onChange={(e) => setRxRows((rows) => rows.map((value, i) => i === index ? { ...value, refills: Math.max(0, Number(e.target.value) || 0) } : value))} />
                 </div>
-              )}
+                {row.sigSuggestions?.length ? (
+                  <div className="flex flex-wrap gap-1">
+                    {row.sigSuggestions.slice(0, 6).map((suggestion, suggestionIndex) => (
+                      <button key={suggestionIndex} type="button" className="rounded-full border bg-slate-50 px-2 py-0.5 text-[11px]" onClick={() => {
+                        const parsed = parseSig(suggestion);
+                        setRxRows((rows) => rows.map((value, i) => i === index ? { ...value, dose: value.dose || parsed.dose, route: value.route || parsed.route, freq: value.freq || parsed.freq || suggestion, duration: value.duration || parsed.duration } : value));
+                      }}>{suggestion}</button>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="flex gap-2">
+                  <input className="min-w-0 flex-1 border rounded px-2 py-1" placeholder="Directions / notes (optional)" value={row.notes || ''} onChange={(e) => setRxRows((rows) => rows.map((value, i) => i === index ? { ...value, notes: e.target.value } : value))} />
+                  <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => removeRxRow(index)}>Remove</button>
+                </div>
+              </div>
+            );
+          })}
+          <button type="button" className="rounded border px-2 py-1 text-xs" onClick={addRxRow}>Add medication</button>
+          <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
+            <button type="button" className="rounded border bg-white px-3 py-1.5 text-xs font-semibold" disabled={busyScope !== null} onClick={() => void persistScope('medications', 'save-draft')}>Save draft</button>
+            <button type="button" className="rounded border bg-white px-3 py-1.5 text-xs font-semibold" disabled={!medsToAuthor.length} onClick={() => setPreviewScope('medications')}>Preview prescription</button>
+            <button type="button" className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 disabled:opacity-50" disabled={busyScope !== null || !medsToAuthor.length} onClick={() => void persistScope('medications', 'finalize')}>
+              {busyScope === 'medications' ? 'Finalizing…' : simulation ? 'Finalize simulated eRx' : 'Finalize & issue to patient'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {labRows.map((row, index) => (
+            <div key={index} className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+              <LabTestInput row={row} onChange={(next) => setLabRows((rows) => rows.map((value, i) => i === index ? next : value))} />
+              <div className="grid gap-2 md:grid-cols-3">
+                <select className="border rounded px-2 py-1" value={row.priority} onChange={(e) => setLabRows((rows) => rows.map((value, i) => i === index ? { ...value, priority: e.target.value as LabRow['priority'] } : value))}>
+                  <option value="">Priority</option><option value="Routine">Routine</option><option value="Urgent">Urgent</option><option value="Stat">Stat</option>
+                </select>
+                <input className="border rounded px-2 py-1" placeholder="Specimen" value={row.specimen} onChange={(e) => setLabRows((rows) => rows.map((value, i) => i === index ? { ...value, specimen: e.target.value } : value))} />
+                <Icd10Input value={row.icd} onChange={(code, label) => setLabRows((rows) => rows.map((value, i) => i === index ? { ...value, icd: code || label } : value))} placeholder="ICD-10 indication (optional)" />
+              </div>
+              <div className="flex gap-2">
+                <input className="min-w-0 flex-1 border rounded px-2 py-1" placeholder="Clinical indication / specimen instructions" value={row.instructions || ''} onChange={(e) => setLabRows((rows) => rows.map((value, i) => i === index ? { ...value, instructions: e.target.value } : value))} />
+                <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => removeLabRow(index)}>Remove</button>
+              </div>
             </div>
-          ) : (
-            <>
-              <div>
-                eRx ID: <b>{erxResult.id}</b>
-              </div>
-              <div>
-                Status: <b>{erxResult.status}</b>
-              </div>
-              <div>
-                Dispense Code: <b>{erxResult.dispenseCode}</b>
-              </div>
-            </>
-          )}
+          ))}
+          <button type="button" className="rounded border px-2 py-1 text-xs" onClick={addLabRow}>Add lab test</button>
+          <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
+            <button type="button" className="rounded border bg-white px-3 py-1.5 text-xs font-semibold" disabled={busyScope !== null} onClick={() => void persistScope('labs', 'save-draft')}>Save draft</button>
+            <button type="button" className="rounded border bg-white px-3 py-1.5 text-xs font-semibold" disabled={!labsToAuthor.length} onClick={() => setPreviewScope('labs')}>Review lab order</button>
+            <button type="button" className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 disabled:opacity-50" disabled={busyScope !== null || !labsToAuthor.length} onClick={() => void persistScope('labs', 'finalize')}>
+              {busyScope === 'labs' ? 'Finalizing…' : simulation ? 'Finalize simulated lab order' : 'Finalize & issue to patient'}
+            </button>
+          </div>
         </div>
       )}
+
+      {erxResult ? (
+        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+          <div className="font-semibold">{erxResult.scope === 'labs' ? 'Lab order' : 'Prescription'}: {erxResult.status}</div>
+          {erxResult.id ? <div className="mt-1">Reference: <span className="font-mono">{erxResult.id}</span></div> : null}
+          <div className="mt-1">Fulfilment owner: patient · marketplace dispatch: none</div>
+        </div>
+      ) : null}
+
+      {previewScope ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-label={previewScope === 'medications' ? 'Prescription preview' : 'Lab order review'}>
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b pb-3">
+              <div>
+                <div className="text-lg font-semibold text-slate-900">{previewScope === 'medications' ? 'Prescription preview' : 'Lab order review'}</div>
+                <div className="text-xs text-slate-500">Patient: {profile.name || appt.patientName} · Clinician: {appt.clinicianName}</div>
+              </div>
+              <button type="button" className="rounded border px-3 py-1 text-sm" onClick={() => setPreviewScope(null)}>Close</button>
+            </div>
+            {simulation ? <div className="my-3 rounded border-2 border-rose-300 bg-rose-50 p-3 text-center text-xs font-bold text-rose-800">SIMULATION — NOT FOR DISPENSING / NOT FOR CLINICAL FULFILMENT</div> : null}
+            <div className="mt-4 space-y-3">
+              {previewScope === 'medications' ? medsToAuthor.map((row, index) => (
+                <div key={index} className="rounded-xl border p-3 text-sm">
+                  <div className="font-semibold">{row.drug} {row.strength} {row.form}</div>
+                  <div className="mt-1 text-slate-700">Dose: {row.dose || '—'} · Route: {row.route || '—'} · Frequency: {row.freq || '—'}</div>
+                  <div className="mt-1 text-slate-700">Duration: {row.duration || '—'} · Quantity: {row.qty || '—'} · Repeats: {row.refills}</div>
+                  {row.notes ? <div className="mt-1 text-slate-600">Directions/notes: {row.notes}</div> : null}
+                  {row.rxcui || row.nappi ? <div className="mt-1 text-[11px] text-slate-500">{row.rxcui ? `RxCUI:${row.rxcui}` : ''}{row.rxcui && row.nappi ? ' · ' : ''}{row.nappi ? `NAPPI:${row.nappi}` : ''}</div> : null}
+                </div>
+              )) : labsToAuthor.map((row, index) => (
+                <div key={index} className="rounded-xl border p-3 text-sm">
+                  <div className="font-semibold">{row.test}</div>
+                  <div className="mt-1 text-slate-700">Priority: {row.priority || 'Routine'} · Specimen: {row.specimen || '—'}</div>
+                  {row.icd ? <div className="mt-1 text-slate-700">Clinical indication / ICD-10: {row.icd}</div> : null}
+                  {row.instructions ? <div className="mt-1 text-slate-600">Instructions: {row.instructions}</div> : null}
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">Finalizing issues this clinician-authored order to the patient's record only. CarePort/MedReach discovery is a later patient-owned action.</div>
+          </div>
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -1066,13 +697,14 @@ function RxDrugInput({ row, onChange }: RxDrugInputProps) {
 
   const select = (hit: RxNormHit) => {
     const label = hit.name || hit.title || '';
+    const inferred = inferStrengthAndForm(label);
     const base: RxRow = {
       ...row,
       drug: label,
       rxcui: hit.rxcui || (hit as any).rxnorm,
       nappi: (hit as any).nappi || row.nappi,
-      strength: row.strength || (hit as any).strength || '',
-      form: row.form || (hit as any).doseForm || (hit as any).dosageForm || '',
+      strength: row.strength || (hit as any).strength || inferred.strength || '',
+      form: row.form || (hit as any).doseForm || (hit as any).dosageForm || inferred.form || '',
       dose: row.dose,
       route: row.route || (hit as any).route || row.route,
       notes:

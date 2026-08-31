@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
-import { readIdentity } from '@/src/lib/identity';
+import { readIdentity, requireTrustedIdentityInProduction } from '@/src/lib/identity';
 import { computeClinicianOperationalState } from '@/src/lib/clinician-operational-state';
 import { loadClinicianComplianceChecks } from '@/src/lib/credentialing/loadChecks';
 
@@ -626,230 +627,291 @@ async function loadAllergiesForSafety(patientId: string, clientAllergies: unknow
   });
 }
 
+function unique(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map((value) => clean(value, 240)).filter(Boolean)));
+}
+
+function participantRefs(participant: any) {
+  const partyId = clean(participant?.partyId, 240);
+  return unique([
+    participant?.clinicianId,
+    participant?.userId,
+    partyId,
+    partyId.replace(/^clin?[-_:]/i, ''),
+  ]);
+}
+
+async function resolveClinicianIdentity(who: ReturnType<typeof readIdentity>, requestedId?: string | null) {
+  const identityRefs = unique([who.uid, who.actorRefId, requestedId]);
+  if (!identityRefs.length) return { clinician: null, refs: [] as string[] };
+
+  const clinician = await prisma.clinicianProfile.findFirst({
+    where: {
+      OR: identityRefs.flatMap((value) => [{ id: value }, { userId: value }]),
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (!clinician) return { clinician: null, refs: identityRefs };
+  return {
+    clinician,
+    refs: unique([...identityRefs, clinician.id, clinician.userId]),
+  };
+}
+
+function clinicianCanAccessEncounter(encounter: any, refs: string[]) {
+  if (!refs.length) return false;
+  const matches = (value: unknown) => refs.includes(clean(value, 240));
+  if (matches(encounter?.clinicianId)) return true;
+
+  return (encounter?.appointments || []).some((appointment: any) => {
+    if (matches(appointment?.clinicianId)) return true;
+    return (appointment?.participants || []).some((participant: any) => {
+      const role = clean(participant?.role, 80).toUpperCase();
+      const status = clean(participant?.status, 80).toUpperCase();
+      if (!['LEAD_CLINICIAN', 'CO_CLINICIAN', 'ADVISOR'].includes(role)) return false;
+      if (status && !['ACCEPTED', 'JOINED'].includes(status)) return false;
+      return participantRefs(participant).some((ref) => refs.includes(ref));
+    });
+  });
+}
+
+function normalizedScope(value: unknown): 'medications' | 'labs' | 'all' {
+  const scope = clean(value, 40).toLowerCase();
+  if (scope === 'medications' || scope === 'labs') return scope;
+  return 'all';
+}
+
+function normalizedAction(value: unknown): 'save-draft' | 'finalize' {
+  return clean(value, 40).toLowerCase() === 'save-draft' ? 'save-draft' : 'finalize';
+}
+
+function parseNotesJson(value: unknown) {
+  if (!value) return {} as Record<string, any>;
+  if (typeof value === 'object') return value as Record<string, any>;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function medDraftFromOrder(order: any) {
+  const snapshot = Array.isArray(order?.meds) ? order.meds[0] : null;
+  const notes = parseNotesJson(order?.notes);
+  const coding = Array.isArray(snapshot?.coding) ? snapshot.coding : [];
+  const rxnorm = coding.find((item: any) => clean(item?.system, 80).toLowerCase().includes('rxnorm'));
+  const nappi = coding.find((item: any) => clean(item?.system, 80).toLowerCase().includes('nappi'));
+  return {
+    drug: clean(order?.drug || snapshot?.primaryCoding?.display, 500),
+    strength: clean(snapshot?.strengthText, 200),
+    form: clean(snapshot?.formText, 200),
+    dose: clean(snapshot?.doseText, 200),
+    route: clean(snapshot?.routeText, 120),
+    freq: clean(snapshot?.frequencyText, 200),
+    duration: clean(snapshot?.durationText, 200),
+    qty: clean(snapshot?.quantityText || snapshot?.quantity?.text, 200),
+    refills: Number(snapshot?.repeats ?? notes?.repeats ?? 0) || 0,
+    notes: clean(snapshot?.note || notes?.note, 2000),
+    rxcui: clean(rxnorm?.code, 120) || undefined,
+    nappi: clean(nappi?.code, 120) || undefined,
+  };
+}
+
+function labDraftFromOrder(order: any) {
+  const snapshot = Array.isArray(order?.tests) ? order.tests[0] : null;
+  return {
+    test: clean(snapshot?.testText || order?.panel, 500),
+    priority: clean(snapshot?.priority, 40),
+    specimen: clean(snapshot?.specimenText, 200),
+    icd: clean(snapshot?.icd10?.code || snapshot?.icd10?.display, 120),
+    instructions: clean(snapshot?.note, 2000),
+    catalogCode: clean(snapshot?.testCoding?.code, 120) || undefined,
+    catalogSystem: clean(snapshot?.testCoding?.system, 120) || undefined,
+  };
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
   try {
     const who = readIdentity(req.headers);
-
-    if (!who?.uid) {
+    try { requireTrustedIdentityInProduction(req.headers, who); } catch {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
-
-    if (who.role !== 'clinician' && who.role !== 'admin') {
+    if (!who?.uid) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+    if (!['clinician', 'admin', 'admin_staff'].includes(clean(who.role, 40).toLowerCase())) {
       return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
     }
 
     const encounterId = clean(params.id, 120);
-    if (!encounterId) {
-      return NextResponse.json({ ok: false, error: 'encounter_id_required' }, { status: 400 });
-    }
+    if (!encounterId) return NextResponse.json({ ok: false, error: 'encounter_id_required' }, { status: 400 });
 
-    const body = (await req.json().catch(() => null)) as ErxDto | null;
-    if (!body) {
-      return NextResponse.json({ ok: false, error: 'invalid_json_body' }, { status: 400 });
-    }
+    const body = (await req.json().catch(() => null)) as (ErxDto & Record<string, any>) | null;
+    if (!body) return NextResponse.json({ ok: false, error: 'invalid_json_body' }, { status: 400 });
 
-    const meds = Array.isArray(body.medications) ? body.medications : [];
-    const labs = Array.isArray(body.labs) ? body.labs : [];
+    const action = normalizedAction(body.action);
+    const scope = normalizedScope(body.scope);
+    const meds = scope === 'labs' ? [] : (Array.isArray(body.medications) ? body.medications : []);
+    const labs = scope === 'medications' ? [] : (Array.isArray(body.labs) ? body.labs : []);
 
     if (meds.length === 0 && labs.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: 'At least one medication or lab order is required.' },
-        { status: 400 },
-      );
+      return NextResponse.json({ ok: false, error: 'at_least_one_order_required' }, { status: 400 });
     }
 
     const encounter = await prisma.encounter.findUnique({
       where: { id: encounterId },
-      include: { appointments: { orderBy: { startsAt: 'desc' }, take: 20 } },
+      include: {
+        appointments: {
+          orderBy: { startsAt: 'desc' },
+          take: 20,
+          include: {
+            participants: {
+              select: { partyId: true, role: true, status: true, clinicianId: true, userId: true },
+            },
+          },
+        },
+      },
     });
+    if (!encounter) return NextResponse.json({ ok: false, error: 'encounter_not_found' }, { status: 404 });
 
-    if (!encounter) {
-      return NextResponse.json({ ok: false, error: 'encounter_not_found' }, { status: 404 });
+    const requestedClinicianId = optionalString(body?.clinician?.id, 120);
+    const identity = await resolveClinicianIdentity(who, requestedClinicianId);
+    if (!identity.clinician) return NextResponse.json({ ok: false, error: 'clinician_not_found' }, { status: 404 });
+    if (clean(who.role, 40).toLowerCase() === 'clinician' && !clinicianCanAccessEncounter(encounter, identity.refs)) {
+      return NextResponse.json({ ok: false, error: 'forbidden_encounter_scope' }, { status: 403 });
     }
 
-    const clinicianId = optionalString(body?.clinician?.id, 120) || optionalString(who.uid, 120);
-    if (!clinicianId) {
-      return NextResponse.json({ ok: false, error: 'clinician_id_required' }, { status: 400 });
-    }
-
-    if (encounter.clinicianId && who.role === 'clinician' && encounter.clinicianId !== clinicianId) {
-      return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
-    }
-
+    const clinician = identity.clinician;
     const patientId = optionalString(body?.patient?.id, 120) || encounter.patientId;
-    if (!patientId) {
-      return NextResponse.json({ ok: false, error: 'patient_id_required' }, { status: 400 });
-    }
-
-    const clinician = await prisma.clinicianProfile.findFirst({
-      where: { OR: [{ id: clinicianId }, { userId: clinicianId }] },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!clinician) {
-      return NextResponse.json({ ok: false, error: 'clinician_not_found' }, { status: 404 });
+    if (!patientId) return NextResponse.json({ ok: false, error: 'patient_id_required' }, { status: 400 });
+    if (encounter.patientId && patientId !== encounter.patientId) {
+      return NextResponse.json({ ok: false, error: 'patient_mismatch' }, { status: 409 });
     }
 
     const onboarding = await prisma.clinicianOnboarding.findFirst({
       where: { clinicianId: clinician.id },
       orderBy: { createdAt: 'desc' },
     });
-
     const trainingSlot = onboarding?.trainingSlotId
       ? await prisma.clinicianTrainingSlot.findUnique({ where: { id: onboarding.trainingSlotId } })
       : null;
-
     const dispatch = await prisma.clinicianDispatch.findFirst({
       where: { clinicianId: clinician.id },
       orderBy: { createdAt: 'desc' },
     });
-
     const checks = await loadClinicianComplianceChecks({
       clinicianId: clinician.id,
       orgId: clean((who as any).orgId || (encounter as any).orgId || '', 120),
     });
-
-    const operational = computeClinicianOperationalState({
-      clinician,
-      onboarding,
-      trainingSlot,
-      dispatch,
-      checks,
-    });
+    const operational = computeClinicianOperationalState({ clinician, onboarding, trainingSlot, dispatch, checks });
 
     if (!operational.canPractice) {
-      return NextResponse.json(
-        { ok: false, error: 'practice_not_enabled', blockers: operational.blockers, operational },
-        { status: 403 },
-      );
+      return NextResponse.json({ ok: false, error: 'practice_not_enabled', blockers: operational.blockers, operational }, { status: 403 });
     }
-
     if (!operational.allowedWorkspaces.includes('erx')) {
-      return NextResponse.json(
-        { ok: false, error: 'workspace_not_authorized', blockers: operational.blockers, operational },
-        { status: 403 },
-      );
+      return NextResponse.json({ ok: false, error: 'workspace_not_authorized', blockers: operational.blockers, operational }, { status: 403 });
     }
 
-    if (!operational.canPrescribe) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'prescribing_not_authorized',
-          blockers: operational.blockers,
-          riskFlags: operational.riskFlags,
-          operational,
-        },
-        { status: 403 },
-      );
+    // Drafting is allowed without silently turning the draft into a clinical order.
+    // Medication finalization, and only medication finalization, requires prescribing authority.
+    if (action === 'finalize' && meds.length > 0 && !operational.canPrescribe) {
+      return NextResponse.json({
+        ok: false,
+        error: 'prescribing_not_authorized',
+        blockers: operational.blockers,
+        riskFlags: operational.riskFlags,
+        operational,
+      }, { status: 403 });
     }
 
     const requestedMaxSchedule = highestRequestedSchedule(meds);
-
     if (
-      requestedMaxSchedule != null &&
-      typeof operational.maxRxSchedule === 'number' &&
-      requestedMaxSchedule > operational.maxRxSchedule
+      action === 'finalize' && meds.length > 0 && requestedMaxSchedule != null &&
+      typeof operational.maxRxSchedule === 'number' && requestedMaxSchedule > operational.maxRxSchedule
     ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'max_schedule_exceeded',
-          requestedMaxSchedule,
-          maxRxSchedule: operational.maxRxSchedule,
-          operational,
-        },
-        { status: 403 },
-      );
+      return NextResponse.json({
+        ok: false,
+        error: 'max_schedule_exceeded',
+        requestedMaxSchedule,
+        maxRxSchedule: operational.maxRxSchedule,
+        operational,
+      }, { status: 403 });
     }
 
-    const allergiesForSafety = await loadAllergiesForSafety(patientId, body.allergies);
-    const allergyConflicts = findMedicationAllergyConflicts(meds, allergiesForSafety);
-    const severeAllergies = allergiesForSafety.filter((a) => isActiveAllergy(a) && isSevereAllergy(a));
-    const recentReactions = recentAllergyReactions(allergiesForSafety, 30);
+    let allergiesForSafety: NormalizedAllergy[] = [];
+    let severeAllergies: NormalizedAllergy[] = [];
+    let recentReactions: ReturnType<typeof recentAllergyReactions> = [];
+    let currentMedicationSafety: Awaited<ReturnType<typeof loadCurrentMedicationSafety>> | null = null;
 
-    const currentMedicationSafety = await loadCurrentMedicationSafety(patientId, meds);
+    if (action === 'finalize' && meds.length > 0) {
+      allergiesForSafety = await loadAllergiesForSafety(patientId, body.allergies);
+      const allergyConflicts = findMedicationAllergyConflicts(meds, allergiesForSafety);
+      severeAllergies = allergiesForSafety.filter((allergy) => isActiveAllergy(allergy) && isSevereAllergy(allergy));
+      recentReactions = recentAllergyReactions(allergiesForSafety, 30);
+      currentMedicationSafety = await loadCurrentMedicationSafety(patientId, meds);
 
-    if (currentMedicationSafety.potentialDuplicateCount > 0) {
-      await prisma.auditEvent
-        .create({
+      if (currentMedicationSafety.potentialDuplicateCount > 0) {
+        await prisma.auditEvent.create({
           data: {
             kind: 'erx_current_medication_advisory_detected',
             actorId: who.uid,
             actorRole: who.role,
             subjectId: encounterId,
-            meta: jsonSafe({
-              patientId,
-              clinicianId: clinician.id,
-              medicationCount: meds.length,
-              currentMedicationSafety,
-              action: 'advisory_only_prescription_not_blocked',
-            }) as any,
+            meta: jsonSafe({ patientId, clinicianId: clinician.id, currentMedicationSafety }) as any,
           },
-        })
-        .catch(() => null);
-    }
+        }).catch(() => null);
+      }
 
-    if (allergyConflicts.length > 0) {
-      await prisma.auditEvent
-        .create({
+      if (allergyConflicts.length > 0) {
+        await prisma.auditEvent.create({
           data: {
             kind: 'erx_allergy_conflict_blocked',
             actorId: who.uid,
             actorRole: who.role,
             subjectId: encounterId,
-            meta: jsonSafe({
-              patientId,
-              clinicianId: clinician.id,
-              conflicts: allergyConflicts,
-              severeAllergyCount: severeAllergies.length,
-              recentReactions,
-              medicationCount: meds.length,
-              currentMedicationSafety,
-            }) as any,
+            meta: jsonSafe({ patientId, clinicianId: clinician.id, conflicts: allergyConflicts }) as any,
           },
-        })
-        .catch(() => null);
-
-      return NextResponse.json(
-        {
+        }).catch(() => null);
+        return NextResponse.json({
           ok: false,
           error: 'ALLERGY_CONFLICT',
-          message:
-            'Prescription blocked because one or more medications conflict with an active patient allergy.',
+          message: 'Prescription blocked because one or more medications conflict with an active patient allergy.',
           conflicts: allergyConflicts,
-          allergySafety: {
-            checked: true,
-            blocked: true,
-            severeAllergyCount: severeAllergies.length,
-            recentReactions,
-          },
           currentMedicationSafety,
-        },
-        { status: 409 },
-      );
+        }, { status: 409 });
+      }
     }
 
     const authoredAt = new Date().toISOString();
+    const finalStatus = action === 'finalize' ? 'issued' : 'draft';
 
     const createdOrders = await prisma.$transaction(async (tx) => {
-      const erxOrders = [];
-      const labOrders = [];
+      const erxOrders: any[] = [];
+      const labOrders: any[] = [];
+
+      if (meds.length > 0) {
+        await tx.erxOrder.deleteMany({
+          where: { encounterId, clinicianId: clinician.id, kind: 'medication', status: 'draft' },
+        });
+      }
+      if (labs.length > 0) {
+        await tx.labOrder.deleteMany({
+          where: { encounterId, clinicianId: clinician.id, kind: 'lab', status: 'draft' },
+        });
+      }
 
       for (const med of meds) {
         const primaryCoding = firstCoding(med.coding, ['nappi', 'rxnorm']);
-        const display =
-          optionalString(primaryCoding?.display, 500) ||
-          optionalString(primaryCoding?.code, 120) ||
-          'Medication';
-
-        const sigParts = medicationSigParts(med);
+        const display = optionalString(primaryCoding?.display, 500) || optionalString(primaryCoding?.code, 120) || 'Medication';
         const sigDisplay = medicationSigDisplay(med);
-
         const snapshot = medicationSnapshot(med, authoredAt);
+        const integrityPayload = jsonSafe({ encounterId, patientId, clinicianId: clinician.id, snapshot, authoredAt });
+        const signatureHash = action === 'finalize'
+          ? createHash('sha256').update(JSON.stringify(integrityPayload)).digest('hex')
+          : null;
 
         const created = await tx.erxOrder.create({
           data: {
@@ -859,143 +921,120 @@ export async function POST(
             drug: display,
             sig: sigDisplay,
             dispenseCode: primaryCoding?.code ?? null,
-            status: 'queued',
+            status: finalStatus,
             kind: 'medication',
             meds: jsonSafe([snapshot]) as any,
             labTests: jsonSafe([]) as any,
             notes: JSON.stringify({
               note: optionalString(med.note, 2000),
               reason: optionalString(body.reason, 1000),
-              repeats: snapshot.repeats,
-              quantity: snapshot.quantity,
-              quantityText: snapshot.quantityText,
-              sig: {
-                display: sigDisplay,
-                parts: sigParts,
-                doseText: optionalString(med.doseText, 200),
-                routeText: optionalString(med.routeText, 120),
-                frequencyText: optionalString(med.frequencyText, 200),
-                durationText: optionalString(med.durationText, 200),
-              },
-              authorization: {
+              orderState: action === 'finalize' ? 'issued' : 'draft',
+              authorRole: 'clinician',
+              fulfilmentOwner: 'patient',
+              marketplaceRouting: action === 'finalize' ? 'patient_action_required' : 'not_available_until_issued',
+              carePortDispatched: false,
+              medReachDispatched: false,
+              authorization: action === 'finalize' ? {
                 gatewayEvaluated: true,
                 canPrescribe: operational.canPrescribe,
                 prescribingMode: operational.prescribingMode,
                 maxRxSchedule: operational.maxRxSchedule,
                 requestedMaxSchedule,
-                blockers: operational.blockers,
-                riskFlags: operational.riskFlags,
-              },
-              allergySafety: {
+              } : { gatewayEvaluated: false, draftOnly: true },
+              allergySafety: action === 'finalize' ? {
                 checked: true,
                 blocked: false,
-                conflictCount: 0,
                 severeAllergyCount: severeAllergies.length,
                 recentReactions,
                 allergyCount: allergiesForSafety.length,
-              },
+              } : { checked: false, draftOnly: true },
               currentMedicationSafety,
-              clientAuthorization: body.authorization ?? null,
               authoredAt,
             }),
+            signedAt: action === 'finalize' ? new Date(authoredAt) : null,
+            signatureHash,
           } as any,
         });
-
         erxOrders.push(created);
       }
 
       for (const lab of labs) {
         const snapshot = labSnapshot(lab, authoredAt);
-
         const created = await tx.labOrder.create({
           data: {
             encounterId,
             patientId,
             clinicianId: clinician.id,
             panel: snapshot.testText,
-            status: 'queued',
-          },
+            status: action === 'finalize' ? 'issued' : 'draft',
+            kind: 'lab',
+            tests: jsonSafe([snapshot]) as any,
+            icd10Codes: jsonSafe(snapshot.icd10?.code ? [snapshot.icd10.code] : []) as any,
+            authorizationSnapshot: jsonSafe({
+              orderState: action === 'finalize' ? 'issued' : 'draft',
+              authorRole: 'clinician',
+              fulfilmentOwner: 'patient',
+              marketplaceRouting: action === 'finalize' ? 'patient_action_required' : 'not_available_until_issued',
+              carePortDispatched: false,
+              medReachDispatched: false,
+              authoredAt,
+            }) as any,
+          } as any,
         });
-
-        labOrders.push({
-          ...created,
-          orderSnapshot: snapshot,
-        });
+        labOrders.push(created);
       }
 
-      await tx.auditEvent
-        .create({
+      if (action === 'finalize') {
+        await tx.auditEvent.create({
           data: {
-            kind: 'encounter_erx_authored',
+            kind: scope === 'labs' ? 'encounter_lab_orders_issued' : scope === 'medications' ? 'encounter_erx_issued' : 'encounter_orders_issued',
             actorId: who.uid,
             actorRole: who.role,
             subjectId: encounterId,
-            meta: jsonSafe({
-              patientId,
-              clinicianId: clinician.id,
-              medicationCount: erxOrders.length,
-              labCount: labOrders.length,
-              allergies: Array.isArray(body.allergies) ? body.allergies : [],
-              reason: optionalString(body.reason, 1000),
-              note: optionalString(body.note, 4000),
-              requestedMaxSchedule,
-              operational: {
-                canPractice: operational.canPractice,
-                canPrescribe: operational.canPrescribe,
-                maxRxSchedule: operational.maxRxSchedule,
-                allowedWorkspaces: operational.allowedWorkspaces,
-                blockers: operational.blockers,
-                riskFlags: operational.riskFlags,
-              },
-              currentMedicationSafety,
-              clientAuthorization: body.authorization ?? null,
-            }) as any,
+            meta: jsonSafe({ patientId, clinicianId: clinician.id, medicationCount: erxOrders.length, labCount: labOrders.length }) as any,
           },
-        })
-        .catch(() => null);
+        }).catch(() => null);
+      }
 
       return { erxOrders, labOrders };
     });
 
-    return NextResponse.json(
-      {
-        ok: true,
-        encounterId,
-        patientId,
-        clinicianId: clinician.id,
-        reason: optionalString(body.reason, 1000),
-        note: optionalString(body.note, 4000),
-        allergies: Array.isArray(body.allergies) ? body.allergies : [],
-        allergySafety: {
-          checked: true,
-          blocked: false,
-          severeAllergyCount: severeAllergies.length,
-          recentReactions,
-          allergyCount: allergiesForSafety.length,
-        },
-        currentMedicationSafety,
-        medications: createdOrders.erxOrders,
-        labs: createdOrders.labOrders,
-        operational: {
-          canPrescribe: operational.canPrescribe,
-          prescribingMode: operational.prescribingMode,
-          maxRxSchedule: operational.maxRxSchedule,
-        },
+    return NextResponse.json({
+      ok: true,
+      encounterId,
+      patientId,
+      clinicianId: clinician.id,
+      action,
+      scope,
+      status: action === 'finalize' ? 'issued' : 'draft',
+      medications: createdOrders.erxOrders,
+      labs: createdOrders.labOrders,
+      allergySafety: action === 'finalize' && meds.length > 0 ? {
+        checked: true,
+        blocked: false,
+        severeAllergyCount: severeAllergies.length,
+        recentReactions,
+        allergyCount: allergiesForSafety.length,
+      } : null,
+      currentMedicationSafety,
+      operational: {
+        canPrescribe: operational.canPrescribe,
+        prescribingMode: operational.prescribingMode,
+        maxRxSchedule: operational.maxRxSchedule,
       },
-      {
-        status: 201,
-        headers: {
-          'Cache-Control': 'no-store',
-          'access-control-allow-origin': '*',
-        },
+      routing: {
+        fulfilmentOwner: 'patient',
+        carePortDispatched: false,
+        medReachDispatched: false,
+        marketplaceRouting: action === 'finalize' ? 'patient_action_required' : 'not_available_until_issued',
       },
-    );
+    }, {
+      status: action === 'finalize' ? 201 : 200,
+      headers: { 'Cache-Control': 'no-store', 'access-control-allow-origin': '*' },
+    });
   } catch (err: any) {
     console.error('[api-gateway][encounters/:id/erx][POST] error', err);
-    return NextResponse.json(
-      { ok: false, error: String(err?.message || 'failed_to_create_erx') },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, error: String(err?.message || 'failed_to_create_erx') }, { status: 500 });
   }
 }
 
@@ -1005,54 +1044,63 @@ export async function GET(
 ) {
   try {
     const who = readIdentity(req.headers);
-
-    if (!who?.uid) {
+    try { requireTrustedIdentityInProduction(req.headers, who); } catch {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
+    if (!who?.uid) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
 
     const encounterId = clean(params.id, 120);
-    if (!encounterId) {
-      return NextResponse.json({ ok: false, error: 'encounter_id_required' }, { status: 400 });
-    }
+    if (!encounterId) return NextResponse.json({ ok: false, error: 'encounter_id_required' }, { status: 400 });
 
     const encounter = await prisma.encounter.findUnique({
       where: { id: encounterId },
-      select: { id: true, clinicianId: true, patientId: true },
+      include: {
+        appointments: {
+          orderBy: { startsAt: 'desc' },
+          take: 20,
+          include: {
+            participants: { select: { partyId: true, role: true, status: true, clinicianId: true, userId: true } },
+          },
+        },
+      },
     });
+    if (!encounter) return NextResponse.json({ ok: false, error: 'encounter_not_found' }, { status: 404 });
 
-    if (!encounter) {
-      return NextResponse.json({ ok: false, error: 'encounter_not_found' }, { status: 404 });
-    }
-
-    if (who.role === 'clinician' && encounter.clinicianId && encounter.clinicianId !== who.uid) {
-      return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+    const identity = await resolveClinicianIdentity(who);
+    const privileged = ['admin', 'admin_staff'].includes(clean(who.role, 40).toLowerCase());
+    if (!privileged && (!identity.clinician || !clinicianCanAccessEncounter(encounter, identity.refs))) {
+      return NextResponse.json({ ok: false, error: 'forbidden_encounter_scope' }, { status: 403 });
     }
 
     const [erxOrders, labOrders] = await Promise.all([
-      prisma.erxOrder.findMany({
-        where: { encounterId },
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.labOrder.findMany({
-        where: { encounterId },
-        orderBy: { createdAt: 'desc' },
-      }),
+      prisma.erxOrder.findMany({ where: { encounterId }, orderBy: { createdAt: 'desc' } }),
+      prisma.labOrder.findMany({ where: { encounterId }, orderBy: { createdAt: 'desc' } }),
     ]);
 
-    return NextResponse.json(
-      { ok: true, encounterId, erxOrders, labOrders },
-      {
-        headers: {
-          'Cache-Control': 'no-store',
-          'access-control-allow-origin': '*',
-        },
+    const clinicianId = identity.clinician?.id || null;
+    const draftMedOrders = clinicianId
+      ? erxOrders.filter((order: any) => order.clinicianId === clinicianId && order.kind === 'medication' && order.status === 'draft').reverse()
+      : [];
+    const draftLabOrders = clinicianId
+      ? labOrders.filter((order: any) => order.clinicianId === clinicianId && order.kind === 'lab' && order.status === 'draft').reverse()
+      : [];
+
+    return NextResponse.json({
+      ok: true,
+      encounterId,
+      erxOrders,
+      labOrders,
+      draft: {
+        medications: draftMedOrders.map(medDraftFromOrder),
+        labs: draftLabOrders.map(labDraftFromOrder),
+        hasMedicationDraft: draftMedOrders.length > 0,
+        hasLabDraft: draftLabOrders.length > 0,
       },
-    );
+    }, {
+      headers: { 'Cache-Control': 'no-store', 'access-control-allow-origin': '*' },
+    });
   } catch (err: any) {
     console.error('[api-gateway][encounters/:id/erx][GET] error', err);
-    return NextResponse.json(
-      { ok: false, error: String(err?.message || 'failed_to_list_erx') },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, error: String(err?.message || 'failed_to_list_erx') }, { status: 500 });
   }
 }

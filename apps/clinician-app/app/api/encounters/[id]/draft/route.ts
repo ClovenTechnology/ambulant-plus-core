@@ -23,7 +23,7 @@ function clean(value: unknown, max = 500) {
   return String(value ?? '').trim().slice(0, max);
 }
 
-async function buildTrustedHeaders(req: NextRequest, hasJsonBody: boolean) {
+async function trustedHeaders(req: NextRequest, hasJsonBody: boolean) {
   const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
   if (!auth.ok) return { response: authErrorResponse(auth) } as const;
 
@@ -52,16 +52,11 @@ async function buildTrustedHeaders(req: NextRequest, hasJsonBody: boolean) {
 }
 
 async function relay(upstream: Response) {
-  const contentType = upstream.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    const payload = await upstream.json().catch(() => null);
-    return NextResponse.json(payload, {
-      status: upstream.status,
-      headers: { 'cache-control': 'no-store' },
-    });
-  }
-  const text = await upstream.text().catch(() => '');
-  return new NextResponse(text, {
+  const payload = await upstream.json().catch(() => ({
+    ok: false,
+    error: `encounter_draft_upstream_${upstream.status}`,
+  }));
+  return NextResponse.json(payload, {
     status: upstream.status,
     headers: { 'cache-control': 'no-store' },
   });
@@ -71,12 +66,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const encounterId = clean(params.id, 120);
   if (!encounterId) return NextResponse.json({ ok: false, error: 'encounter_id_required' }, { status: 400 });
 
-  const identity = await buildTrustedHeaders(req, false);
+  const identity = await trustedHeaders(req, false);
   if ('response' in identity) return identity.response;
 
   try {
     const upstream = await fetch(
-      `${gatewayBase()}/api/encounters/${encodeURIComponent(encounterId)}/transcript/note-draft`,
+      `${gatewayBase()}/api/encounters/${encodeURIComponent(encounterId)}/draft`,
       { method: 'GET', headers: identity.headers, cache: 'no-store' },
     );
     return relay(upstream);
@@ -88,7 +83,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   const encounterId = clean(params.id, 120);
   if (!encounterId) return NextResponse.json({ ok: false, error: 'encounter_id_required' }, { status: 400 });
 
@@ -97,14 +92,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ ok: false, error: 'invalid_json_body' }, { status: 400 });
   }
 
-  const identity = await buildTrustedHeaders(req, true);
+  const identity = await trustedHeaders(req, true);
   if ('response' in identity) return identity.response;
 
   try {
     const upstream = await fetch(
-      `${gatewayBase()}/api/encounters/${encodeURIComponent(encounterId)}/transcript/note-draft`,
+      `${gatewayBase()}/api/encounters/${encodeURIComponent(encounterId)}/draft`,
       {
-        method: 'POST',
+        method: 'PUT',
         headers: identity.headers,
         body: JSON.stringify(body),
         cache: 'no-store',

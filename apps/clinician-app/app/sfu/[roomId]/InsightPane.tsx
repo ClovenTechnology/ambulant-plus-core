@@ -28,7 +28,8 @@ type ToastKind = 'info' | 'success' | 'warning' | 'error';
 type InsightPaneProps = {
   dense: boolean;
   soap: SoapState;
-  patientEducation: string;
+  // Legacy compatibility input for alternate SFU skins. Insight output is no longer written here.
+  patientEducation?: string;
   profile: PatientProfile;
   appt: {
     reason: string;
@@ -41,7 +42,8 @@ type InsightPaneProps = {
   contextStatus?: PatientContextStatus;
   contextError?: string | null;
   onChangeSoap: (next: SoapState) => void;
-  onChangePatientEducation: (value: string) => void;
+  // Accepted for backward compatibility only; Gate A routes Insight into Clinical Reasoning.
+  onChangePatientEducation?: (value: string) => void;
   onToast: (body: string, kind?: ToastKind, title?: string) => void;
   onShowSoapTab?: () => void;
 };
@@ -49,7 +51,6 @@ type InsightPaneProps = {
 export default function InsightPane({
   dense,
   soap,
-  patientEducation,
   profile,
   appt,
   patientAllergies,
@@ -58,7 +59,6 @@ export default function InsightPane({
   contextStatus = 'unavailable',
   contextError,
   onChangeSoap,
-  onChangePatientEducation,
   onToast,
   onShowSoapTab,
 }: InsightPaneProps) {
@@ -83,8 +83,7 @@ export default function InsightPane({
         encounterId: clinicalContext.encounter?.id || null,
         patientId: profile.id || null,
         soap,
-        patientEducation,
-        reason: appt.reason,
+              reason: appt.reason,
         patient: {
           id: profile.id,
           name: profile.name || appt.patientName,
@@ -151,25 +150,34 @@ export default function InsightPane({
     return text;
   };
 
-  const acceptInsight = () => {
-    if (!insight) return;
-    const text = insightToText();
-    onChangePatientEducation(
-      patientEducation ? `${patientEducation}\n\n---\n${text}` : text
-    );
-    onToast('Insight accepted into Patient Education.', 'success');
+  const appendUnique = (existing: string | undefined, incoming: string) => {
+    const current = String(existing || '').trim();
+    const text = String(incoming || '').trim();
+    if (!text) return current;
+    if (current.toLowerCase().replace(/\s+/g, ' ').includes(text.toLowerCase().replace(/\s+/g, ' '))) return current;
+    return current ? `${current}\n\n${text}` : text;
   };
 
-  const adjustInsight = () => {
+  const applyInsightToClinicalReasoning = (mode: 'accept' | 'adjust') => {
     if (!insight) return;
     const text = insightToText();
+    const clinicalReasoning = appendUnique(soap.clinicalReasoning || soap.a, text);
     onChangeSoap({
       ...soap,
-      p: soap.p ? `${soap.p}\n\n---\n${text}` : text,
+      clinicalReasoning,
+      a: clinicalReasoning,
     });
     onShowSoapTab?.();
-    onToast('Insight copied to Plan. Edit in SOAP tab.', 'info');
+    onToast(
+      mode === 'accept'
+        ? 'Insight added to Clinical Reasoning for clinician review.'
+        : 'Insight copied to Clinical Reasoning for editing before it becomes part of the note.',
+      mode === 'accept' ? 'success' : 'info',
+    );
   };
+
+  const acceptInsight = () => applyInsightToClinicalReasoning('accept');
+  const adjustInsight = () => applyInsightToClinicalReasoning('adjust');
 
   const declineInsight = () => {
     if (!insight) return;
@@ -199,14 +207,14 @@ export default function InsightPane({
           onClick={acceptInsight}
           disabled={!insight}
         >
-          Accept
+          Add to Clinical Reasoning
         </button>
         <button
           className="px-2 py-1 border rounded text-xs"
           onClick={adjustInsight}
           disabled={!insight}
         >
-          Adjust
+          Copy to Clinical Reasoning
         </button>
         <button
           className="px-2 py-1 border rounded text-xs"

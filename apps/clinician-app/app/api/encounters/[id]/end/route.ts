@@ -1,110 +1,20 @@
-// apps/clinician-app/app/api/encounters/[id]/end/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { readDb, writeDb } from '../../../erx/_lib_db_compat';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const GW = process.env.APIGW_BASE?.replace(/\/+$/, '');
-
-type EncounterEndDto = {
-  encounterId: string;
-  clinicianId: string;
-  patientId?: string;
-  patientName?: string;
-
-  synopsis?: string;
-  diagnosisText?: string;
-  diagnosisCode?: string;
-  plan?: string;
-  notes?: string;
-
-  startedAt?: string;  // ISO
-  endedAt?: string;    // ISO
-  elapsedMs?: number;
-};
-
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
-  const encounterId = params.id;
-  const body = (await req.json().catch(() => null)) as EncounterEndDto | null;
-
-  if (!body) {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-  }
-
-  if (!body.clinicianId) {
-    return NextResponse.json({ error: 'clinicianId is required' }, { status: 400 });
-  }
-
-  // Ensure encounterId is set in body
-  body.encounterId = body.encounterId || encounterId;
-
-  // 1) Try API gateway first, if present
-  if (GW) {
-    try {
-      const r = await fetch(
-        `${GW}/api/encounters/${encodeURIComponent(encounterId)}/end`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        },
-      );
-      if (r.ok) {
-        const json = await r.json().catch(() => ({}));
-        return NextResponse.json(json, { status: r.status });
-      }
-      console.warn(
-        '[encounters/end][POST] GW upstream non-OK, falling back to local store',
-        r.status,
-      );
-    } catch (err) {
-      console.error(
-        '[encounters/end][POST] GW upstream error, falling back to local store',
-        err,
-      );
-    }
-  }
-
-  // 2) Local demo fallback: store a summary row in db.encounterSummaries
-  try {
-    const db = await readDb();
-    if (!Array.isArray(db.encounterSummaries)) db.encounterSummaries = [];
-
-    const now = new Date().toISOString();
-    const summary = {
-      id: `es-${Math.random().toString(36).slice(2, 10)}`,
-      encounterId,
-      clinicianId: body.clinicianId,
-      patientId: body.patientId ?? null,
-      patientName: body.patientName ?? null,
-
-      synopsis: body.synopsis ?? '',
-      diagnosisText: body.diagnosisText ?? '',
-      diagnosisCode: body.diagnosisCode ?? '',
-      plan: body.plan ?? '',
-      notes: body.notes ?? '',
-
-      startedAt: body.startedAt ?? null,
-      endedAt: body.endedAt ?? now,
-      elapsedMs: typeof body.elapsedMs === 'number' ? body.elapsedMs : null,
-
-      createdAt: now,
-      source: 'clinician-app',
-    };
-
-    db.encounterSummaries.unshift(summary);
-    await writeDb(db);
-
-    return NextResponse.json(summary, { status: 201 });
-  } catch (err) {
-    console.error('[encounters/end][POST] local store failed', err);
-    return NextResponse.json(
-      { error: 'Failed to save encounter summary (local demo store failed).' },
-      { status: 500 },
-    );
-  }
+const CANONICAL_API_GATEWAY = 'https://api-gateway.ambulantplus.co.za';
+function gatewayBase(){ return String(process.env.APIGW_BASE || process.env.API_GATEWAY_URL || process.env.NEXT_PUBLIC_APIGW_BASE || CANONICAL_API_GATEWAY).trim().replace(/\/+$/,''); }
+function clean(v:unknown,max=500){ return String(v??'').trim().slice(0,max); }
+async function relay(upstream:Response){ const ct=upstream.headers.get('content-type')||''; if(ct.includes('application/json')) return NextResponse.json(await upstream.json().catch(()=>null),{status:upstream.status,headers:{'cache-control':'no-store'}}); return new NextResponse(await upstream.text().catch(()=>''),{status:upstream.status,headers:{'cache-control':'no-store'}}); }
+export async function POST(req:NextRequest,{params}:{params:{id:string}}){
+  const auth=await requireClinicianAuth(req,{allowAdmin:true,allowAdminStaff:true}); if(!auth.ok) return authErrorResponse(auth);
+  const encounterId=clean(params.id,120); if(!encounterId) return NextResponse.json({ok:false,error:'encounter_id_required'},{status:400});
+  let identity:string; try{ identity=createTrustedClinicianIdentityHeader(req); }catch(error:any){ return NextResponse.json({ok:false,error:clean(error?.message)||'identity_bridge_failed'},{status:Number(error?.status||500)}); }
+  const body=await req.json().catch(()=>null); if(!body || typeof body!=='object') return NextResponse.json({ok:false,error:'invalid_json_body'},{status:400});
+  try{
+    const upstream=await fetch(`${gatewayBase()}/api/encounters/${encodeURIComponent(encounterId)}/end`,{method:'POST',headers:{accept:'application/json','content-type':'application/json','x-ambulant-identity':identity},body:JSON.stringify({...body,encounterId}),cache:'no-store'});
+    return relay(upstream);
+  }catch(error:any){ return NextResponse.json({ok:false,error:'api_gateway_unreachable',message:clean(error?.message,1000)},{status:502}); }
 }

@@ -1,129 +1,117 @@
+// apps/clinician-app/app/api/appointments/[id]/reschedule/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { store, emitEvent } from '@runtime/store';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function parseDate(value: unknown) {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? new Date(ms) : null;
+function gatewayBase() {
+  return (
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+    ''
+  ).replace(/\/+$/, '');
 }
 
-function parseDurationMinutes(body: Record<string, unknown>) {
-  const raw =
-    body.durationMinutes ??
-    body.slotDurationMinutes ??
-    body.sessionDurationMinutes ??
-    body.consultationDurationMinutes ??
-    body.duration;
-
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return null;
-
-  const minutes = Math.trunc(n);
-  return minutes > 0 && minutes <= 24 * 60 ? minutes : null;
+function json(data: any, status = 200) {
+  return NextResponse.json(data, {
+    status,
+    headers: { 'cache-control': 'no-store' },
+  });
 }
 
-function windowError(start: Date | null, end: Date | null) {
-  if (!start || !end) return 'startsAt_and_endsAt_required';
-  if (end.getTime() <= start.getTime()) return 'invalid_appointment_window';
-  return null;
+function clean(value: unknown, max = 240) {
+  return String(value ?? '').trim().slice(0, max);
+}
+
+function trustedGatewayHeaders(req: NextRequest, trustedIdentity: string) {
+  const headers = new Headers({
+    accept: 'application/json',
+    'content-type': 'application/json',
+    'x-ambulant-identity': trustedIdentity,
+  });
+
+  const authorization = req.headers.get('authorization');
+  const requestId = req.headers.get('x-request-id');
+  const correlationId = req.headers.get('x-correlation-id');
+  if (authorization) headers.set('authorization', authorization);
+  if (requestId) headers.set('x-request-id', requestId);
+  if (correlationId) headers.set('x-correlation-id', correlationId);
+
+  return headers;
+}
+
+async function proxyReschedule(
+  req: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  const auth = await requireClinicianAuth(req, {
+    allowAdmin: false,
+    allowAdminStaff: false,
+  });
+  if (!auth.ok) return authErrorResponse(auth);
+
+  const id = clean(params?.id);
+  if (!id) return json({ ok: false, error: 'appointment_id_required' }, 400);
+
+  const gw = gatewayBase();
+  if (!gw) return json({ ok: false, error: 'api_gateway_url_missing' }, 500);
+
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== 'object') {
+    return json({ ok: false, error: 'invalid_json_body' }, 400);
+  }
+
+  let trustedIdentity: string;
+  try {
+    trustedIdentity = createTrustedClinicianIdentityHeader(req);
+  } catch (error: any) {
+    return json(
+      { ok: false, error: String(error?.message || 'identity_bridge_failed') },
+      Number(error?.status || 500),
+    );
+  }
+
+  try {
+    const upstream = new URL(
+      '/api/appointments/' + encodeURIComponent(id) + '/reschedule',
+      gw,
+    );
+
+    const response = await fetch(upstream.toString(), {
+      method: req.method === 'PUT' ? 'PUT' : 'POST',
+      headers: trustedGatewayHeaders(req, trustedIdentity),
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    });
+
+    const text = await response.text();
+    return new NextResponse(text || JSON.stringify({ ok: response.ok }), {
+      status: response.status,
+      headers: {
+        'content-type': response.headers.get('content-type') || 'application/json',
+        'cache-control': 'no-store',
+      },
+    });
+  } catch (error: any) {
+    return json(
+      { ok: false, error: error?.message || 'appointment_reschedule_proxy_failed' },
+      502,
+    );
+  }
+}
+
+export async function POST(
+  req: NextRequest,
+  ctx: { params: { id: string } },
+) {
+  return proxyReschedule(req, ctx);
 }
 
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  ctx: { params: { id: string } },
 ) {
-  const id = params.id;
-  const appt = store.appointments.get(id);
-  if (!appt) return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
-
-  const body = await req.json().catch(() => ({}));
-  const start = parseDate(body?.startsAt);
-  const end = parseDate(body?.endsAt);
-  const error = windowError(start, end);
-
-  if (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error,
-        message: 'Reschedule requires real appointment startsAt and endsAt.',
-      },
-      { status: 400 },
-    );
-  }
-
-  const startsAt = start!.toISOString();
-  const endsAt = end!.toISOString();
-
-  appt.startsAt = startsAt;
-  appt.endsAt = endsAt;
-  appt.status = 'scheduled';
-  store.appointments.set(id, appt);
-
-  emitEvent({
-    kind: 'appointment_rescheduled',
-    encounterId: appt.encounterId,
-    patientId: appt.patientId,
-    clinicianId: appt.clinicianId,
-    payload: { apptId: appt.id, startsAt, endsAt },
-    targets: { patientId: appt.patientId, clinicianId: appt.clinicianId, admin: true },
-  });
-
-  return NextResponse.json({ ok: true, appointment: appt });
-}
-
-/**
- * Compatibility POST.
- * Old callers may send startISO, but they must now also send either:
- * - endsAt, or
- * - an explicit configured durationMinutes / slotDurationMinutes / sessionDurationMinutes.
- *
- * No production path may silently assume 30 minutes.
- */
-export async function POST(
-  req: NextRequest,
-  ctx: { params: { id: string } }
-) {
-  const legacy = await req.json().catch(() => ({}));
-
-  const start = parseDate(legacy?.startsAt ?? legacy?.startISO);
-  if (!start) {
-    return NextResponse.json(
-      { ok: false, error: 'start_time_required', message: 'startISO or startsAt is required.' },
-      { status: 400 },
-    );
-  }
-
-  let end = parseDate(legacy?.endsAt);
-  const durationMinutes = parseDurationMinutes(legacy);
-
-  if (!end && durationMinutes) {
-    end = new Date(start.getTime() + durationMinutes * 60 * 1000);
-  }
-
-  const error = windowError(start, end);
-  if (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: error === 'startsAt_and_endsAt_required' ? 'appointment_duration_required' : error,
-        message: 'Cannot reschedule without endsAt or an explicit configured appointment duration.',
-      },
-      { status: 400 },
-    );
-  }
-
-  return PUT(
-    new NextRequest(req.url, {
-      method: 'PUT',
-      body: JSON.stringify({
-        startsAt: start.toISOString(),
-        endsAt: end!.toISOString(),
-      }),
-      headers: { 'content-type': 'application/json' },
-    }),
-    ctx,
-  );
+  return proxyReschedule(req, ctx);
 }

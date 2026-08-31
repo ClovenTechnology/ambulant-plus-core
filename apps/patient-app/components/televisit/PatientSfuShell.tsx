@@ -360,7 +360,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
   const draggingRef = useRef<{ active: boolean } | null>(null);
   const touchTimerRef = useRef<number | null>(null);
 
-  const [rightTab, setRightTab] = useState<PatientRightTab>('overview');
+  const [rightTab, setRightTab] = useState<PatientRightTab>('chat');
   const [rightOpen, setRightOpen] = useState(true);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [mobileConsultPanel, setMobileConsultPanel] = useState<MobileConsultPanel>('chat');
@@ -1404,6 +1404,84 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
           ? 'lg:grid-cols-[1.15fr_2fr]'
           : 'lg:grid-cols-[1.1fr_1.9fr_1.2fr]';
 
+  const desktopChatContent = (
+    <div className="flex h-[min(64vh,720px)] min-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-3 py-2.5">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">Consultation chat</div>
+          <div className="text-xs text-slate-500">Secure in-room messages with your clinical team.</div>
+        </div>
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+          {state === 'connected' ? 'Live' : state}
+        </span>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 py-3">
+        {patientChatMessages.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+            No chat messages yet. Messages from the clinician will appear here.
+          </div>
+        ) : (
+          patientChatMessages.map((message) => {
+            const mine = message.from === 'patient';
+            return (
+              <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className={`max-w-[92%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
+                    mine
+                      ? 'bg-slate-900 text-white'
+                      : 'border border-slate-200 bg-slate-50 text-slate-800'
+                  }`}
+                >
+                  <div
+                    className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                      mine ? 'text-white/70' : 'text-slate-400'
+                    }`}
+                  >
+                    {chatSenderLabel(message.from)}
+                  </div>
+                  <div className="whitespace-pre-wrap break-words leading-5">{message.text}</div>
+                </div>
+              </div>
+            );
+          })
+        )}
+
+        {clinicianTyping ? <div className="text-xs text-slate-500">Clinician is typing...</div> : null}
+        <div ref={patientChatEndRef} />
+      </div>
+
+      <div className="shrink-0 border-t border-slate-100 bg-white p-3">
+        <div className="flex flex-col gap-2">
+          <textarea
+            className="min-h-[76px] w-full resize-none rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+            placeholder="Type a message to the clinician..."
+            value={patientChatDraft}
+            rows={3}
+            onChange={(event) => {
+              setPatientChatDraft(event.target.value);
+              sendPatientTyping();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                void sendPatientChat();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void sendPatientChat()}
+            disabled={!patientChatDraft.trim() || state !== 'connected'}
+            className="self-end rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-slate-50">
       <PatientSfuHeader
@@ -1732,91 +1810,6 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
               </section>
             ) : null}
 
-            {!isMobileLayout && !presentation ? (
-              <section className="hidden min-h-0 flex-1 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm lg:flex lg:flex-col">
-              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">Consultation chat</div>
-                  <div className="text-xs text-slate-500">
-                    Secure in-room messages between patient and clinician.
-                  </div>
-                </div>
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
-                  {state === 'connected' ? 'Live' : state}
-                </span>
-              </div>
-
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
-                {patientChatMessages.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
-                    No chat messages yet. Messages from the clinician will appear here.
-                  </div>
-                ) : (
-                  patientChatMessages.map((message) => {
-                    const mine = message.from === 'patient';
-                    return (
-                      <div
-                        key={message.id}
-                        className={`flex ${mine ? 'justify-end' : 'justify-start'}`}
-                      >
-                        <div
-                          className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
-                            mine
-                              ? 'bg-slate-900 text-white'
-                              : 'border border-slate-200 bg-slate-50 text-slate-800'
-                          }`}
-                        >
-                          <div
-                            className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
-                              mine ? 'text-white/70' : 'text-slate-400'
-                            }`}
-                          >
-                            {chatSenderLabel(message.from)}
-                          </div>
-                          <div className="whitespace-pre-wrap break-words">{message.text}</div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-
-                {clinicianTyping ? (
-                  <div className="text-xs text-slate-500">Clinician is typing…</div>
-                ) : null}
-
-                <div ref={patientChatEndRef} />
-              </div>
-
-              <div className="shrink-0 border-t border-slate-100 p-3">
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <textarea
-                    className="min-h-[44px] flex-1 resize-none rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
-                    placeholder="Type a message to the clinician…"
-                    value={patientChatDraft}
-                    rows={2}
-                    onChange={(e) => {
-                      setPatientChatDraft(e.target.value);
-                      sendPatientTyping();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        void sendPatientChat();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void sendPatientChat()}
-                    disabled={!patientChatDraft.trim() || state !== 'connected'}
-                    className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300 sm:self-end"
-                  >
-                    Send
-                  </button>
-                </div>
-              </div>
-            </section>
-          ) : null}
 
           </div>
 
@@ -1828,6 +1821,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
                 onChangeTab={setRightTab}
                 open={rightOpen}
                 onToggleOpen={() => setRightOpen((v) => !v)}
+                chatContent={desktopChatContent}
                 roster={roster}
                 allergies={allergies}
                 allergiesLoading={allergiesLoading}

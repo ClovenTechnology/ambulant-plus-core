@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 
 import { Card, Tabs } from '@/components/ui';
 import { Collapse } from '@/components/Collapse';
@@ -8,7 +8,7 @@ import { CollapseBtn } from '@/components/CollapseBtn';
 import TodaysPills from '@/components/TodaysPills';
 import type { RoomParty } from '@/src/lib/rtc/roster-contract';
 
-export type PatientRightTab = 'overview' | 'history' | 'orders' | 'uploads';
+export type PatientRightTab = 'chat' | 'overview' | 'history' | 'orders' | 'uploads';
 
 export type Allergy = {
   name?: string;
@@ -82,6 +82,7 @@ type Props = {
   onChangeTab: (t: PatientRightTab) => void;
   open: boolean;
   onToggleOpen: () => void;
+  chatContent?: ReactNode;
   roster?: RoomParty[];
   allergies: Allergy[];
   allergiesLoading: boolean;
@@ -187,6 +188,7 @@ export default function PatientRightPane({
   onChangeTab,
   open,
   onToggleOpen,
+  chatContent,
   roster,
   allergies,
   allergiesLoading,
@@ -209,10 +211,11 @@ export default function PatientRightPane({
 
   return (
     <div className="flex flex-col gap-4">
-      <Card title="Clinical context">
+      <Card title="Consultation workspace">
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
           <Tabs
             items={[
+              { key: 'chat', label: 'Chat' },
               { key: 'overview', label: 'Overview' },
               { key: 'history', label: 'History' },
               { key: 'orders', label: 'Orders' },
@@ -228,6 +231,14 @@ export default function PatientRightPane({
         </div>
 
         <Collapse open={open} className="px-4 py-4">
+          {tab === 'chat' ? (
+            chatContent ?? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-500">
+                Consultation chat is unavailable.
+              </div>
+            )
+          ) : null}
+
           {tab === 'overview' ? (
             <div className="space-y-4">
               <InvitedClinicianCard roster={roster} />

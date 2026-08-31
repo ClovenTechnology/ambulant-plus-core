@@ -4,6 +4,7 @@ import {
   ensureClinicianSelfOrPrivileged,
   requireClinicianAuth,
 } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,6 +41,22 @@ function asList(payload: any): any[] {
   return [];
 }
 
+function trustedGatewayHeaders(req: NextRequest, trustedIdentity: string) {
+  const headers = new Headers({
+    accept: 'application/json',
+    'x-ambulant-identity': trustedIdentity,
+  });
+
+  const authorization = req.headers.get('authorization');
+  const requestId = req.headers.get('x-request-id');
+  const correlationId = req.headers.get('x-correlation-id');
+  if (authorization) headers.set('authorization', authorization);
+  if (requestId) headers.set('x-request-id', requestId);
+  if (correlationId) headers.set('x-correlation-id', correlationId);
+
+  return headers;
+}
+
 export async function GET(req: NextRequest) {
   const gateway = gatewayBase();
   if (!gateway) return missingGatewayResponse();
@@ -67,6 +84,16 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, error: 'missing_clinician_identity' }, 401);
     }
 
+    let trustedIdentity: string;
+    try {
+      trustedIdentity = createTrustedClinicianIdentityHeader(req);
+    } catch (error: any) {
+      return json(
+        { ok: false, error: String(error?.message || 'identity_bridge_failed') },
+        Number(error?.status || 500),
+      );
+    }
+
     const upstream = new URL('/api/appointments', gateway);
 
     urlIn.searchParams.forEach((value, key) => {
@@ -80,26 +107,21 @@ export async function GET(req: NextRequest) {
 
     const r = await fetch(upstream.toString(), {
       method: 'GET',
-      headers: {
-        accept: 'application/json',
-        'x-role': auth.role,
-        'x-uid': auth.clinicianId,
-        'x-clinician-id': auth.clinicianId,
-      },
+      headers: trustedGatewayHeaders(req, trustedIdentity),
       cache: 'no-store',
     });
 
     const payload = await r.json().catch(() => ({}));
     const appointments = asList(payload).filter((item) => !isSimulationAppointment(item));
 
-    if (!r.ok) {
+    if (!r.ok || payload?.ok === false) {
       return json(
         {
           ok: false,
           error: payload?.error || 'appointments_upstream_failed',
           appointments,
         },
-        r.status,
+        r.status || 502,
       );
     }
 

@@ -36,8 +36,6 @@ import { TextBlock } from '@/components/shared/TextBlock';
 import { Card, Tabs, Collapse, Icon, Skeleton } from '@/components/ui';
 import { CollapseBtn } from '@/components/ui/CollapseBtn';
 
-import { useAutocomplete, icdSearch } from '@/src/hooks/useAutocomplete';
-import type { ICD10Hit } from '@/src/hooks/useAutocomplete';
 import { useUiPrefs } from '@/hooks/useUiPrefs';
 import useInviteSpecialistApproval from '@/src/hooks/useInviteSpecialistApproval';
 
@@ -351,13 +349,6 @@ type Vitals = {
   dia?: number;
 };
 
-const ICD10_SUGGESTIONS: string[] = [
-  'J20.9 - Acute bronchitis, unspecified',
-  'R50.9 - Fever, unspecified',
-  'R05.9 - Cough, unspecified',
-  'I10 - Essential (primary) hypertension',
-  'E11.9 - Type 2 diabetes mellitus without complications',
-];
 
 function num2(x?: number) {
   return typeof x === 'number' && Number.isFinite(x) ? Number(x).toFixed(2) : '-';
@@ -365,6 +356,19 @@ function num2(x?: number) {
 function fmtBP(sys?: number, dia?: number) {
   const ok = Number.isFinite(sys as number) && Number.isFinite(dia as number);
   return ok ? `${Math.round(sys!)} / ${Math.round(dia!)} mmHg` : '-/- mmHg';
+}
+
+function mergeVitalsSnapshot(previous: Vitals, incoming: Vitals): Vitals {
+  const next: Vitals = { ...previous };
+  const fields: Array<keyof Pick<Vitals, 'hr' | 'spo2' | 'tempC' | 'rr' | 'sys' | 'dia'>> = [
+    'hr', 'spo2', 'tempC', 'rr', 'sys', 'dia',
+  ];
+  for (const field of fields) {
+    const value = incoming[field];
+    if (typeof value === 'number' && Number.isFinite(value)) next[field] = value;
+  }
+  if (typeof incoming.ts === 'number' && Number.isFinite(incoming.ts)) next.ts = incoming.ts;
+  return next;
 }
 
 // Helper: read join JWT from session (visitId/roomId variants)
@@ -821,16 +825,21 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   // Vitals
   const [vitals, setVitals] = useState<Vitals>({});
 
-  // SOAP / meds / education
-  const [soap, setSoap] = useState<SoapState>({ s: '', o: '', a: '', p: '', icd10Code: undefined });
+  // Clinical Note owns encounter narrative/evidence only. Orders and Conclusions have separate state.
+  const [soap, setSoap] = useState<SoapState>({
+    clinicalNote: '', presentingComplaint: '', hpi: '', symptoms: '', relevantHistory: '',
+    objectiveFindings: '', clinicalReasoning: '', riskAssessment: '',
+    s: '', o: '', a: '', p: '', icd10Code: undefined,
+  });
   const [currentMeds, setCurrentMeds] = useState<string>('');
-  const [patientEducation, setPatientEducation] = useState<string>('');
+  const [clinicalDraftHydrated, setClinicalDraftHydrated] = useState(false);
+  const [clinicalDraftSaveState, setClinicalDraftSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [transcriptNoteSuggestions, setTranscriptNoteSuggestions] = useState<TranscriptNoteSuggestion[]>([]);
   const [transcriptDraftLoading, setTranscriptDraftLoading] = useState(false);
   const [transcriptDraftError, setTranscriptDraftError] = useState<string | null>(null);
 
   // eRx summary (meds + labs) from ErxComposer
-  const [erxSummary, setErxSummary] = useState<ErxSummary>({ meds: [], labs: [] });
+  const [erxSummary, setErxSummary] = useState<ErxSummary>({ meds: [], labs: [], medicationState: 'empty', labState: 'empty', medicationDraftCount: 0, labDraftCount: 0 });
 
   // =========================
   // VIDEO DOCK / UNDOCK (no new routes; least invasive)
@@ -1030,70 +1039,133 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     };
   }, [moveFloatDrag, endFloatDrag]);
 
-  // Persist SOAP + meds per-room as a local draft cache.
+  const setClinicalNoteField = useCallback(
+    (key: keyof Pick<SoapState, 'clinicalNote' | 'presentingComplaint' | 'hpi' | 'symptoms' | 'relevantHistory' | 'objectiveFindings' | 'clinicalReasoning' | 'riskAssessment'>, value: string) => {
+      setSoap((prev) => {
+        const next = { ...prev, [key]: value } as SoapState;
+        // Legacy keys are compatibility mirrors only; they do not own Orders or Conclusions.
+        return {
+          ...next,
+          s: next.symptoms || '',
+          o: next.objectiveFindings || '',
+          a: next.clinicalReasoning || '',
+          p: next.relevantHistory || '',
+        };
+      });
+    },
+    [],
+  );
+
+  // Local storage is a recovery cache only. Encounter draft API is authoritative when available.
   useEffect(() => {
-    try {
-      if (typeof window === 'undefined') return;
-      const saved = localStorage.getItem(`sfu-soap-v2-${roomId}`);
-      if (saved) {
-        const parsed = safeJsonParse(saved);
-        if (isRecord(parsed)) {
-          const p = parsed as Record<string, unknown>;
-          const soapCandidate = p.soap ?? parsed;
-          if (isRecord(soapCandidate)) setSoap(soapCandidate as SoapState);
-          if (typeof p.currentMeds === 'string') setCurrentMeds(p.currentMeds);
-          if (typeof p.patientEducation === 'string') setPatientEducation(p.patientEducation);
+    let cancelled = false;
+
+    void (async () => {
+      let localSoap: SoapState | null = null;
+      try {
+        if (typeof window !== 'undefined') {
+          const saved = localStorage.getItem(`sfu-soap-v2-${roomId}`);
+          if (saved) {
+            const parsed = safeJsonParse(saved);
+            if (isRecord(parsed)) {
+              const stored = parsed as Record<string, unknown>;
+              const soapCandidate = stored.soap ?? parsed;
+              if (isRecord(soapCandidate)) localSoap = soapCandidate as SoapState;
+              if (typeof stored.currentMeds === 'string') setCurrentMeds(stored.currentMeds);
+            }
+          }
         }
+      } catch {
+        // cache failure must not block the consultation
       }
-    } catch {
-      // ignore
-    }
-  }, [roomId]);
+
+      if (!encounterId) {
+        if (!cancelled && localSoap) setSoap(localSoap);
+        if (!cancelled) setClinicalDraftHydrated(true);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/draft`, {
+          method: 'GET', cache: 'no-store', credentials: 'same-origin',
+        });
+        const json = await res.json().catch(() => null as any);
+        if (!res.ok || !json?.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+
+        const server = json?.draft?.clinicalNote;
+        if (!cancelled && server && typeof server === 'object') {
+          const canonical: SoapState = {
+            clinicalNote: String(server.clinicalNote || ''),
+            presentingComplaint: String(server.presentingComplaint || ''),
+            hpi: String(server.hpi || ''),
+            symptoms: String(server.symptoms || ''),
+            relevantHistory: String(server.relevantHistory || ''),
+            objectiveFindings: String(server.objectiveFindings || ''),
+            clinicalReasoning: String(server.clinicalReasoning || ''),
+            riskAssessment: String(server.riskAssessment || ''),
+            s: String(server.symptoms || ''),
+            o: String(server.objectiveFindings || ''),
+            a: String(server.clinicalReasoning || ''),
+            p: String(server.relevantHistory || ''),
+          };
+          setSoap(canonical);
+        } else if (!cancelled && localSoap) {
+          setSoap(localSoap);
+        }
+      } catch (error) {
+        console.warn('[clinical-draft] server hydration unavailable; using local cache', error);
+        if (!cancelled && localSoap) setSoap(localSoap);
+      } finally {
+        if (!cancelled) setClinicalDraftHydrated(true);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [encounterId, roomId]);
 
   useEffect(() => {
     try {
       if (typeof window === 'undefined') return;
-      localStorage.setItem(
-        `sfu-soap-v2-${roomId}`,
-        JSON.stringify({
-          soap,
-          currentMeds,
-          patientEducation,
-        })
-      );
+      localStorage.setItem(`sfu-soap-v2-${roomId}`, JSON.stringify({ soap, currentMeds }));
     } catch {
-      // ignore
+      // local recovery cache is best-effort
     }
-  }, [soap, currentMeds, patientEducation, roomId]);
+  }, [soap, currentMeds, roomId]);
 
-  // Pre-populate Allergies text in SOAP from patient allergies
   useEffect(() => {
-    if (!patientAllergies || patientAllergies.length === 0) return;
-    setSoap((prev) => {
-      if (prev.o) return prev;
-      const text = patientAllergies
-        .map((a) => {
-          const sev = a.severity ? ` [${a.severity}]` : '';
-          const rxn = a.reaction ? ` - ${a.reaction}` : '';
-          return `${a.substance}${sev}${rxn}`;
+    if (!clinicalDraftHydrated || !encounterId) return;
+    setClinicalDraftSaveState('saving');
+    const id = window.setTimeout(() => {
+      void fetch(`/api/encounters/${encodeURIComponent(encounterId)}/draft`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          mode: 'autosave',
+          clinicalNote: {
+            clinicalNote: soap.clinicalNote || '',
+            presentingComplaint: soap.presentingComplaint || '',
+            hpi: soap.hpi || '',
+            symptoms: soap.symptoms || '',
+            relevantHistory: soap.relevantHistory || '',
+            objectiveFindings: soap.objectiveFindings || '',
+            clinicalReasoning: soap.clinicalReasoning || '',
+            riskAssessment: soap.riskAssessment || '',
+          },
+        }),
+      })
+        .then(async (res) => {
+          const json = await res.json().catch(() => null as any);
+          if (!res.ok || !json?.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+          setClinicalDraftSaveState('saved');
         })
-        .join('\n');
-      return { ...prev, o: text };
-    });
-  }, [patientAllergies]);
-
-  // Symptoms ICD-10 autocomplete (SOAP S)
-  const icdSympAuto = useAutocomplete<ICD10Hit>(icdSearch);
-  const [sympCode, setSympCode] = useState<string>('');
-  const icdSympOptions = icdSympAuto.opts.map((h) => ({
-    code: h.code,
-    text: `${h.code} \u2014 ${h.title}`,
-  }));
-  const icdSympOptionsFinal = icdSympOptions.length
-    ? icdSympOptions
-    : ICD10_SUGGESTIONS.map((t, i) => ({ code: t.split(' ')[0] || `SUG-${i}`, text: t }));
-  const [sympOpen, setSympOpen] = useState(false);
-  const [sympActive, setSympActive] = useState(-1);
+        .catch((error) => {
+          console.warn('[clinical-draft] autosave failed', error);
+          setClinicalDraftSaveState('error');
+        });
+    }, 1000);
+    return () => window.clearTimeout(id);
+  }, [clinicalDraftHydrated, encounterId, soap.clinicalNote, soap.presentingComplaint, soap.hpi, soap.symptoms, soap.relevantHistory, soap.objectiveFindings, soap.clinicalReasoning, soap.riskAssessment]);
 
   // Current medications entered during this room session.
   const currentMedsList = useMemo(
@@ -1333,7 +1405,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
           try {
             const input = parsed as Parameters<typeof normalizeVitals>[0];
             const v = normalizeVitals(input);
-            setVitals(v as Vitals);
+            setVitals((previous) => mergeVitalsSnapshot(previous, v as Vitals));
           } catch (err) {
             console.warn('[vitals] normalize error', err);
           }
@@ -2074,11 +2146,10 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
     }
   };
 
-  function appendUniqueSoapText(existing: string | undefined, text: string) {
+  function appendUniqueNoteText(existing: string | undefined, text: string) {
     const current = String(existing || '').trim();
     const incoming = String(text || '').trim();
     if (!incoming) return current;
-
     const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
     if (current && normalize(current).includes(normalize(incoming))) return current;
     return current ? `${current}\n\n${incoming}` : incoming;
@@ -2086,58 +2157,84 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
 
   function noteSuggestionLabel(section: string) {
     switch (section) {
-      case 'symptoms':
-        return 'Symptoms';
-      case 'history':
-        return 'History / HPI';
-      case 'assessment':
-        return 'Assessment';
-      case 'plan':
-        return 'Plan';
-      case 'safetyNetting':
-        return 'Safety-netting';
-      case 'followUp':
-        return 'Follow-up';
-      default:
-        return 'Transcript note';
+      case 'symptoms': return 'Symptoms / ROS';
+      case 'history': return 'Relevant History';
+      case 'assessment': return 'Clinical Reasoning';
+      case 'plan': return 'Care Plan';
+      case 'safetyNetting': return 'Safety-netting';
+      case 'followUp': return 'Follow-up';
+      default: return 'Clinical note';
     }
   }
 
-  function soapKeyForSuggestion(section: string): 's' | 'a' | 'p' {
-    switch (section) {
-      case 'symptoms':
-        return 's';
-      case 'assessment':
-        return 'a';
-      case 'history':
-      case 'plan':
-      case 'safetyNetting':
-      case 'followUp':
-      default:
-        return 'p';
-    }
-  }
-
-  function applyTranscriptSuggestion(suggestion: TranscriptNoteSuggestion) {
+  async function applyTranscriptSuggestion(suggestion: TranscriptNoteSuggestion) {
     const text = String(suggestion.suggestedText || '').trim();
-    if (!text) return;
+    if (!text || suggestion.applied) return;
+    const section = String(suggestion.section || 'history');
 
-    const key = soapKeyForSuggestion(String(suggestion.section || 'history'));
+    if (section === 'plan' || section === 'safetyNetting' || section === 'followUp') {
+      if (!encounterId) {
+        pushToast('No encounter is attached to this call.', 'warning', 'Conclusion draft unavailable');
+        return;
+      }
 
-    setSoap((prev) => ({
-      ...prev,
-      [key]: appendUniqueSoapText(String(prev[key] || ''), text),
-    }));
+      try {
+        const currentRes = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/draft`, {
+          method: 'GET', cache: 'no-store', credentials: 'same-origin',
+        });
+        const currentJson = await currentRes.json().catch(() => null as any);
+        if (!currentRes.ok || !currentJson?.ok) throw new Error(currentJson?.error || `HTTP ${currentRes.status}`);
+        const current = currentJson?.draft?.conclusions || {};
+        const field = section === 'plan' ? 'carePlan' : section === 'safetyNetting' ? 'safetyNetting' : 'followUpNote';
+        const conclusions = {
+          visitSynopsis: String(current.visitSynopsis || ''),
+          diagnoses: Array.isArray(current.diagnoses) ? current.diagnoses : [],
+          disposition: String(current.disposition || ''),
+          carePlan: String(current.carePlan || ''),
+          patientEducation: String(current.patientEducation || ''),
+          safetyNetting: String(current.safetyNetting || ''),
+          referralNote: String(current.referralNote || ''),
+          followUpNote: String(current.followUpNote || ''),
+          conclusionNote: String(current.conclusionNote || ''),
+        } as Record<string, any>;
+        conclusions[field] = appendUniqueNoteText(String(conclusions[field] || ''), text);
 
-    setTranscriptNoteSuggestions((prev) =>
-      prev.map((item) => (item.id === suggestion.id ? { ...item, applied: true } : item)),
-    );
+        const saveRes = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/draft`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ mode: 'manual', conclusions }),
+        });
+        const saveJson = await saveRes.json().catch(() => null as any);
+        if (!saveRes.ok || !saveJson?.ok) throw new Error(saveJson?.error || `HTTP ${saveRes.status}`);
+        setTranscriptNoteSuggestions((prev) => prev.map((item) => item.id === suggestion.id ? { ...item, applied: true } : item));
+        pushToast(`Added transcript suggestion to Conclusions → ${noteSuggestionLabel(section)}.`, 'success', 'Transcript reviewed');
+        return;
+      } catch (error: any) {
+        pushToast(error?.message || 'Could not save the conclusion suggestion.', 'error', 'Transcript suggestion not applied');
+        return;
+      }
+    }
 
-    pushToast(
-      `Added transcript suggestion to ${noteSuggestionLabel(String(suggestion.section || 'history'))}.`,
-      'success',
-      'Transcript reviewed',
-    );
+    if (section === 'symptoms') {
+      setSoap((prev) => {
+        const symptoms = appendUniqueNoteText(prev.symptoms || prev.s, text);
+        return { ...prev, symptoms, s: symptoms };
+      });
+    } else if (section === 'assessment') {
+      setSoap((prev) => {
+        const clinicalReasoning = appendUniqueNoteText(prev.clinicalReasoning || prev.a, text);
+        return { ...prev, clinicalReasoning, a: clinicalReasoning };
+      });
+    } else {
+      setSoap((prev) => {
+        const relevantHistory = appendUniqueNoteText(prev.relevantHistory || prev.p, text);
+        return { ...prev, relevantHistory, p: relevantHistory };
+      });
+    }
+
+    setTranscriptNoteSuggestions((prev) => prev.map((item) => item.id === suggestion.id ? { ...item, applied: true } : item));
+    pushToast(`Added transcript suggestion to ${noteSuggestionLabel(section)}.`, 'success', 'Transcript reviewed');
   }
 
   async function generateTranscriptNoteDraft() {
@@ -2154,14 +2251,22 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          soap,
-          existingSoap: {
-            subjective: soap.s,
-            objective: soap.o,
-            assessment: soap.a,
-            plan: soap.p,
+          clinicalNote: {
+            clinicalNote: soap.clinicalNote || '',
+            presentingComplaint: soap.presentingComplaint || '',
+            hpi: soap.hpi || '',
+            symptoms: soap.symptoms || '',
+            relevantHistory: soap.relevantHistory || '',
+            objectiveFindings: soap.objectiveFindings || '',
+            clinicalReasoning: soap.clinicalReasoning || '',
+            riskAssessment: soap.riskAssessment || '',
           },
-          existingNote: patientEducation,
+          existingSoap: {
+            subjective: [soap.presentingComplaint, soap.hpi, soap.symptoms, soap.relevantHistory].filter(Boolean).join('\n\n'),
+            objective: soap.objectiveFindings || '',
+            assessment: soap.clinicalReasoning || '',
+            plan: '',
+          },
           localTranscriptSegmentCount: captionTranscript.length,
         }),
       });
@@ -2183,7 +2288,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
         );
       } else {
         pushToast(
-          'No new transcript suggestions were found. Existing SOAP may already contain the content.',
+          'No new transcript suggestions were found. Existing clinical documentation may already contain the content.',
           'info',
           'Transcript reviewed',
         );
@@ -2203,34 +2308,33 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
   const encounterSummary = useMemo(() => {
     const lines: string[] = [];
     lines.push(`Reason for visit: ${appt.reason || '-'}`);
-    if (soap.s) lines.push(`Subjective / Symptoms:\n${soap.s}`);
-    if (soap.a) lines.push(`Assessment:\n${soap.a}`);
-    if (soap.p) lines.push(`Plan / Treatment:\n${soap.p}`);
-    if (patientEducation) lines.push(`Patient Education:\n${patientEducation}`);
+    if (soap.clinicalNote) lines.push(`Clinical Note:\n${soap.clinicalNote}`);
+    if (soap.presentingComplaint) lines.push(`Presenting Complaint:\n${soap.presentingComplaint}`);
+    if (soap.hpi) lines.push(`HPI:\n${soap.hpi}`);
+    if (soap.symptoms) lines.push(`Symptoms / ROS:\n${soap.symptoms}`);
+    if (soap.relevantHistory) lines.push(`Relevant History:\n${soap.relevantHistory}`);
+    if (soap.objectiveFindings) lines.push(`Objective / Examination Findings:\n${soap.objectiveFindings}`);
+    if (soap.clinicalReasoning) lines.push(`Clinical Reasoning / Impression:\n${soap.clinicalReasoning}`);
+    if (soap.riskAssessment) lines.push(`Risk Assessment:\n${soap.riskAssessment}`);
 
-    const medsOrdered = erxSummary.meds;
-    if (medsOrdered.length) {
+    if (erxSummary.meds.length) {
       lines.push(
-        'Medications prescribed:\n' +
-          medsOrdered
-            .map((r) => {
-              const parts = [r.drug, r.dose, r.route, r.freq, r.duration].filter(Boolean).join(' · ');
-              return `- ${parts}`;
-            })
-            .join('\n')
+        `${erxSummary.medicationState === 'issued' ? 'Issued prescriptions' : 'Prescription drafts'}:\n` +
+          erxSummary.meds.map((r) => {
+            const product = [r.drug, r.strength, r.form].filter(Boolean).join(' ');
+            const directions = [r.dose, r.route, r.freq, r.duration].filter(Boolean).join(' · ');
+            return `- ${[product, directions].filter(Boolean).join(' — ')}`;
+          }).join('\n'),
       );
     }
 
-    const labsOrdered = erxSummary.labs;
-    if (labsOrdered.length) {
+    if (erxSummary.labs.length) {
       lines.push(
-        'Lab tests ordered:\n' +
-          labsOrdered
-            .map((l) => {
-              const parts = [l.test, l.priority, l.specimen, l.icd].filter(Boolean).join(' · ');
-              return `- ${parts}`;
-            })
-            .join('\n')
+        `${erxSummary.labState === 'issued' ? 'Issued lab orders' : 'Lab order drafts'}:\n` +
+          erxSummary.labs.map((l) => {
+            const parts = [l.test, l.priority, l.specimen, l.icd].filter(Boolean).join(' · ');
+            return `- ${parts}`;
+          }).join('\n'),
       );
     }
 
@@ -2246,7 +2350,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
     }
 
     return lines.join('\n\n');
-  }, [appt.reason, soap.s, soap.a, soap.p, patientEducation, erxSummary, patientAllergies]);
+  }, [appt.reason, soap, erxSummary, patientAllergies]);
 
   // -------------------------
   // End Session -> callback from SessionConclusions
@@ -2267,8 +2371,16 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
         encounterStatus: 'completed',
         encounterReachedClinicalThreshold: true,
         summaryPayload: {
-          soap,
-          patientEducation,
+          clinicalNote: {
+            clinicalNote: soap.clinicalNote || '',
+            presentingComplaint: soap.presentingComplaint || '',
+            hpi: soap.hpi || '',
+            symptoms: soap.symptoms || '',
+            relevantHistory: soap.relevantHistory || '',
+            objectiveFindings: soap.objectiveFindings || '',
+            clinicalReasoning: soap.clinicalReasoning || '',
+            riskAssessment: soap.riskAssessment || '',
+          },
           erxSummary,
           roomId,
         },
@@ -2289,7 +2401,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
         error: err?.message || 'unknown_error',
       });
     }
-  }, [consultationSession, soap, patientEducation, erxSummary, roomId, encounterId, pushToast, audit]);
+  }, [consultationSession, soap, erxSummary, roomId, encounterId, pushToast, audit]);
 
   // =========================
   // Render helpers
@@ -2732,7 +2844,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
             <div className="min-h-0 min-w-0 overflow-hidden pl-1 flex flex-col">
               <div className="shrink-0 space-y-2 pb-2">
                 <div className="px-2">
-                  <div className="text-sm font-semibold text-gray-800">SOAP, Insights, History</div>
+                  <div className="text-sm font-semibold text-gray-800">Clinical Note, Orders, Conclusions, Insight, History</div>
                 </div>
 
                 <div className="px-2 text-[11px] text-slate-500">
@@ -2751,8 +2863,8 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                         });
                       }}
                       items={[
-                        { key: 'soap', label: 'Sub' },
-                        { key: 'erx', label: 'eRx' },
+                        { key: 'soap', label: 'Clinical Note' },
+                        { key: 'erx', label: 'Orders' },
                         { key: 'conclusions', label: 'Conclusions' },
                         { key: 'insight', label: 'Insight' },
                         { key: 'history', label: 'History' },
@@ -2779,119 +2891,72 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                   <Collapse open={rightPanelsOpen}>
                 <>
                   {rightTab === 'soap' && (
-                    <Card title="Clerk Desk" dense={dense} gradient>
-                      <div className="text-xs text-gray-500 mb-2">
-                        Capture the core consultation narrative first, then use coding, medicines and transcript assistance as supporting tools.
-                      </div>
-
-                      <div className="mb-3 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-                        <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-600">Core consultation notes</div>
-                      <TextBlock
-                        label="Presenting Complaints"
-                        value={soap.a}
-                        onChange={(v) => setSoap({ ...soap, a: v })}
-                        dictation
-                      />
-                      <TextBlock
-                        label="History of Present Illness (HPI)"
-                        value={soap.p}
-                        onChange={(v) => setSoap({ ...soap, p: v })}
-                        multiline
-                        dictation
-                      />
-                      <TextBlock
-                        label="Patient Education"
-                        value={patientEducation}
-                        onChange={setPatientEducation}
-                        multiline
-                        dictation
-                      />
-                      </div>
-
-
-
-                      <div className="mb-2 border rounded bg-white">
-                        <div className="flex items-center justify-between px-2 py-1">
-                          <div className="flex flex-col">
-                            <span className="text-xs font-medium text-gray-700">Current Medication</span>
-                            <span className="text-[11px] text-gray-500">From patient profile</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {medsError && (
-                              <span className="text-[10px] text-amber-700 border border-amber-200 bg-amber-50 rounded-full px-2 py-0.5">
-                                Source unavailable
-                              </span>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => setCurrentMedsOpen((v) => !v)}
-                              className="text-[11px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100"
-                              aria-expanded={currentMedsOpen}
-                            >
-                              {currentMedsOpen ? 'Hide' : 'Show'}
-                              <Icon name={currentMedsOpen ? 'collapse' : 'expand'} />
-                            </button>
-                          </div>
+                    <Card title="Clinical Note" dense={dense} gradient>
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs text-gray-500">
+                          Encounter narrative and examination evidence only. Orders and final outcomes are documented in their dedicated tabs.
                         </div>
-                        <Collapse open={currentMedsOpen}>
-                          <div className="border-t px-3 py-2">
-                            {activeMeds.length > 0 ? (
-                              <ul className="list-disc pl-5 text-sm text-gray-800 space-y-0.5">
-                                {activeMeds.map((m) => (
-                                  <li key={m.id}>
-                                    <span className="font-medium">{m.name}</span>
-                                    {m.dose && <span className="text-gray-700"> · {m.dose}</span>}
-                                    {m.frequency && <span className="text-gray-700"> · {m.frequency}</span>}
-                                    {m.route && <span className="text-gray-500"> · {m.route}</span>}
-                                    {m.status && m.status.toLowerCase() !== 'active' && (
-                                      <span className="ml-1 text-[11px] text-gray-500">({m.status})</span>
-                                    )}
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : medsError || patientMeds === null ? (
-                              <div className="rounded border border-amber-200 bg-amber-50 px-2 py-2 text-sm text-amber-900">
-                                Medication information is unavailable. Do not interpret this as “no medications”.
-                              </div>
-                            ) : currentMedsList.length === 0 ? (
-                              <div className="text-sm text-gray-600 italic">No medications recorded in the verified feed.</div>
-                            ) : (
-                              <ul className="list-disc pl-5 text-sm text-gray-800">
-                                {currentMedsList.map((m, i) => (
-                                  <li key={`${m}-${i}`}>{m}</li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                        </Collapse>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] ${clinicalDraftSaveState === 'error' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {clinicalDraftSaveState === 'saving' ? 'Saving…' : clinicalDraftSaveState === 'saved' ? 'Server draft saved' : clinicalDraftSaveState === 'error' ? 'Draft save needs attention' : 'Draft ready'}
+                        </span>
                       </div>
 
-                      <div className="mt-2 border rounded bg-white">
-                        <div className="flex items-center justify-between px-2 py-1">
-                          <div className="text-xs font-medium text-gray-700">Allergies</div>
-                          <div className="flex items-center gap-2">
-                            {allergiesFromLive ? (
-                              <span className="text-[10px] text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-full px-2 py-0.5">
-                                Live
-                              </span>
-                            ) : allergiesError ? (
-                              <span className="text-[10px] text-amber-700 border border-amber-200 bg-amber-50 rounded-full px-2 py-0.5">
-                                Source unavailable
-                              </span>
-                            ) : null}
-                            <button
-                              type="button"
-                              onClick={() => setAllergiesOpen((v) => !v)}
-                              className="text-[11px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100"
-                              aria-expanded={allergiesOpen}
-                            >
-                              {allergiesOpen ? 'Hide' : 'Show'}
-                              <Icon name={allergiesOpen ? 'collapse' : 'expand'} />
-                            </button>
+                      <div className="space-y-4">
+                        <section className="rounded-xl border border-slate-200 bg-white p-3">
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-600">Top Clinical Note</div>
+                          <TextBlock
+                            label="Clinical Note"
+                            value={soap.clinicalNote || ''}
+                            onChange={(value) => setClinicalNoteField('clinicalNote', value)}
+                            multiline
+                          />
+                          <div className="mt-1 text-[11px] text-slate-500">Clinician-authored free narrative. This remains the first note field and does not duplicate Orders or Conclusions.</div>
+                        </section>
+
+                        <section className="rounded-xl border border-slate-200 bg-slate-50/50 p-3">
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-600">Subjective</div>
+                          <div className="space-y-3">
+                            <TextBlock label="Presenting Complaint" value={soap.presentingComplaint || ''} onChange={(value) => setClinicalNoteField('presentingComplaint', value)} />
+                            <TextBlock label="History of Present Illness (HPI)" value={soap.hpi || ''} onChange={(value) => setClinicalNoteField('hpi', value)} multiline />
+                            <TextBlock label="Symptoms / Review of Systems" value={soap.symptoms || ''} onChange={(value) => setClinicalNoteField('symptoms', value)} multiline />
+                            <TextBlock label="Relevant History" value={soap.relevantHistory || ''} onChange={(value) => setClinicalNoteField('relevantHistory', value)} multiline />
                           </div>
-                        </div>
-                        <Collapse open={allergiesOpen}>
-                          <div className="border-t px-2 py-2">
+                          <div className="mt-2 text-[11px] text-slate-500">Symptoms remain clinically expressive text. ICD-10 diagnosis selection belongs in Conclusions.</div>
+                        </section>
+
+                        <section className="rounded-xl border border-slate-200 bg-slate-50/50 p-3">
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-600">Objective</div>
+                          <TextBlock label="Objective / Examination Findings" value={soap.objectiveFindings || ''} onChange={(value) => setClinicalNoteField('objectiveFindings', value)} multiline />
+                          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-600 sm:grid-cols-3">
+                            <div className="rounded border bg-white px-2 py-1">BP: {fmtBP(vitals.sys, vitals.dia)}</div>
+                            <div className="rounded border bg-white px-2 py-1">SpO₂: {num2(vitals.spo2)}%</div>
+                            <div className="rounded border bg-white px-2 py-1">Temp: {num2(vitals.tempC)} °C</div>
+                            <div className="rounded border bg-white px-2 py-1">HR: {num2(vitals.hr)} bpm</div>
+                            <div className="rounded border bg-white px-2 py-1">RR: {num2(vitals.rr)} /min</div>
+                          </div>
+                        </section>
+
+                        <section className="rounded-xl border border-slate-200 bg-slate-50/50 p-3">
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-600">Assessment</div>
+                          <div className="space-y-3">
+                            <TextBlock label="Clinical Reasoning / Impression" value={soap.clinicalReasoning || ''} onChange={(value) => setClinicalNoteField('clinicalReasoning', value)} multiline />
+                            <TextBlock label="Risk Assessment" value={soap.riskAssessment || ''} onChange={(value) => setClinicalNoteField('riskAssessment', value)} multiline />
+                          </div>
+                          <div className="mt-2 text-[11px] text-slate-500">Working reasoning belongs here; coded final diagnoses and disposition are completed in Conclusions.</div>
+                        </section>
+
+                        <section className="rounded-xl border border-slate-200 bg-white p-3">
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-600">Clinical Context — read-only/supporting</div>
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-xs font-medium text-slate-700">Current medication context</div>
+                              <textarea
+                                className="mt-1 min-h-[64px] w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                                value={currentMeds}
+                                onChange={(event) => setCurrentMeds(event.target.value)}
+                                placeholder="One current medicine per line if additional session context is needed. Prescribing belongs in Orders."
+                              />
+                            </div>
                             <AllergiesPanel
                               allergies={patientAllergies || []}
                               loading={allergiesLoading}
@@ -2902,188 +2967,60 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                               onCreate={handleCreateAllergy}
                             />
                           </div>
-                        </Collapse>
-                      </div>
+                        </section>
 
-                      <div className="mt-3 space-y-1">
-                        <div className="text-xs text-gray-500">Symptoms (ICD-10 autocomplete; free text allowed)</div>
-                        <div className="relative">
-                          <input
-                            className="w-full border rounded px-2 py-1 text-sm"
-                            role="combobox"
-                            aria-expanded={sympOpen}
-                            aria-controls="icd10-symptoms-listbox"
-                            aria-autocomplete="list"
-                            value={icdSympAuto.q || soap.s}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              icdSympAuto.setQ(v);
-                              setSympCode('');
-                              setSympOpen(true);
-                              setSympActive(-1);
-                              setSoap((s) => ({ ...s, s: v }));
-                            }}
-                            onFocus={(e) => {
-                              const v = e.currentTarget.value;
-                              if (v) icdSympAuto.setQ(v);
-                              if (icdSympOptionsFinal.length) setSympOpen(true);
-                            }}
-                            onKeyDown={(e) => {
-                              if (!icdSympOptionsFinal.length) return;
-                              if (e.key === 'ArrowDown') {
-                                e.preventDefault();
-                                setSympOpen(true);
-                                setSympActive((a) => {
-                                  const next = a + 1;
-                                  return next >= icdSympOptionsFinal.length ? icdSympOptionsFinal.length - 1 : next;
-                                });
-                              } else if (e.key === 'ArrowUp') {
-                                e.preventDefault();
-                                setSympOpen(true);
-                                setSympActive((a) => (a <= 0 ? 0 : a - 1));
-                              } else if (e.key === 'Enter') {
-                                if (sympOpen && sympActive >= 0 && sympActive < icdSympOptionsFinal.length) {
-                                  e.preventDefault();
-                                  const o = icdSympOptionsFinal[sympActive];
-                                  icdSympAuto.setQ(o.text);
-                                  setSoap((s) => ({ ...s, s: o.text, icd10Code: o.code }));
-                                  setSympCode(o.code);
-                                  setSympOpen(false);
-                                }
-                              } else if (e.key === 'Escape') {
-                                setSympOpen(false);
-                              }
-                            }}
-                            onBlur={(e) => {
-                              setTimeout(() => setSympOpen(false), 120);
-                              const v = e.currentTarget.value.trim();
-                              if (!v) return;
-                              const direct = v.split(/\s+/)[0];
-                              const norm = v.toLowerCase();
-
-                              const opt =
-                                icdSympOptionsFinal.find((o) => o.code.toLowerCase() === norm) ||
-                                icdSympOptionsFinal.find((o) => o.code.toLowerCase() === direct.toLowerCase()) ||
-                                icdSympOptionsFinal.find(
-                                  (o) => o.text.toLowerCase().startsWith(norm) || o.text.toLowerCase().includes(norm)
-                                );
-
-                              if (opt) {
-                                setSympCode(opt.code);
-                                setSoap((s) => ({ ...s, icd10Code: opt.code }));
-                              }
-                            }}
-                            placeholder="Type to search ICD-10 (free text allowed)"
-                            aria-label="Symptoms"
-                            autoComplete="off"
-                            autoCorrect="off"
-                            autoCapitalize="off"
-                          />
-
-                          {sympOpen && icdSympOptionsFinal.length > 0 && (
-                            <ul
-                              id="icd10-symptoms-listbox"
-                              role="listbox"
-                              className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded border bg-white shadow text-sm"
-                            >
-                              {icdSympOptionsFinal.map((o, idx) => (
-                                <li
-                                  key={o.code + idx}
-                                  id={`icd10-symp-${idx}`}
-                                  role="option"
-                                  aria-selected={idx === sympActive}
-                                  className={`px-2 py-1 cursor-pointer ${
-                                    idx === sympActive ? 'bg-blue-50' : 'hover:bg-gray-50'
-                                  }`}
-                                  onMouseDown={(ev) => ev.preventDefault()}
-                                  onClick={() => {
-                                    icdSympAuto.setQ(o.text);
-                                    setSoap((s) => ({ ...s, s: o.text, icd10Code: o.code }));
-                                    setSympCode(o.code);
-                                    setSympOpen(false);
-                                  }}
-                                >
-                                  <span className="font-mono text-xs mr-1">{o.code}</span>
-                                  <span>{o.text.replace(/^([A-Z0-9.]+)\s+-\s*/, '')}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-
-                        {sympCode && (
-                          <div className="text-[11px] text-gray-600">
-                            Selected ICD-10 code: <span className="font-mono">{sympCode}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="mt-4 rounded-xl border border-sky-100 bg-sky-50/70 p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <div className="text-xs font-semibold text-sky-900">Transcript-assisted note draft</div>
-                            <div className="mt-0.5 text-[11px] leading-relaxed text-sky-700">
-                              Uses persisted final transcript segments when transcription is available. Captions/Overlay only affect display; muted or unpublished audio cannot be captured. Nothing is added to the clinical record until you review and append it.
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={generateTranscriptNoteDraft}
-                            disabled={transcriptDraftLoading || !encounterId}
-                            className="rounded-full border border-sky-200 bg-white px-3 py-1.5 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
-                            title="Generate note suggestions from transcript"
-                          >
-                            {transcriptDraftLoading ? 'Reviewing...' : 'Generate note suggestions from transcript'}
-                          </button>
-                        </div>
-
-                        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-sky-700">
-                          <span className="rounded-full bg-white/80 px-2 py-0.5">Local live segments: {captionTranscript.length}</span>
-                          <span className="rounded-full bg-white/80 px-2 py-0.5">Mode: review required</span>
-                          <span className="rounded-full bg-white/80 px-2 py-0.5">Action: append only</span>
-                          <span className="rounded-full bg-white/80 px-2 py-0.5">Position: review after core notes</span>
-                        </div>
-
-                        {transcriptDraftError ? (
-                          <div className="mt-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700">
-                            {transcriptDraftError}
-                          </div>
-                        ) : null}
-
-                        {transcriptNoteSuggestions.length > 0 ? (
-                          <div className="mt-3 space-y-2">
-                            {transcriptNoteSuggestions.map((suggestion) => (
-                              <div
-                                key={suggestion.id}
-                                className="rounded-lg border border-sky-100 bg-white p-2 shadow-sm"
-                              >
-                                <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-sky-800">
-                                      {noteSuggestionLabel(String(suggestion.section || 'history'))}
-                                    </span>
-                                    {suggestion.applied ? (
-                                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Applied</span>
-                                    ) : null}
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => applyTranscriptSuggestion(suggestion)}
-                                    disabled={!!suggestion.applied}
-                                    className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    {suggestion.applied ? 'Added' : 'Append to SOAP'}
-                                  </button>
-                                </div>
-                                <div className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">
-                                  {suggestion.suggestedText}
-                                </div>
+                        <section className="rounded-xl border border-sky-100 bg-sky-50/70 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="text-xs font-semibold text-sky-900">Transcript-assisted note suggestions</div>
+                              <div className="mt-0.5 text-[11px] leading-relaxed text-sky-700">
+                                Uses persisted final transcript segments when transcription is available. Nothing enters the record until the clinician applies a suggestion. Plan, safety-netting and follow-up suggestions are routed to Conclusions rather than duplicated in Clinical Note.
                               </div>
-                            ))}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={generateTranscriptNoteDraft}
+                              disabled={transcriptDraftLoading || !encounterId}
+                              className="rounded-full border border-sky-200 bg-white px-3 py-1.5 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {transcriptDraftLoading ? 'Reviewing…' : 'Generate suggestions from transcript'}
+                            </button>
                           </div>
-                        ) : null}
-                      </div>
 
+                          <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-sky-700">
+                            <span className="rounded-full bg-white/80 px-2 py-0.5">Local live segments: {captionTranscript.length}</span>
+                            <span className="rounded-full bg-white/80 px-2 py-0.5">Clinician review required</span>
+                            <span className="rounded-full bg-white/80 px-2 py-0.5">Append only</span>
+                            <span className="rounded-full bg-white/80 px-2 py-0.5">Position: after core note</span>
+                          </div>
+
+                          {transcriptDraftError ? <div className="mt-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700">{transcriptDraftError}</div> : null}
+
+                          {transcriptNoteSuggestions.length > 0 ? (
+                            <div className="mt-3 space-y-2">
+                              {transcriptNoteSuggestions.map((suggestion) => (
+                                <div key={suggestion.id} className="rounded-lg border border-sky-100 bg-white p-2 shadow-sm">
+                                  <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-sky-800">{noteSuggestionLabel(String(suggestion.section || 'history'))}</span>
+                                      {suggestion.applied ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Applied</span> : null}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => void applyTranscriptSuggestion(suggestion)}
+                                      disabled={!!suggestion.applied}
+                                      className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {suggestion.applied ? 'Added' : `Add to ${noteSuggestionLabel(String(suggestion.section || 'history'))}`}
+                                    </button>
+                                  </div>
+                                  <div className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{suggestion.suggestedText}</div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </section>
+                      </div>
                     </Card>
                   )}
 
@@ -3115,7 +3052,6 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                           ).trim()
                         )
                         .filter(Boolean)}
-                      icd10Suggestions={ICD10_SUGGESTIONS}
                       onToast={pushToast}
                       onAudit={audit}
                       onSummaryChange={setErxSummary}
@@ -3147,7 +3083,9 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                         clinicName={clinicNameParam}
                         clinicLogoUrl="/logo.png"
                         clinicAddress={clinicAddressParam}
+                        simulation={isSimulationSession}
                         onEnd={handleSessionEnd}
+                        onReviewOrders={() => setUi('rightTab', 'erx')}
                       />
                     </Card>
                   )}
@@ -3156,7 +3094,6 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                     <InsightPane
                       dense={dense}
                       soap={soap}
-                      patientEducation={patientEducation}
                       profile={profile}
                       appt={{ reason: appt.reason, clinicianName: appt.clinicianName, patientName: appt.patientName }}
                       patientAllergies={patientAllergies}
@@ -3165,7 +3102,6 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                       contextStatus={contextStatus}
                       contextError={contextError}
                       onChangeSoap={(next) => setSoap(next)}
-                      onChangePatientEducation={setPatientEducation}
                       onToast={pushToast}
                       onShowSoapTab={() => setUi('rightTab', 'soap')}
                     />

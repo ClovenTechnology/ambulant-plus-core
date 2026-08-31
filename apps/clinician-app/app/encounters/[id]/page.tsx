@@ -19,6 +19,8 @@ type Appt = {
   notes?: string;
   diagnosis?: string;
   disposition?: string;
+  encounterId?: string | null;
+  patientId?: string | null;
 };
 
 type PaymentMethod = 'self-pay-card' | 'medical-aid' | 'voucher-promo' | 'unknown';
@@ -87,6 +89,38 @@ type ClaimSummary = {
   payment: ClaimPayment;
 };
 
+type MedicationDraft = {
+  drug: string;
+  strength?: string;
+  form?: string;
+  dose?: string;
+  route?: string;
+  freq?: string;
+  duration?: string;
+  qty?: string;
+  refills?: number;
+  notes?: string;
+  rxcui?: string;
+  nappi?: string;
+};
+
+type LabDraft = {
+  test: string;
+  priority?: string;
+  specimen?: string;
+  icd?: string;
+  instructions?: string;
+  catalogCode?: string;
+  catalogSystem?: string;
+};
+
+type EncounterOrderDraft = {
+  medications: MedicationDraft[];
+  labs: LabDraft[];
+  hasMedicationDraft: boolean;
+  hasLabDraft: boolean;
+};
+
 export default function FinalizeEncounter({ params }: { params: { id: string } }) {
   const { id } = params;
 
@@ -103,6 +137,70 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
   const [claimErr, setClaimErr] = useState<string | null>(null);
   const [claimOutcome, setClaimOutcome] = useState<string | null>(null);
   const [showVoucherCode, setShowVoucherCode] = useState(false);
+  const [encounterRef, setEncounterRef] = useState(id);
+  const [orderDraft, setOrderDraft] = useState<EncounterOrderDraft | null>(null);
+  const [orderDraftLoading, setOrderDraftLoading] = useState(false);
+  const [orderDraftError, setOrderDraftError] = useState<string | null>(null);
+  const [orderFinalizing, setOrderFinalizing] = useState<'medications' | 'labs' | null>(null);
+  const [showOrderPreview, setShowOrderPreview] = useState(false);
+
+  const loadOrderDraft = async (targetEncounterId: string) => {
+    if (!targetEncounterId) return;
+    setOrderDraftLoading(true);
+    setOrderDraftError(null);
+    try {
+      const r = await fetch(`/api/encounters/${encodeURIComponent(targetEncounterId)}/erx`, {
+        cache: 'no-store',
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok || data?.ok === false) {
+        throw new Error(data?.error || `HTTP ${r.status}`);
+      }
+      const draft = data?.draft || {};
+      setOrderDraft({
+        medications: Array.isArray(draft.medications) ? draft.medications : [],
+        labs: Array.isArray(draft.labs) ? draft.labs : [],
+        hasMedicationDraft: Boolean(draft.hasMedicationDraft),
+        hasLabDraft: Boolean(draft.hasLabDraft),
+      });
+    } catch (e: any) {
+      setOrderDraftError(e?.message || 'Unable to load saved order drafts.');
+      setOrderDraft(null);
+    } finally {
+      setOrderDraftLoading(false);
+    }
+  };
+
+  const finalizeSavedOrderDraft = async (scope: 'medications' | 'labs') => {
+    if (!orderDraft) return;
+    const rows = scope === 'medications' ? orderDraft.medications : orderDraft.labs;
+    if (!rows.length) return;
+
+    setOrderFinalizing(scope);
+    setOrderDraftError(null);
+    try {
+      const r = await fetch(`/api/encounters/${encodeURIComponent(encounterRef)}/erx`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'finalize',
+          scope,
+          medications: scope === 'medications' ? orderDraft.medications : [],
+          labs: scope === 'labs' ? orderDraft.labs : [],
+        }),
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok || data?.ok === false) {
+        throw new Error(data?.message || data?.error || `HTTP ${r.status}`);
+      }
+      await loadOrderDraft(encounterRef);
+      setShowOrderPreview(false);
+    } catch (e: any) {
+      setOrderDraftError(e?.message || 'The saved order draft could not be finalized.');
+    } finally {
+      setOrderFinalizing(null);
+    }
+  };
 
   const load = async () => {
     try {
@@ -112,22 +210,26 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
+      const resolvedEncounterId = String(data?.encounterId || id).trim() || id;
       setA(data);
+      setEncounterRef(resolvedEncounterId);
       setNotes(data?.notes || '');
       setDx(data?.diagnosis || '');
       setDisp((data?.disposition as any) || 'home');
+      void loadOrderDraft(resolvedEncounterId);
+      void loadClaim(resolvedEncounterId);
     } catch (e: any) {
       setErr(`Failed to load appointment: ${e?.message || 'error'}`);
     }
   };
 
-  const loadClaim = async () => {
+  const loadClaim = async (targetEncounterId = encounterRef) => {
     setClaimLoading(true);
     setClaimErr(null);
     setClaimOutcome(null);
     try {
       const r = await fetch(
-        `${CLIN}/api/claims?encounterId=${encodeURIComponent(id)}`,
+        `${CLIN}/api/claims?encounterId=${encodeURIComponent(targetEncounterId)}`,
         { cache: 'no-store' },
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -139,7 +241,7 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
         : [];
       // Prefer exact encounterId match; fallback to first item if any.
       const match =
-        items.find((c) => String(c.encounterId) === String(id)) ||
+        items.find((c) => String(c.encounterId) === String(targetEncounterId)) ||
         items[0] ||
         null;
       setClaim(match || null);
@@ -159,7 +261,7 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
       setClaimErr(null);
       setClaimOutcome(null);
       const payload: any = {
-        encounterId: id,
+        encounterId: encounterRef,
         patientName: a?.patientName,
         diagnosisText: dx || undefined,
       };
@@ -194,8 +296,7 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
   };
 
   useEffect(() => {
-    load();
-    loadClaim();
+    void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -226,7 +327,7 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
       // Prepare a claim package for this encounter and then reload claim summary if available
       try {
         const claimResult = await autoSubmitClaim();
-        await loadClaim().catch(() => undefined);
+        await loadClaim(encounterRef).catch(() => undefined);
         alert(`Encounter saved and completed. ${formatClaimOutcomeMessage(claimResult)}`);
       } catch {
         // Appointment save succeeded, but claim failed – surface nicely
@@ -341,14 +442,14 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
 
           <div className="flex gap-2">
             <a
-              href={`/orders/new?encounterId=${encodeURIComponent(id)}`}
+              href={`/orders/new?encounterId=${encodeURIComponent(encounterRef)}`}
               className="rounded bg-indigo-600 px-3 py-1 text-white hover:bg-indigo-700"
             >
               Write eRx
             </a>
             <a
               href={`/orders/new?encounterId=${encodeURIComponent(
-                id,
+                encounterRef,
               )}&tab=lab`}
               className="rounded border bg-white px-3 py-1 hover:bg-gray-50"
             >
@@ -363,6 +464,79 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
           </div>
         </div>
       </div>
+
+      {(orderDraftLoading || orderDraftError || orderDraft?.hasMedicationDraft || orderDraft?.hasLabDraft) ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-amber-950">Saved encounter orders</div>
+              <div className="mt-1 text-xs text-amber-800">
+                Draft prescriptions and lab orders survive room exit or network loss. They remain unissued until you explicitly review and finalize them.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowOrderPreview((value) => !value)}
+              disabled={!orderDraft?.hasMedicationDraft && !orderDraft?.hasLabDraft}
+              className="rounded border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-950 disabled:opacity-50"
+            >
+              {showOrderPreview ? 'Hide preview' : 'Preview saved orders'}
+            </button>
+          </div>
+
+          {orderDraftLoading ? <div className="mt-3 text-xs text-amber-800">Loading saved orders...</div> : null}
+          {orderDraftError ? <div className="mt-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{orderDraftError}</div> : null}
+
+          {showOrderPreview && orderDraft ? (
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-amber-200 bg-white p-3">
+                <div className="text-sm font-semibold">Prescription draft</div>
+                {orderDraft.medications.length ? (
+                  <div className="mt-2 space-y-2">
+                    {orderDraft.medications.map((medication, index) => (
+                      <div key={`${medication.drug}-${index}`} className="rounded border p-2 text-xs">
+                        <div className="font-semibold text-slate-900">{medication.drug} {medication.strength || ''} {medication.form || ''}</div>
+                        <div className="mt-1 text-slate-600">Dose: {medication.dose || '-'} · Route: {medication.route || '-'} · Frequency: {medication.freq || '-'}</div>
+                        <div className="mt-1 text-slate-600">Duration: {medication.duration || '-'} · Quantity: {medication.qty || '-'} · Repeats: {medication.refills || 0}</div>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      disabled={orderFinalizing !== null}
+                      onClick={() => void finalizeSavedOrderDraft('medications')}
+                      className="rounded bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      {orderFinalizing === 'medications' ? 'Finalizing...' : 'Finalize & issue prescription'}
+                    </button>
+                  </div>
+                ) : <div className="mt-2 text-xs text-slate-500">No unfinalized prescription draft.</div>}
+              </div>
+
+              <div className="rounded-lg border border-amber-200 bg-white p-3">
+                <div className="text-sm font-semibold">Lab order draft</div>
+                {orderDraft.labs.length ? (
+                  <div className="mt-2 space-y-2">
+                    {orderDraft.labs.map((lab, index) => (
+                      <div key={`${lab.test}-${index}`} className="rounded border p-2 text-xs">
+                        <div className="font-semibold text-slate-900">{lab.test}</div>
+                        <div className="mt-1 text-slate-600">Priority: {lab.priority || '-'} · Specimen: {lab.specimen || '-'} · ICD-10: {lab.icd || '-'}</div>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      disabled={orderFinalizing !== null}
+                      onClick={() => void finalizeSavedOrderDraft('labs')}
+                      className="rounded bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      {orderFinalizing === 'labs' ? 'Finalizing...' : 'Finalize & issue lab order'}
+                    </button>
+                  </div>
+                ) : <div className="mt-2 text-xs text-slate-500">No unfinalized lab order draft.</div>}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <div className="grid gap-3">
         <label className="text-sm">

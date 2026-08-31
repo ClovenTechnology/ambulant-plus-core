@@ -5,6 +5,7 @@ import {
   ensureClinicianSelfOrPrivileged,
   requireClinicianAuth,
 } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -91,6 +92,22 @@ function normaliseAppointment(a: any, clinicianId: string) {
   };
 }
 
+function trustedGatewayHeaders(req: NextRequest, trustedIdentity: string) {
+  const headers = new Headers({
+    accept: 'application/json',
+    'x-ambulant-identity': trustedIdentity,
+  });
+
+  const authorization = req.headers.get('authorization');
+  const requestId = req.headers.get('x-request-id');
+  const correlationId = req.headers.get('x-correlation-id');
+  if (authorization) headers.set('authorization', authorization);
+  if (requestId) headers.set('x-request-id', requestId);
+  if (correlationId) headers.set('x-correlation-id', correlationId);
+
+  return headers;
+}
+
 export async function GET(req: NextRequest) {
   const gw = gatewayBase();
   if (!gw) return json({ ok: false, error: 'api_gateway_url_missing', appointments: [] }, 500);
@@ -118,18 +135,23 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, error: 'missing_clinician_identity', appointments: [] }, 401);
     }
 
+    let trustedIdentity: string;
+    try {
+      trustedIdentity = createTrustedClinicianIdentityHeader(req);
+    } catch (error: any) {
+      return json(
+        { ok: false, error: String(error?.message || 'identity_bridge_failed'), appointments: [] },
+        Number(error?.status || 500),
+      );
+    }
+
     const upstream = new URL('/api/appointments', gw);
     upstream.searchParams.set('clinicianId', clinicianId);
     upstream.searchParams.set('excludeSimulation', '1');
 
     const r = await fetch(upstream.toString(), {
       method: 'GET',
-      headers: {
-        accept: 'application/json',
-        'x-role': auth.role,
-        'x-uid': auth.session?.sub || auth.clinician?.userId || clinicianId,
-        'x-clinician-id': clinicianId,
-      },
+      headers: trustedGatewayHeaders(req, trustedIdentity),
       cache: 'no-store',
     });
 

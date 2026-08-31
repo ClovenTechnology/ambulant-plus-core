@@ -151,7 +151,15 @@ async function requireEncounter(encounterId: string) {
   const encounter = await prisma.encounter.findUnique({
     where: { id: encounterId },
     include: {
-      appointments: { orderBy: { startsAt: 'desc' }, take: 20 },
+      appointments: {
+        orderBy: { startsAt: 'desc' },
+        take: 20,
+        include: {
+          participants: {
+            select: { partyId: true, role: true, status: true, clinicianId: true, userId: true },
+          },
+        },
+      },
       consultationInviteQuotes: { include: { lines: true }, orderBy: { createdAt: 'desc' }, take: 50 },
       collaborativeDrafts: { include: { lines: true }, orderBy: { createdAt: 'desc' }, take: 50 },
     },
@@ -166,32 +174,78 @@ async function requireEncounter(encounterId: string) {
   return encounter;
 }
 
-function clinicianAllowed(encounter: any, uid: string) {
-  if (!uid) return false;
-  if (encounter.clinicianId === uid) return true;
-  if (Array.isArray(encounter.appointments) && encounter.appointments.some((a: any) => a.clinicianId === uid)) return true;
+function unique(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map((value) => clean(value, 240)).filter(Boolean)));
+}
+
+async function resolveClinicianRefs(who: Who) {
+  const identityRefs = unique([who.uid, who.actorRefId]);
+  if (!identityRefs.length) return [];
+
+  const profiles = await prisma.clinicianProfile.findMany({
+    where: {
+      OR: identityRefs.flatMap((identityRef) => [
+        { id: identityRef },
+        { userId: identityRef },
+      ]),
+    },
+    select: { id: true, userId: true },
+    take: 10,
+  });
+
+  return unique([
+    ...identityRefs,
+    ...profiles.map((profile) => profile.id),
+    ...profiles.map((profile) => profile.userId),
+  ]);
+}
+
+function participantRefs(participant: any) {
+  const partyId = clean(participant?.partyId, 240);
+  return unique([
+    participant?.clinicianId,
+    participant?.userId,
+    partyId,
+    partyId.replace(/^clin?[-_:]/i, ''),
+  ]);
+}
+
+function clinicianAllowed(encounter: any, clinicianRefs: string[]) {
+  if (!clinicianRefs.length) return false;
+  const matches = (value: unknown) => clinicianRefs.includes(clean(value, 240));
+
+  if (matches(encounter.clinicianId)) return true;
+  if (
+    Array.isArray(encounter.appointments) &&
+    encounter.appointments.some((appointment: any) => {
+      if (matches(appointment?.clinicianId)) return true;
+      return (appointment?.participants || []).some((participant: any) => {
+        const role = clean(participant?.role, 80).toUpperCase();
+        const status = clean(participant?.status, 80).toUpperCase();
+        if (!['LEAD_CLINICIAN', 'CO_CLINICIAN', 'ADVISOR'].includes(role)) return false;
+        if (status && !['ACCEPTED', 'JOINED'].includes(status)) return false;
+        return participantRefs(participant).some((ref) => clinicianRefs.includes(ref));
+      });
+    })
+  ) return true;
 
   if (
     Array.isArray(encounter.consultationInviteQuotes) &&
-    encounter.consultationInviteQuotes.some((q: any) =>
-      q.leadClinicianId === uid ||
-      q.requestedByClinicianId === uid ||
-      (Array.isArray(q.lines) && q.lines.some((line: any) => line.clinicianId === uid))
+    encounter.consultationInviteQuotes.some((quote: any) =>
+      matches(quote.leadClinicianId) ||
+      matches(quote.requestedByClinicianId) ||
+      (Array.isArray(quote.lines) && quote.lines.some((line: any) => matches(line.clinicianId)))
     )
-  ) {
-    return true;
-  }
+  ) return true;
 
   if (
     Array.isArray(encounter.collaborativeDrafts) &&
-    encounter.collaborativeDrafts.some((d: any) =>
-      d.leadClinicianId === uid ||
-      d.requestedByClinicianId === uid ||
-      (Array.isArray(d.lines) && d.lines.some((line: any) => line.clinicianId === uid))
+    encounter.collaborativeDrafts.some((draft: any) =>
+      matches(draft.leadClinicianId) ||
+      matches(draft.requestedByClinicianId) ||
+      (Array.isArray(draft.lines) && draft.lines.some((line: any) => matches(line.clinicianId)))
     )
-  ) {
-    return true;
-  }
+  ) return true;
 
   return false;
 }
@@ -200,7 +254,7 @@ function patientAllowed(encounter: any, uid: string, actorRefId?: string | null)
   return !!uid && (encounter.patientId === uid || encounter.patientId === actorRefId);
 }
 
-function assertCanReadTranscript(encounter: any, who: Who) {
+async function assertCanReadTranscript(encounter: any, who: Who) {
   if (!who.uid) {
     const err = new Error('unauthorized') as Error & { status?: number };
     err.status = 401;
@@ -208,7 +262,10 @@ function assertCanReadTranscript(encounter: any, who: Who) {
   }
 
   if (who.role === 'system' || who.role === 'admin' || who.role === 'admin_staff') return;
-  if (who.role === 'clinician' && clinicianAllowed(encounter, who.uid)) return;
+  if (who.role === 'clinician') {
+    const refs = await resolveClinicianRefs(who);
+    if (clinicianAllowed(encounter, refs)) return;
+  }
   if (who.role === 'patient' && patientAllowed(encounter, who.uid, who.actorRefId)) return;
 
   const err = new Error('forbidden') as Error & { status?: number };
@@ -216,7 +273,7 @@ function assertCanReadTranscript(encounter: any, who: Who) {
   throw err;
 }
 
-function assertCanWriteTranscript(encounter: any, who: Who) {
+async function assertCanWriteTranscript(encounter: any, who: Who) {
   if (!who.uid) {
     const err = new Error('unauthorized') as Error & { status?: number };
     err.status = 401;
@@ -224,7 +281,10 @@ function assertCanWriteTranscript(encounter: any, who: Who) {
   }
 
   if (who.role === 'system' || who.role === 'admin' || who.role === 'admin_staff') return;
-  if (who.role === 'clinician' && clinicianAllowed(encounter, who.uid)) return;
+  if (who.role === 'clinician') {
+    const refs = await resolveClinicianRefs(who);
+    if (clinicianAllowed(encounter, refs)) return;
+  }
 
   const err = new Error('forbidden') as Error & { status?: number };
   err.status = 403;
@@ -250,7 +310,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (!encounterId) return json({ ok: false, error: 'encounter_id_required' }, 400);
 
     const encounter = await requireEncounter(encounterId);
-    assertCanReadTranscript(encounter, who);
+    await assertCanReadTranscript(encounter, who);
 
     const { transcript } = transcriptFromSummary(encounter.summaryPayload);
 
@@ -277,7 +337,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!segment) return json({ ok: false, error: 'invalid_caption_segment' }, 400);
 
     const encounter = await requireEncounter(encounterId);
-    assertCanWriteTranscript(encounter, who);
+    await assertCanWriteTranscript(encounter, who);
 
     const { summary, transcript } = transcriptFromSummary(encounter.summaryPayload);
 
