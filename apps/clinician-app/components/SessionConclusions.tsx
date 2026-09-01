@@ -140,8 +140,8 @@ function FollowupSlotPicker({
     let cancelled = false;
 
     async function loadLabs() {
-      // Try live from encounter → eRx
-      if (encounterId) {
+      // Real consultations read live encounter orders. Simulation never touches production order state.
+      if (!simulation && encounterId) {
         try {
           const res = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/erx`, { cache: 'no-store' });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -231,6 +231,34 @@ function FollowupSlotPicker({
     (async () => {
       setBusy(true);
       try {
+        if (simulation) {
+          const out: Record<string, Slot[]> = {};
+          const d0 = new Date();
+          d0.setHours(0, 0, 0, 0);
+          const durMs = (slotMinutes || 15) * 60 * 1000;
+          for (let i = 0; i < 14; i++) {
+            const d = new Date(d0);
+            d.setDate(d0.getDate() + i);
+            const key = d.toISOString().slice(0, 10);
+            if (d.getDay() === 0) {
+              out[key] = [];
+              continue;
+            }
+            const mk = (h: number): Slot => {
+              const s = new Date(d);
+              s.setHours(h, 0, 0, 0);
+              const e = new Date(s.getTime() + durMs);
+              return { start: s.toISOString(), end: e.toISOString(), status: 'free', source: 'mock' };
+            };
+            out[key] = [mk(9), mk(14)];
+          }
+          if (!cancelled) {
+            setSlots(out);
+            setSlotsSource('mock');
+          }
+          return;
+        }
+
         const d0 = new Date();
         d0.setHours(0, 0, 0, 0);
         const dEnd = new Date(d0);
@@ -497,13 +525,15 @@ export default function SessionConclusions({
   clinicLogoUrl,
   clinicAddress,
   simulation = false,
+  medicationDraftCount = 0,
+  labDraftCount = 0,
 }: {
   clinicianId: string;
   clinicianName?: string;
   encounterId?: string;
   apptStartISO?: string;
   slotMinutes?: number;
-  onEnd?: () => void;
+  onEnd?: () => void | Promise<void>;
   onReviewOrders?: () => void;
   referralSlot?: React.ReactNode;
   patientId?: string;
@@ -512,6 +542,8 @@ export default function SessionConclusions({
   clinicLogoUrl?: string;
   clinicAddress?: string;
   simulation?: boolean;
+  medicationDraftCount?: number;
+  labDraftCount?: number;
 }) {
   const [tab, setTab] = useState<RightTab>('end');
 
@@ -598,7 +630,7 @@ export default function SessionConclusions({
         // local recovery cache is best effort only
       }
 
-      if (!encounterId) {
+      if (!encounterId || simulation) {
         if (!cancelled && local) setDraft(local);
         if (!cancelled) setDraftHydrated(true);
         return;
@@ -638,12 +670,16 @@ export default function SessionConclusions({
       }
     })();
     return () => { cancelled = true; };
-  }, [encounterId, emptyDraft, storageKey]);
+  }, [encounterId, emptyDraft, simulation, storageKey]);
 
   useEffect(() => {
     if (!draftHydrated) return;
     try { localStorage.setItem(storageKey, JSON.stringify(draft)); } catch {}
-    if (!encounterId) return;
+    if (!encounterId || simulation) {
+      setSaveState('saved');
+      setSavedAt(Date.now());
+      return;
+    }
     setSaveState('saving');
     const id = window.setTimeout(() => {
       void fetch(`/api/encounters/${encodeURIComponent(encounterId)}/draft`, {
@@ -660,11 +696,11 @@ export default function SessionConclusions({
       });
     }, 1000);
     return () => window.clearTimeout(id);
-  }, [draft, draftHydrated, encounterId, storageKey]);
+  }, [draft, draftHydrated, encounterId, simulation, storageKey]);
 
   async function saveDraftNow() {
     try { localStorage.setItem(storageKey, JSON.stringify(draft)); } catch {}
-    if (!encounterId) { setSavedAt(Date.now()); return true; }
+    if (!encounterId || simulation) { setSaveState('saved'); setSavedAt(Date.now()); return true; }
     setSaveState('saving');
     try {
       const res = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/draft`, {
@@ -707,6 +743,7 @@ export default function SessionConclusions({
   }
 
   async function getOutstandingOrderDrafts() {
+    if (simulation) return { medicationDraftCount, labDraftCount };
     if (!encounterId) return { medicationDraftCount: 0, labDraftCount: 0 };
     try {
       const res = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/erx`, { cache: 'no-store', credentials: 'same-origin' });
@@ -723,9 +760,23 @@ export default function SessionConclusions({
   }
 
   async function finalizeEncounterAndClaim() {
+    if (simulation) {
+      setClosing(true);
+      try {
+        const saved = await saveDraftNow();
+        if (!saved) throw new Error('simulation_conclusions_draft_save_failed');
+        await onEnd?.();
+        alert('Simulation consultation ended. Conclusions and Orders remained simulation-only; no production claim, eRx/lab issuance, follow-up booking, CarePort or MedReach workflow was invoked.');
+        return { ok: true, outcome: 'not_applicable', reason: 'simulation_only' } as ClaimAutoSubmitResult;
+      } finally {
+        setClosing(false);
+        setEndGuard(null);
+      }
+    }
+
     if (!encounterId) {
       await saveDraftNow();
-      onEnd?.();
+      await onEnd?.();
       return null as ClaimAutoSubmitResult | null;
     }
 
@@ -771,7 +822,7 @@ export default function SessionConclusions({
         console.warn('[SessionConclusions] claim package preparation failed after encounter closure', error);
       }
 
-      onEnd?.();
+      await onEnd?.();
       alert(`Consultation ended. Unfinalized Orders, if retained, remain drafts and were not issued. ${formatClaimOutcomeMessage(claimResult)}`);
       return claimResult;
     } finally {
@@ -790,6 +841,16 @@ export default function SessionConclusions({
   }
 
   const handleFollowupAction = async (mode: 'confirm' | 'recommend', slot: { start: string; end: string }) => {
+    const statement = mode === 'confirm'
+      ? `Follow-up selected for ${new Date(slot.start).toLocaleString()}.`
+      : `Follow-up recommended for ${new Date(slot.start).toLocaleString()} with a 24-hour simulated hold.`;
+
+    if (simulation) {
+      setDraft((current) => ({ ...current, followUpNote: current.followUpNote ? `${current.followUpNote}\n\n${statement}` : statement }));
+      alert(`${statement} Simulation only: no production follow-up booking or calendar hold was created. The consultation remains open until you explicitly end it.`);
+      return;
+    }
+
     if (!encounterId) {
       alert('Cannot create follow-up: no encounterId found.');
       return;
@@ -800,11 +861,11 @@ export default function SessionConclusions({
       const res = await fetch('/api/followups', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json().catch(() => null as any);
       if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
-      const statement = mode === 'confirm'
+      const productionStatement = mode === 'confirm'
         ? `Follow-up booked for ${new Date(slot.start).toLocaleString()}.`
         : `Follow-up recommended for ${new Date(slot.start).toLocaleString()} with a 24-hour hold.`;
-      setDraft((current) => ({ ...current, followUpNote: current.followUpNote ? `${current.followUpNote}\n\n${statement}` : statement }));
-      alert(`${statement} The consultation remains open until you explicitly end it.`);
+      setDraft((current) => ({ ...current, followUpNote: current.followUpNote ? `${current.followUpNote}\n\n${productionStatement}` : productionStatement }));
+      alert(`${productionStatement} The consultation remains open until you explicitly end it.`);
     } catch (error) {
       console.error('[SessionConclusions] follow-up action failed', error);
       alert('Failed to create follow-up. The consultation remains open.');
@@ -895,7 +956,7 @@ export default function SessionConclusions({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-            <div className={`text-xs ${saveState === 'error' ? 'text-rose-700' : 'text-gray-600'}`}>{saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Server draft save needs attention' : savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString()}` : 'Draft ready'}</div>
+            <div className={`text-xs ${saveState === 'error' ? 'text-rose-700' : 'text-gray-600'}`}>{simulation ? (savedAt ? `Simulation draft saved locally ${new Date(savedAt).toLocaleTimeString()}` : 'Simulation draft stays local') : saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Server draft save needs attention' : savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString()}` : 'Draft ready'}</div>
             <div className="ml-auto flex gap-2">
               <button type="button" className="rounded border bg-white px-3 py-1.5 text-sm" onClick={() => void saveDraftNow()} disabled={closing}>Save Draft</button>
               <button type="button" className="rounded border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-900 hover:bg-emerald-100 disabled:opacity-50" onClick={() => void requestEndSession()} disabled={closing}>{closing ? 'Ending…' : 'End Consultation'}</button>

@@ -535,9 +535,11 @@ export default function ErxComposer({
   return (
     <Card title="Orders" dense={dense} gradient>
       <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-        <div className="font-semibold text-slate-900">Clinician authorship only</div>
+        <div className="font-semibold text-slate-900">{simulation ? 'Simulation order authoring only' : 'Clinician authorship only'}</div>
         <div className="mt-1 leading-relaxed">
-          Finalizing an order issues it to the patient record. It does not send a marketplace request. The patient later decides whether to use CarePort or MedReach and chooses among available providers based on stock, price, ETA, proximity or preference.
+          {simulation
+            ? 'Simulation Orders remain local to this training session. Finalizing does not update a production patient record, CarePort, MedReach, a pharmacy or a laboratory.'
+            : 'Finalizing an order issues it to the patient record. It does not send a marketplace request. The patient later decides whether to use CarePort or MedReach and chooses among available providers based on stock, price, ETA, proximity or preference.'}
         </div>
       </div>
 
@@ -549,7 +551,7 @@ export default function ErxComposer({
           Labs · {stateBadge(labState)}
         </button>
         <span className={`ml-auto text-[11px] ${autosaveState === 'error' ? 'text-rose-700' : 'text-slate-500'}`}>
-          {autosaveState === 'saving' ? 'Saving draft…' : autosaveState === 'saved' ? 'Server draft saved' : autosaveState === 'error' ? 'Draft save needs attention' : ''}
+          {autosaveState === 'saving' ? 'Saving draft…' : autosaveState === 'saved' ? (simulation ? 'Simulation draft saved locally' : 'Server draft saved') : autosaveState === 'error' ? 'Draft save needs attention' : ''}
         </span>
       </div>
 
@@ -638,7 +640,7 @@ export default function ErxComposer({
         <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
           <div className="font-semibold">{erxResult.scope === 'labs' ? 'Lab order' : 'Prescription'}: {erxResult.status}</div>
           {erxResult.id ? <div className="mt-1">Reference: <span className="font-mono">{erxResult.id}</span></div> : null}
-          <div className="mt-1">Fulfilment owner: patient · marketplace dispatch: none</div>
+          <div className="mt-1">{simulation ? 'Simulation only · no production patient record or marketplace dispatch' : 'Fulfilment owner: patient · marketplace dispatch: none'}</div>
         </div>
       ) : null}
 
@@ -671,7 +673,7 @@ export default function ErxComposer({
                 </div>
               ))}
             </div>
-            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">Finalizing issues this clinician-authored order to the patient's record only. CarePort/MedReach discovery is a later patient-owned action.</div>
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">{simulation ? 'Simulation preview only. Finalizing remains inside this training session and does not issue to a production patient record or trigger CarePort/MedReach.' : "Finalizing issues this clinician-authored order to the patient's record only. CarePort/MedReach discovery is a later patient-owned action."}</div>
           </div>
         </div>
       ) : null}

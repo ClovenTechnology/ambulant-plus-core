@@ -2363,7 +2363,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
         'Session incomplete'
       );
       audit('encounter.end.missing_session', { encounterId: encounterId || null });
-      return;
+      throw new Error('consultation_session_missing');
     }
 
     try {
@@ -2382,6 +2382,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
             riskAssessment: soap.riskAssessment || '',
           },
           erxSummary,
+          simulation: isSimulationSession,
           roomId,
         },
       });
@@ -2400,8 +2401,9 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
         sessionId: consultationSession.id,
         error: err?.message || 'unknown_error',
       });
+      throw err instanceof Error ? err : new Error(err?.message || 'consultation_completion_failed');
     }
-  }, [consultationSession, soap, erxSummary, roomId, encounterId, pushToast, audit]);
+  }, [consultationSession, soap, erxSummary, isSimulationSession, roomId, encounterId, pushToast, audit]);
 
   // =========================
   // Render helpers
@@ -3084,6 +3086,8 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                         clinicLogoUrl="/logo.png"
                         clinicAddress={clinicAddressParam}
                         simulation={isSimulationSession}
+                        medicationDraftCount={erxSummary.medicationDraftCount || 0}
+                        labDraftCount={erxSummary.labDraftCount || 0}
                         onEnd={handleSessionEnd}
                         onReviewOrders={() => setUi('rightTab', 'erx')}
                       />

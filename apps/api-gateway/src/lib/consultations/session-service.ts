@@ -309,13 +309,40 @@ export async function completeSession(params: {
     throw new Error('Only clinician/admin can complete consultation session');
   }
 
-  const decision = evaluateSessionPolicy({
-    visitMode: session.visitMode,
-    startsAt: session.startedAt ?? new Date(),
-    sessionStarted: Boolean(session.startedAt),
-    encounterReachedClinicalThreshold: params.encounterReachedClinicalThreshold ?? true,
-    referred: params.encounterStatus === 'referred',
+  const appointment = await prisma.appointment.findUnique({
+    where: { id: session.appointmentId },
   });
+  if (!appointment) throw new Error('Appointment not found');
+
+  const appointmentMeta = toMetaObject(appointment.meta);
+  const bookingSource = String(appointment.bookingSource || '').toLowerCase();
+  const billingMode = String(appointmentMeta.billingMode || '').toLowerCase();
+  const metadataSource = String(appointmentMeta.source || '').toLowerCase();
+  const roomId = String(appointment.roomId || session.roomId || '');
+  const isSimulation =
+    bookingSource === 'admin_simulation' ||
+    appointmentMeta.simulation === true ||
+    billingMode === 'simulation' ||
+    metadataSource === 'admin.simulation' ||
+    roomId.startsWith('simulation-');
+
+  const decision = isSimulation
+    ? {
+        outcome: 'COMPLETED' as const,
+        refundType: 'NONE' as const,
+        refundTarget: 'NONE' as const,
+        payoutState: 'ZERO' as const,
+        claimState: 'SUPPRESS' as const,
+        reasonCode: 'SIMULATION_COMPLETED',
+        policyVersion: 'session-policy-v1-simulation',
+      }
+    : evaluateSessionPolicy({
+        visitMode: session.visitMode,
+        startsAt: session.startedAt ?? new Date(),
+        sessionStarted: Boolean(session.startedAt),
+        encounterReachedClinicalThreshold: params.encounterReachedClinicalThreshold ?? true,
+        referred: params.encounterStatus === 'referred',
+      });
 
   const endedAt = session.endedAt ?? new Date();
 
@@ -335,6 +362,14 @@ export async function completeSession(params: {
         ...toMetaObject(session.metadata),
         completedByUserId: params.identity.uid ?? null,
         completedAt: endedAt.toISOString(),
+        ...(isSimulation
+          ? {
+              simulation: true,
+              billingMode: 'simulation',
+              source: appointmentMeta.source || 'admin.simulation',
+              nonBillable: true,
+            }
+          : {}),
       }),
     },
   });
@@ -348,6 +383,26 @@ export async function completeSession(params: {
   });
 
   if (session.encounterId) {
+    const encounter = await prisma.encounter.findUnique({
+      where: { id: session.encounterId },
+      select: { summaryPayload: true },
+    });
+    const existingSummary = toMetaObject(encounter?.summaryPayload);
+    const incomingSummary = toMetaObject(params.summaryPayload);
+    const mergedSummary = {
+      ...existingSummary,
+      ...incomingSummary,
+      ...(isSimulation
+        ? {
+            simulation: true,
+            billingMode: 'simulation',
+            source: existingSummary.source || appointmentMeta.source || 'admin.simulation',
+            sessionNumber: existingSummary.sessionNumber ?? appointmentMeta.sessionNumber ?? null,
+            nonBillable: true,
+          }
+        : {}),
+    };
+
     await prisma.encounter.update({
       where: { id: session.encounterId },
       data: {
@@ -361,8 +416,18 @@ export async function completeSession(params: {
           claimState: decision.claimState,
           reasonCode: decision.reasonCode,
           policyVersion: decision.policyVersion,
+          ...(isSimulation
+            ? {
+                simulation: true,
+                billingMode: 'simulation',
+                nonBillable: true,
+                coverageDecision: 'simulation_not_billable',
+              }
+            : {}),
         }),
-        ...(params.summaryPayload ? { summaryPayload: toInputJsonValue(params.summaryPayload) } : {}),
+        ...(params.summaryPayload || isSimulation
+          ? { summaryPayload: toInputJsonValue(isSimulation ? mergedSummary : params.summaryPayload) }
+          : {}),
       },
     });
   }
