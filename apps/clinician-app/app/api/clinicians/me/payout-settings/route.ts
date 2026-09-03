@@ -1,6 +1,6 @@
 // apps/clinician-app/app/api/clinicians/me/payout-settings/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,35 +16,21 @@ function json(data: any, status = 200) {
   return NextResponse.json(data, { status, headers: { 'cache-control': 'no-store' } });
 }
 
-function clinicianUid(auth: any) {
-  return String(auth?.clinicianId || auth?.clinician?.id || auth?.clinician?.userId || auth?.session?.email || auth?.session?.sub || '').trim();
-}
 
 async function proxy(req: NextRequest, method: 'GET' | 'PUT') {
   if (!GW) return json({ ok: false, error: 'missing_gateway_origin' }, 500);
-
-  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
-  if (!auth.ok) return authErrorResponse(auth);
-
-  const uid = clinicianUid(auth);
-  if (!uid) return json({ ok: false, error: 'missing_clinician_identity' }, 401);
-
+  let identity: string;
+  try { identity = createTrustedClinicianIdentityHeader(req); }
+  catch (err: any) { return json({ ok: false, error: err?.message || 'unauthenticated' }, typeof err?.status === 'number' ? err.status : 401); }
   const init: RequestInit = {
     method,
     cache: 'no-store',
-    headers: {
-      accept: 'application/json',
-      'x-uid': uid,
-      'x-clinician-id': auth.clinicianId,
-      'x-role': auth.role,
-    },
+    headers: { accept: 'application/json', 'x-ambulant-identity': identity },
   };
-
   if (method === 'PUT') {
     (init.headers as any)['content-type'] = 'application/json';
     init.body = JSON.stringify(await req.json().catch(() => ({})));
   }
-
   const res = await fetch(`${GW}/api/clinicians/me/payout-settings`, init);
   const body = await res.json().catch(() => ({}));
   return json(body, res.status);

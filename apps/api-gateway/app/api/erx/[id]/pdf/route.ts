@@ -1,217 +1,99 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
-import { readIdentity } from '@/src/lib/identity';
+import { readIdentity, requireTrustedIdentityInProduction } from '@/src/lib/identity';
+import { getClinicalDocumentBranding } from '@/src/clinical-documents/branding';
+import { renderPrescriptionPdf } from '@/src/clinical-documents/templates';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function clean(value: unknown, max = 2000) {
-  return String(value ?? '').trim().slice(0, max);
-}
-
-function safeText(value: unknown, fallback = '—') {
-  const text = clean(value, 2000).replace(/\s+/g, ' ');
-  return text || fallback;
-}
-
-function parseJsonMaybe(value: unknown) {
-  if (!value) return null;
-  if (typeof value !== 'string') return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-function pdfText(value: unknown) {
-  return safeText(value)
-    .replace(/[^\x20-\x7E]/g, '-')
-    .replace(/\\/g, '\\\\')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)');
-}
-
-function wrapLine(line: string, width = 88) {
-  const words = line.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let current = '';
-
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (next.length > width) {
-      if (current) lines.push(current);
-      current = word;
-    } else {
-      current = next;
-    }
-  }
-
-  if (current) lines.push(current);
-  return lines.length ? lines : [''];
-}
-
-function buildSimplePdf(lines: string[]) {
-  const visibleLines = lines.flatMap((line) => wrapLine(line)).slice(0, 48);
-
-  const stream = [
-    'BT',
-    '/F1 10 Tf',
-    '50 800 Td',
-    ...visibleLines.flatMap((line, index) =>
-      index === 0 ? [`(${pdfText(line)}) Tj`] : ['0 -15 Td', `(${pdfText(line)}) Tj`],
-    ),
-    'ET',
-  ].join('\n');
-
-  const objects = [
-    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
-    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
-    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
-    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
-    `5 0 obj\n<< /Length ${Buffer.byteLength(stream, 'utf8')} >>\nstream\n${stream}\nendstream\nendobj\n`,
-  ];
-
-  let pdf = '%PDF-1.4\n';
-  const offsets = [0];
-
-  for (const obj of objects) {
-    offsets.push(Buffer.byteLength(pdf, 'utf8'));
-    pdf += obj;
-  }
-
-  const xrefOffset = Buffer.byteLength(pdf, 'utf8');
-  pdf += `xref\n0 ${objects.length + 1}\n`;
-  pdf += '0000000000 65535 f \n';
-
-  for (let i = 1; i < offsets.length; i += 1) {
-    pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
-  }
-
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-
-  return Buffer.from(pdf, 'utf8');
-}
+function clean(value: unknown, max = 2000) { return String(value ?? '').trim().slice(0, max); }
+function asObject(value: unknown): Record<string, any> { if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, any>; if (typeof value === 'string') { try { const v = JSON.parse(value); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch {} } return {}; }
 
 async function canReadErx(req: NextRequest, erx: any) {
   const who = readIdentity(req.headers);
+  try { requireTrustedIdentityInProduction(req.headers, who); } catch { return false; }
   if (!who?.uid) return false;
-
-  if (who.role === 'admin') return true;
-
+  if (['admin', 'admin_staff'].includes(String(who.role || '').toLowerCase())) return true;
   if (who.role === 'clinician') {
-    if (erx.clinicianId === who.uid || erx.clinicianId === (who as any).actorRefId) return true;
-
-    const profile = await prisma.clinicianProfile.findFirst({
-      where: { id: erx.clinicianId, userId: who.uid },
-      select: { id: true },
-    });
-
-    return Boolean(profile);
+    if ([who.uid, (who as any).actorRefId].filter(Boolean).includes(erx.clinicianId)) return true;
+    return Boolean(await (prisma as any).clinicianProfile.findFirst({ where: { id: erx.clinicianId, userId: who.uid }, select: { id: true } }));
   }
-
   if (who.role === 'patient') {
-    const candidates = [who.uid, (who as any).actorRefId].map((v) => clean(v, 180)).filter(Boolean);
-    if (candidates.includes(erx.patientId)) return true;
-
-    const profile = await prisma.patientProfile.findFirst({
-      where: { id: erx.patientId, userId: who.uid },
-      select: { id: true },
-    });
-
-    return Boolean(profile);
+    if ([who.uid, (who as any).actorRefId].filter(Boolean).includes(erx.patientId)) return true;
+    return Boolean(await (prisma as any).patientProfile.findFirst({ where: { id: erx.patientId, userId: who.uid }, select: { id: true } }));
   }
-
   return false;
 }
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const id = clean(params.id, 180);
-    if (!id) {
-      return NextResponse.json({ ok: false, error: 'erx_id_required' }, { status: 400 });
-    }
+    if (!id) return NextResponse.json({ ok: false, error: 'erx_id_required' }, { status: 400 });
+    const erx = await (prisma as any).erxOrder.findUnique({ where: { id } });
+    if (!erx) return NextResponse.json({ ok: false, error: 'erx_not_found' }, { status: 404 });
+    if (!(await canReadErx(req, erx))) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
 
-    const erx = await prisma.erxOrder.findUnique({ where: { id } });
-    if (!erx) {
-      return NextResponse.json({ ok: false, error: 'erx_not_found' }, { status: 404 });
-    }
+    const notes = asObject(erx.notes);
+    const issueTime = erx.signedAt || erx.createdAt;
+    const group = erx.signedAt
+      ? await (prisma as any).erxOrder.findMany({ where: { encounterId: erx.encounterId, clinicianId: erx.clinicianId, signedAt: erx.signedAt, kind: 'medication' }, orderBy: { createdAt: 'asc' } })
+      : [erx];
+    const patientSnapshot = asObject(notes.patientSnapshot);
+    const prescriberSnapshot = asObject(notes.prescriberSnapshot);
+    const branding = Object.keys(asObject(notes.documentBrandingSnapshot)).length ? notes.documentBrandingSnapshot : await getClinicalDocumentBranding();
 
-    const allowed = await canReadErx(req, erx);
-    if (!allowed) {
-      return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
-    }
+    const patient = Object.keys(patientSnapshot).length ? patientSnapshot : await (prisma as any).patientProfile.findFirst({ where: { OR: [{ id: erx.patientId }, { userId: erx.patientId }, { mrn: erx.patientId }] }, orderBy: { createdAt: 'desc' } }).catch(() => null);
+    const clinician = Object.keys(prescriberSnapshot).length ? prescriberSnapshot : await (prisma as any).clinicianProfile.findFirst({ where: { OR: [{ id: erx.clinicianId }, { userId: erx.clinicianId }] }, orderBy: { createdAt: 'desc' } }).catch(() => null);
 
-    const notesRaw = parseJsonMaybe(erx.notes);
-    const notes =
-      notesRaw && typeof notesRaw === 'object' && !Array.isArray(notesRaw)
-        ? (notesRaw as Record<string, any>)
-        : {};
-
-    const meds = Array.isArray(erx.meds) ? (erx.meds as unknown[]) : [];
-    const firstMed =
-      (meds.find((m) => m && typeof m === 'object' && !Array.isArray(m)) || null) as
-        | Record<string, any>
-        | null;
-
-    const quantity =
-      notes.quantity && typeof notes.quantity === 'object' && !Array.isArray(notes.quantity)
-        ? (notes.quantity as Record<string, any>)
-        : {};
-
-    const quantityText = firstMed?.quantityText || notes.quantityText || quantity.text || '';
-    const repeats = firstMed?.repeats ?? notes.repeats ?? 0;
-    const currentMedicationSafety = notes.currentMedicationSafety || null;
-
-    const lines = [
-      'Ambulant+ ePrescription',
-      'Contactless Medicine Clinical Document',
-      '',
-      `eRx ID: ${erx.id}`,
-      `Status: ${safeText(erx.status)}`,
-      `Prescription number: ${safeText(erx.rxNumber)}`,
-      `Encounter ID: ${safeText(erx.encounterId)}`,
-      `Patient ID: ${safeText(erx.patientId)}`,
-      `Clinician ID: ${safeText(erx.clinicianId)}`,
-      `Created: ${erx.createdAt.toISOString()}`,
-      '',
-      'Medication',
-      `Name: ${safeText(erx.drug, 'Medication')}`,
-      `Directions: ${safeText(erx.sig, 'Use as directed')}`,
-      `Dispense code: ${safeText(erx.dispenseCode)}`,
-      `Quantity: ${safeText(quantityText)}`,
-      `Repeats: ${safeText(repeats)}`,
-      '',
-      'Clinical safety',
-      `Allergy checked: ${notes?.allergySafety?.checked ? 'Yes' : 'Recorded in order metadata'}`,
-      `Allergy conflicts: ${safeText(notes?.allergySafety?.conflictCount ?? 0)}`,
-      `Current-medication check: ${currentMedicationSafety?.checked ? 'Advisory check completed' : 'Not available'}`,
-      `Current-medication advisories: ${safeText(currentMedicationSafety?.potentialDuplicateCount ?? 0)}`,
-      `Prescribing mode: ${safeText(notes?.authorization?.prescribingMode)}`,
-      '',
-      'Fulfilment',
-      'The clinician authored this ePrescription. The patient must choose CarePort fulfilment, sponsor use, and payment method in the patient app.',
-      '',
-      'Verification',
-      'Generated by Ambulant+ from the live encounter-linked eRx order. Validate against the in-app record before dispensing.',
-    ];
-
-    const pdf = buildSimplePdf(lines);
-    const filename = `ambulant-erx-${id.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
-
-    return new NextResponse(pdf, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="${filename}"`,
-        'Cache-Control': 'no-store',
-      },
+    const meds = group.map((order: any) => {
+      const orderNotes = asObject(order.notes);
+      const snapshots = Array.isArray(order.meds) ? order.meds : [];
+      const med = snapshots.find((v: any) => v && typeof v === 'object' && !Array.isArray(v)) || {};
+      const primary = asObject(med.primaryCoding);
+      return {
+        name: clean(primary.display || order.drug, 260),
+        strength: clean(med.strengthText, 120),
+        form: clean(med.formText, 120),
+        directions: clean(order.sig || [med.doseText, med.routeText, med.frequencyText, med.durationText].filter(Boolean).join(' '), 900),
+        quantity: clean(med.quantityText || asObject(med.quantity).text, 120),
+        repeats: med.repeats ?? orderNotes.repeats ?? 0,
+        duration: clean(med.durationText, 120),
+        code: clean(primary.code || order.dispenseCode, 100),
+        codeSystem: clean(primary.system, 100),
+        note: clean(med.note || orderNotes.note, 600),
+      };
     });
+
+    const allergy = asObject(notes.allergySafety);
+    const severeText = Array.isArray(allergy.severeAllergies) && allergy.severeAllergies.length
+      ? `Documented severe allergy: ${allergy.severeAllergies.map((a: any) => clean(a?.substanceText || a?.substance || a?.allergen || a?.name, 120)).filter(Boolean).join(', ')}.`
+      : Number(allergy.severeAllergyCount || 0) > 0 ? 'Severe allergy information is recorded in the encounter. Confirm the allergy record before dispensing.' : null;
+
+    const cmeta = asObject((clinician as any)?.meta); const raw = asObject(cmeta.rawProfile);
+    const pdf = renderPrescriptionPdf({
+      branding,
+      prescriptionId: erx.id,
+      rxNumber: erx.rxNumber,
+      status: erx.status,
+      issuedAt: issueTime,
+      patient: { name: patient?.name, idNumber: patient?.idNumber, dob: patient?.dob, mrn: patient?.mrn },
+      prescriber: {
+        name: clinician?.name || clinician?.displayName || raw.displayName || raw.fullName,
+        regulatorRegistration: clinician?.regulatorRegistration || raw.regulatorRegistration || raw.hpcsaNumber || raw.hpcsa,
+        practiceNumber: clinician?.practiceNumber || raw.practiceNumber || raw.practiceNo,
+        specialty: clinician?.specialty || raw.specialty,
+        phone: clinician?.phone || raw.phone,
+        email: clinician?.email || raw.email,
+      },
+      medications: meds,
+      severeAllergyAlert: severeText,
+      signatureHash: erx.signatureHash,
+      simulation: Boolean(notes.simulation || notes.simulationOnly),
+    });
+    const filename = `ambulant-erx-${id.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+    return new NextResponse(pdf, { status: 200, headers: { 'content-type': 'application/pdf', 'content-disposition': `inline; filename="${filename}"`, 'cache-control': 'no-store' } });
   } catch (err: any) {
     console.error('[api-gateway][erx/:id/pdf][GET] error', err);
-    return NextResponse.json(
-      { ok: false, error: String(err?.message || 'failed_to_render_erx_pdf') },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, error: String(err?.message || 'failed_to_render_erx_pdf') }, { status: 500 });
   }
 }

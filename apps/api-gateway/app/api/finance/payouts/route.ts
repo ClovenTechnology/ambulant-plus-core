@@ -367,6 +367,21 @@ function profileBankSource(profile: any, payout: any, role: string) {
   };
 }
 
+function verifiedClinicianPayoutAccount(profile: any) {
+  const state = asObject(asObject(profile?.meta).payoutAccount);
+  const status = text(state.status, 40).toLowerCase();
+  const recipientCode = text(state.recipientCode || profile?.payoutAccountId, 180);
+  if (status !== 'verified' || !recipientCode) return null;
+  return {
+    recipientCode,
+    bankName: text(state.bankName, 180) || null,
+    accountMasked: text(state.accountMasked, 80) || null,
+    accountName: text(state.accountName, 180) || null,
+    currency: 'ZAR',
+    country: 'ZA',
+  };
+}
+
 function partnerTransferStatus(transfer: any) {
   const status = text(transfer?.status || transfer?.paystackStatus, 80).toLowerCase();
 
@@ -438,9 +453,20 @@ async function sendPartnerPaystackTransferForPayout(payout: any, actorRole: stri
   }
 
   const profile = await loadPartnerProfile(role, String(payout.entityId || ''));
-  const bankDetails = extractPartnerBankDetails(profileBankSource(profile, payout, role));
+  const verifiedClinicianAccount = role === 'clinician' ? verifiedClinicianPayoutAccount(profile) : null;
+  const bankDetails = role === 'clinician' ? null : extractPartnerBankDetails(profileBankSource(profile, payout, role));
 
-  if (!paystackBankDetailsReady(bankDetails)) {
+  if (role === 'clinician' && !verifiedClinicianAccount) {
+    return {
+      ok: false,
+      payoutId: payout.id,
+      role,
+      entityId: payout.entityId,
+      error: 'clinician_verified_payout_destination_required',
+    };
+  }
+
+  if (role !== 'clinician' && !paystackBankDetailsReady(bankDetails)) {
     return {
       ok: false,
       payoutId: payout.id,
@@ -455,23 +481,25 @@ async function sendPartnerPaystackTransferForPayout(payout: any, actorRole: stri
   const currentSummary = asObject(currentMeta.contractorPayoutSummary);
 
   const existingRecipientCode =
-    text(currentTransfer.recipientCode || (bankDetails as any)?.paystackRecipientCode, 180) || null;
+    text(currentTransfer.recipientCode || verifiedClinicianAccount?.recipientCode || (bankDetails as any)?.paystackRecipientCode, 180) || null;
 
   const displayRole = roleDisplayName(role);
   const recipientName =
     text(profile?.displayName, 120) ||
     text(profile?.name, 120) ||
     text(profile?.email, 120) ||
-    text((bankDetails as any)?.accountName, 120) ||
+    text(verifiedClinicianAccount?.accountName || (bankDetails as any)?.accountName, 120) ||
     displayRole + ' ' + String(payout.entityId || '').slice(0, 8);
 
   const recipient = existingRecipientCode
     ? { recipientCode: existingRecipientCode, raw: { reused: true } }
-    : await createPaystackTransferRecipient({
+    : role === 'clinician'
+      ? (() => { throw new Error('clinician_verified_payout_destination_required'); })()
+      : await createPaystackTransferRecipient({
         name: recipientName,
         accountNumber: bankDetails!.accountNumber!,
         bankCode: bankDetails!.bankCode!,
-        currency: payout.currency || bankDetails!.currency || 'ZAR',
+        currency: payout.currency || verifiedClinicianAccount?.currency || bankDetails?.currency || 'ZAR',
         country: bankDetails!.country || 'ZA',
         metadata: {
           scope: role + '_payout',
@@ -491,7 +519,7 @@ async function sendPartnerPaystackTransferForPayout(payout: any, actorRole: stri
     recipientCode: recipient.recipientCode,
     reference,
     reason: 'Ambulant+ ' + displayRole.toLowerCase() + ' contractor payout ' + payout.id,
-    currency: payout.currency || bankDetails!.currency || 'ZAR',
+    currency: payout.currency || verifiedClinicianAccount?.currency || bankDetails?.currency || 'ZAR',
     metadata: {
       scope: role + '_payout',
       payoutRole: role,
@@ -525,7 +553,7 @@ async function sendPartnerPaystackTransferForPayout(payout: any, actorRole: stri
       transferCode: transfer.transferCode || null,
       recipientCode: transfer.recipientCode || recipient.recipientCode,
       amountCents: asCents(payout.amountCents),
-      currency: payout.currency || bankDetails!.currency || 'ZAR',
+      currency: payout.currency || verifiedClinicianAccount?.currency || bankDetails?.currency || 'ZAR',
       message: transfer.message || null,
       raw: transfer.raw || null,
       submittedAt: new Date().toISOString(),

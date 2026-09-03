@@ -1,6 +1,7 @@
 // apps/api-gateway/app/api/clinicians/me/payout-settings/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
+import { readIdentity, requireTrustedIdentityInProduction } from '@/src/lib/identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,27 +46,19 @@ function normalizeDispatch(raw: unknown): SmartIdDispatchOption {
 }
 
 async function resolveClinician(req: NextRequest) {
-  const uid = String(req.headers.get('x-clinician-id') || req.headers.get('x-uid') || '').trim();
-
-  if (!uid) {
-    return { error: json({ ok: false, error: 'missing_clinician_identity' }, 401), clinician: null };
+  const who = readIdentity(req.headers);
+  try { requireTrustedIdentityInProduction(req.headers, who); } catch {
+    return { error: json({ ok: false, error: 'unauthorized' }, 401), clinician: null };
   }
-
+  if (!who?.uid || !['clinician', 'admin'].includes(String(who.role || '').toLowerCase())) {
+    return { error: json({ ok: false, error: 'forbidden' }, 403), clinician: null };
+  }
+  const refs = [String((who as any).actorRefId || '').trim(), String(who.uid || '').trim(), String((who as any).email || '').trim()].filter(Boolean);
   const clinician = await (prisma as any).clinicianProfile.findFirst({
-    where: {
-      OR: [
-        { id: uid },
-        { userId: uid },
-        { email: uid },
-      ],
-    },
+    where: { OR: refs.flatMap((ref) => [{ id: ref }, { userId: ref }, { email: ref }]) },
     orderBy: { createdAt: 'desc' },
   });
-
-  if (!clinician) {
-    return { error: json({ ok: false, error: 'clinician_not_found' }, 404), clinician: null };
-  }
-
+  if (!clinician) return { error: json({ ok: false, error: 'clinician_not_found' }, 404), clinician: null };
   return { error: null, clinician };
 }
 

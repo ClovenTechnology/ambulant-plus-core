@@ -81,6 +81,14 @@ type PayoutSummary = {
     message?: string;
   } | null;
   contractorNotice: string;
+  payoutAccount?: {
+    status?: string;
+    bankName?: string | null;
+    accountName?: string | null;
+    accountMasked?: string | null;
+    verifiedAt?: string | null;
+    recipientConfigured?: boolean;
+  };
   payoutSettings?: {
     schedule?: string;
     bankLast4?: string | null;
@@ -153,6 +161,11 @@ export default function ClinicianPayoutPage() {
   const [error, setError] = useState<string | null>(null);
   const [from, setFrom] = useState(daysAgoIso(30));
   const [to, setTo] = useState(todayIso());
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [banks, setBanks] = useState<any[]>([]);
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountMessage, setAccountMessage] = useState<string | null>(null);
+  const [bankDraft, setBankDraft] = useState({ bankCode: '', bankName: '', accountNumber: '', accountName: '', accountType: 'personal', documentType: 'identityNumber', documentNumber: '' });
 
   async function load() {
     setLoading(true);
@@ -203,6 +216,30 @@ export default function ClinicianPayoutPage() {
     }
     return null;
   }, [error, items.length, loading, summary]);
+
+  async function openPayoutAccount() {
+    setAccountOpen(true); setAccountMessage(null);
+    if (banks.length) return;
+    try {
+      const res = await fetch('/api/clinicians/me/payout-account?banks=1', { cache: 'no-store' });
+      const js = await res.json();
+      if (!res.ok || !js?.ok) throw new Error(js?.error || 'Unable to load supported banks.');
+      setBanks(Array.isArray(js.banks) ? js.banks : []);
+    } catch (e: any) { setAccountMessage(e?.message || 'Unable to load supported banks.'); }
+  }
+
+  async function savePayoutAccount() {
+    setAccountBusy(true); setAccountMessage(null);
+    try {
+      const res = await fetch('/api/clinicians/me/payout-account', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bankDraft) });
+      const js = await res.json();
+      if (!res.ok || !js?.ok) throw new Error(js?.verificationMessage || js?.error || 'Payout account verification failed.');
+      setAccountMessage('Bank account verified and activated for payouts.');
+      setBankDraft((p) => ({ ...p, accountNumber: '', documentNumber: '' }));
+      await load();
+    } catch (e: any) { setAccountMessage(e?.message || 'Payout account verification failed.'); }
+    finally { setAccountBusy(false); }
+  }
 
   function downloadCsv() {
     const params = new URLSearchParams();
@@ -343,6 +380,38 @@ export default function ClinicianPayoutPage() {
             Apply date range
           </button>
         </div>
+      </section>
+
+      <section className="rounded-3xl border bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-gray-950">Payout destination</h2>
+            <p className="mt-1 text-xs text-gray-500">Clinician payouts are released only to a Paystack-verified South African bank account.</p>
+          </div>
+          <button type="button" onClick={() => void openPayoutAccount()} className="rounded-xl border bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50">
+            {summary?.payoutAccount?.status === 'verified' ? 'Replace payout account' : 'Set up payout account'}
+          </button>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl border bg-gray-50 p-3"><div className="text-[11px] uppercase tracking-wide text-gray-500">Status</div><div className="mt-1 text-sm font-semibold text-gray-900">{summary?.payoutAccount?.status === 'verified' ? 'Verified' : 'Not configured'}</div></div>
+          <div className="rounded-2xl border bg-gray-50 p-3"><div className="text-[11px] uppercase tracking-wide text-gray-500">Bank</div><div className="mt-1 text-sm font-semibold text-gray-900">{summary?.payoutAccount?.bankName || '—'}</div></div>
+          <div className="rounded-2xl border bg-gray-50 p-3"><div className="text-[11px] uppercase tracking-wide text-gray-500">Account</div><div className="mt-1 text-sm font-semibold text-gray-900">{summary?.payoutAccount?.accountMasked || '—'}</div></div>
+        </div>
+        {accountOpen ? (
+          <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="text-xs font-medium text-gray-700">Bank<select value={bankDraft.bankCode} onChange={(e) => { const b = banks.find((x: any) => String(x.code) === e.target.value); setBankDraft((p) => ({ ...p, bankCode: e.target.value, bankName: String(b?.name || '') })); }} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm"><option value="">Select bank</option>{banks.map((b: any) => <option key={String(b.code)} value={String(b.code)}>{String(b.name)}</option>)}</select></label>
+              <label className="text-xs font-medium text-gray-700">Account holder name<input value={bankDraft.accountName} onChange={(e) => setBankDraft((p) => ({ ...p, accountName: e.target.value }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm" autoComplete="name" /></label>
+              <label className="text-xs font-medium text-gray-700">Account number<input value={bankDraft.accountNumber} onChange={(e) => setBankDraft((p) => ({ ...p, accountNumber: e.target.value.replace(/[^0-9]/g, '') }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm" inputMode="numeric" autoComplete="off" /></label>
+              <label className="text-xs font-medium text-gray-700">Account type<select value={bankDraft.accountType} onChange={(e) => setBankDraft((p) => ({ ...p, accountType: e.target.value, documentType: e.target.value === 'business' ? 'businessRegistrationNumber' : 'identityNumber' }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm"><option value="personal">Personal</option><option value="business">Business</option></select></label>
+              {bankDraft.accountType === 'personal' ? <label className="text-xs font-medium text-gray-700">Identity document type<select value={bankDraft.documentType} onChange={(e) => setBankDraft((p) => ({ ...p, documentType: e.target.value }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm"><option value="identityNumber">South African ID</option><option value="passportNumber">Passport</option></select></label> : null}
+              <label className="text-xs font-medium text-gray-700">{bankDraft.accountType === 'business' ? 'Business registration number' : bankDraft.documentType === 'passportNumber' ? 'Passport number' : 'Identity number'}<input value={bankDraft.documentNumber} onChange={(e) => setBankDraft((p) => ({ ...p, documentNumber: e.target.value }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm" autoComplete="off" /></label>
+            </div>
+            <p className="mt-3 text-[11px] text-gray-500">Your account and identity details are sent server-side to Paystack for South African account validation. Ambulant+ stores the verified recipient reference and masked account details, not the full account or identity number in the clinician profile.</p>
+            {accountMessage ? <div className="mt-3 rounded-xl border bg-white px-3 py-2 text-xs text-gray-700">{accountMessage}</div> : null}
+            <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setAccountOpen(false)} className="rounded-xl border bg-white px-3 py-2 text-sm">Cancel</button><button type="button" onClick={() => void savePayoutAccount()} disabled={accountBusy} className="rounded-xl bg-gray-950 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{accountBusy ? 'Verifying…' : 'Verify & activate'}</button></div>
+          </div>
+        ) : null}
       </section>
 
       {visibleNotice && (

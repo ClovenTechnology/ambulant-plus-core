@@ -454,6 +454,72 @@ export async function checkPaystackTransferBalance(currency = 'ZAR') {
   } satisfies PaystackBalance;
 }
 
+
+export type PaystackZaBank = {
+  id?: number | null;
+  name: string;
+  code: string;
+  currency: string;
+  country: string;
+  type: string;
+  supportedTypes: Array<'personal' | 'business' | string>;
+};
+
+export type PaystackZaAccountValidationInput = {
+  bankCode: string;
+  accountNumber: string;
+  accountName: string;
+  accountType: 'personal' | 'business';
+  documentType: 'identityNumber' | 'passportNumber' | 'businessRegistrationNumber';
+  documentNumber: string;
+};
+
+export type PaystackZaAccountValidation = {
+  verified: boolean;
+  accountAcceptsCredits: boolean;
+  accountOpen: boolean;
+  accountHolderMatch: boolean;
+  verificationMessage: string | null;
+  raw: any;
+};
+
+export async function listPaystackZaVerificationBanks(): Promise<PaystackZaBank[]> {
+  const response = await paystackRequest<any>('/bank?currency=ZAR&enabled_for_verification=true&perPage=100', { method: 'GET' });
+  const rows = Array.isArray(response?.data) ? response.data : [];
+  return rows.map((row: any) => ({
+    id: Number.isFinite(Number(row?.id)) ? Number(row.id) : null,
+    name: text(row?.name, 180),
+    code: text(row?.code, 80),
+    currency: text(row?.currency || 'ZAR', 8).toUpperCase() || 'ZAR',
+    country: text(row?.country || 'South Africa', 80),
+    type: text(row?.type || 'basa', 40),
+    supportedTypes: Array.isArray(row?.supported_types) ? row.supported_types.map((v: any) => text(v, 40)).filter(Boolean) : [],
+  })).filter((row: PaystackZaBank) => row.name && row.code);
+}
+
+export async function validatePaystackZaAccount(input: PaystackZaAccountValidationInput): Promise<PaystackZaAccountValidation> {
+  const bankCode = text(input.bankCode, 80);
+  const accountNumber = text(input.accountNumber, 80);
+  const accountName = text(input.accountName, 180);
+  const accountType = input.accountType === 'business' ? 'business' : 'personal';
+  const documentType = text(input.documentType, 80);
+  const documentNumber = text(input.documentNumber, 120);
+  if (!bankCode || !accountNumber || !accountName || !documentType || !documentNumber) throw new Error('paystack_account_validation_fields_required');
+  const response = await paystackRequest<any>('/bank/validate', {
+    method: 'POST',
+    body: JSON.stringify({ bank_code: bankCode, country_code: 'ZA', account_number: accountNumber, account_name: accountName, account_type: accountType, document_type: documentType, document_number: documentNumber }),
+  });
+  const data = object(response?.data || response);
+  return {
+    verified: data.verified === true,
+    accountAcceptsCredits: data.accountAcceptsCredits === true,
+    accountOpen: data.accountOpen === true,
+    accountHolderMatch: data.accountHolderMatch === true,
+    verificationMessage: text(data.verificationMessage || response?.message, 500) || null,
+    raw: response,
+  };
+}
+
 export function shapePaystackTransferWebhook(body: unknown) {
   const eventBody = object(body);
   const data = object(eventBody.data);

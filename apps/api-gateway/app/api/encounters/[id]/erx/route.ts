@@ -4,6 +4,7 @@ import { prisma } from '@/src/lib/db';
 import { readIdentity, requireTrustedIdentityInProduction } from '@/src/lib/identity';
 import { computeClinicianOperationalState } from '@/src/lib/clinician-operational-state';
 import { loadClinicianComplianceChecks } from '@/src/lib/credentialing/loadChecks';
+import { getClinicalDocumentBranding, clinicalDocumentBrandingSnapshot } from '@/src/clinical-documents/branding';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -887,6 +888,29 @@ export async function POST(
 
     const authoredAt = new Date().toISOString();
     const finalStatus = action === 'finalize' ? 'issued' : 'draft';
+    const documentBranding = action === 'finalize' ? clinicalDocumentBrandingSnapshot(await getClinicalDocumentBranding()) : null;
+    const patientProfile = action === 'finalize'
+      ? await (prisma as any).patientProfile.findFirst({ where: { OR: [{ id: patientId }, { userId: patientId }, { mrn: patientId }] }, orderBy: { createdAt: 'desc' } }).catch(() => null)
+      : null;
+    const clinicianMeta = jsonSafe((clinician as any).meta || {}) as any;
+    const clinicianRaw = (clinicianMeta?.rawProfile && typeof clinicianMeta.rawProfile === 'object') ? clinicianMeta.rawProfile : {};
+    const documentPatientSnapshot = action === 'finalize' ? {
+      id: patientProfile?.id || patientId,
+      name: optionalString(body?.patient?.name, 180) || optionalString(patientProfile?.name, 180),
+      idNumber: optionalString(patientProfile?.idNumber, 100),
+      dob: patientProfile?.dob ? new Date(patientProfile.dob).toISOString() : null,
+      mrn: optionalString(patientProfile?.mrn, 100),
+    } : null;
+    const documentPrescriberSnapshot = action === 'finalize' ? {
+      id: clinician.id,
+      name: optionalString(body?.clinician?.name, 180) || optionalString((clinician as any).displayName, 180) || optionalString(clinicianRaw?.displayName || clinicianRaw?.fullName, 180),
+      regulator: optionalString((clinician as any).regulatorBody || clinicianRaw?.regulatorBody || 'HPCSA', 80),
+      regulatorRegistration: optionalString((clinician as any).regulatorRegistration || clinicianRaw?.regulatorRegistration || clinicianRaw?.hpcsaNumber || clinicianRaw?.hpcsa, 100),
+      practiceNumber: optionalString((clinician as any).practiceNumber || clinicianRaw?.practiceNumber || clinicianRaw?.practiceNo, 100),
+      specialty: optionalString((clinician as any).specialty || clinicianRaw?.specialty, 120),
+      phone: optionalString((clinician as any).phone || clinicianRaw?.phone, 80),
+      email: optionalString((clinician as any).email || clinicianRaw?.email, 180),
+    } : null;
 
     const createdOrders = await prisma.$transaction(async (tx) => {
       const erxOrders: any[] = [];
@@ -945,10 +969,19 @@ export async function POST(
                 checked: true,
                 blocked: false,
                 severeAllergyCount: severeAllergies.length,
+                severeAllergies: severeAllergies.map((allergy) => ({
+                  substanceText: allergy.substanceText,
+                  reactionText: allergy.reactionText ?? null,
+                  severity: allergy.severity ?? null,
+                  status: allergy.status ?? null,
+                })),
                 recentReactions,
                 allergyCount: allergiesForSafety.length,
               } : { checked: false, draftOnly: true },
               currentMedicationSafety,
+              documentBrandingSnapshot: documentBranding,
+              patientSnapshot: documentPatientSnapshot,
+              prescriberSnapshot: documentPrescriberSnapshot,
               authoredAt,
             }),
             signedAt: action === 'finalize' ? new Date(authoredAt) : null,
@@ -977,6 +1010,9 @@ export async function POST(
               marketplaceRouting: action === 'finalize' ? 'patient_action_required' : 'not_available_until_issued',
               carePortDispatched: false,
               medReachDispatched: false,
+              documentBrandingSnapshot: documentBranding,
+              patientSnapshot: documentPatientSnapshot,
+              prescriberSnapshot: documentPrescriberSnapshot,
               authoredAt,
             }) as any,
           } as any,
@@ -1013,6 +1049,12 @@ export async function POST(
         checked: true,
         blocked: false,
         severeAllergyCount: severeAllergies.length,
+        severeAllergies: severeAllergies.map((allergy) => ({
+          substanceText: allergy.substanceText,
+          reactionText: allergy.reactionText ?? null,
+          severity: allergy.severity ?? null,
+          status: allergy.status ?? null,
+        })),
         recentReactions,
         allergyCount: allergiesForSafety.length,
       } : null,

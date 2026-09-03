@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
+import { requireClinicianAuth } from '@/src/lib/clinician-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -92,50 +93,16 @@ function rangeFromRequest(req: NextRequest) {
 }
 
 async function resolveClinician(req: NextRequest) {
-  const url = new URL(req.url);
-  const devLookup =
-    process.env.NODE_ENV !== 'production' ||
-    process.env.ALLOW_CLINICIAN_PAYOUT_DEV_LOOKUP === '1';
-
-  const headerClinicianId = text(req.headers.get('x-clinician-id'), 180);
-  if (headerClinicianId) {
-    const profile = await prisma.clinicianProfile.findUnique({
-      where: { id: headerClinicianId },
-    });
-    if (profile) return profile;
-  }
-
-  const headerUserId = text(req.headers.get('x-user-id'), 180);
-  if (headerUserId) {
-    const profile = await prisma.clinicianProfile.findUnique({
-      where: { userId: headerUserId },
-    });
-    if (profile) return profile;
-  }
-
-  const headerEmail = text(req.headers.get('x-user-email') || req.headers.get('x-clinician-email'), 240);
-  if (headerEmail) {
-    const profile = await prisma.clinicianProfile.findFirst({
-      where: { email: headerEmail },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (profile) return profile;
-  }
-
-  const clinicianId = text(url.searchParams.get('clinicianId'), 180);
-  if (devLookup && clinicianId) {
-    return prisma.clinicianProfile.findUnique({
-      where: { id: clinicianId },
-    });
-  }
-
-  if (devLookup) {
-    return prisma.clinicianProfile.findFirst({
-      orderBy: { createdAt: 'asc' },
-    });
-  }
-
-  return null;
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: false });
+  if (!auth.ok) return null;
+  const direct = auth.clinician;
+  if (direct?.id) return direct;
+  const refs = [text(auth.clinicianId, 180), text(auth.session?.sub, 180), text(auth.session?.email, 240)].filter(Boolean);
+  if (!refs.length) return null;
+  return prisma.clinicianProfile.findFirst({
+    where: { OR: refs.flatMap((ref) => [{ id: ref }, { userId: ref }, { email: ref }]) },
+    orderBy: { createdAt: 'desc' },
+  });
 }
 
 function payoutEntityIds(clinician: any) {
@@ -396,6 +363,17 @@ function buildPayload(clinician: any, rows: any[], range: any) {
       currentPlanId: payoutSettings.planTierId || payoutSettings.currentPlanId || 'solo',
       billingCycle: payoutSettings.billingCycle || 'monthly',
     },
+    payoutAccount: (() => {
+      const state = asObject(asObject(clinician?.meta).payoutAccount);
+      return {
+        status: text(state.status, 40) || 'not_configured',
+        bankName: text(state.bankName, 180) || null,
+        accountName: text(state.accountName, 180) || null,
+        accountMasked: text(state.accountMasked, 80) || null,
+        verifiedAt: text(state.verifiedAt, 80) || null,
+        recipientConfigured: Boolean(text(state.recipientCode || clinician?.payoutAccountId, 180)),
+      };
+    })(),
     lastPayout: {
       amountCents: paidRows[0]?.netPayableCents || 0,
       at: paidRows[0]?.periodEnd || null,

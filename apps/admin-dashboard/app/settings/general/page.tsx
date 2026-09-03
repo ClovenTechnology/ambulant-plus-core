@@ -1787,6 +1787,7 @@ export default function GeneralSettingsPage() {
               <div className="rounded-xl border bg-gray-50 p-3">Set RBAC roles & scopes for operators (Admin, Finance, Ops, Compliance).</div>
               <div className="rounded-xl border bg-gray-50 p-3">Confirm CarePort & MedReach defaults align with your payout rules.</div>
               <div className="rounded-xl border bg-gray-50 p-3">Ensure brand assets are hosted and stable for patient-facing and clinician-facing apps.</div>
+              <a href="/settings/clinical-documents" className="block rounded-xl border border-teal-200 bg-teal-50 p-3 font-medium text-teal-800 hover:bg-teal-100">Configure prescription, lab requisition & certificate branding →</a>
             </div>
           </div>
 

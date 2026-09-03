@@ -492,13 +492,17 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
     return <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 border text-gray-700">{text || 'Blood'}</span>;
   }
 
-  /* preview modal + PDF (jsPDF) */
+  /* preview modal + server-rendered clinical PDF */
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewPayload, setPreviewPayload] = useState<any>(null);
   const clinicianName = typeof window !== 'undefined' ? (window as any).__USER__?.name ?? 'Dr. Nomsa' : 'Dr. Nomsa';
-  const patientPlaceholder = { name: 'Demo Patient', id: 'PT-0001' };
+  const patientPlaceholder = { name: '', id: '' };
 
   const openPreview = useCallback(() => {
+    if (!encounterId) {
+      setToast({ msg: 'Select an encounter before generating a laboratory requisition.', kind: 'error' });
+      return;
+    }
     const payload = {
       createdAt: new Date().toISOString(),
       clinician: clinicianName,
@@ -507,65 +511,33 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
     };
     setPreviewPayload(payload);
     setPreviewOpen(true);
-  }, [labItems, clinicianName]);
+  }, [labItems, clinicianName, encounterId]);
 
   const generatePdfBlob = useCallback(async (payload: any) => {
-    // try dynamic import of jsPDF
-    try {
-      const { jsPDF } = await import('jspdf');
-      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-      const left = 40;
-      let y = 40;
-      doc.setFontSize(16);
-      doc.text('Ambulant+', left, y);
-      doc.setFontSize(10);
-      doc.text('Connected care · MedReach integration', left, y + 18);
-      doc.setFontSize(9);
-      doc.text(`Clinician: ${payload.clinician}`, left, y + 36);
-      doc.text(`Patient: ${payload.patient.name} (${payload.patient.id})`, left, y + 52);
-      doc.text(`Created: ${new Date(payload.createdAt).toLocaleString()}`, left, y + 68);
-
-      y += 90;
-      doc.setFontSize(10);
-      doc.text('Order', left, y);
-      y += 16;
-
-      const colX = [left, 140, 320, 420];
-      doc.setFontSize(9);
-      doc.text('Code', colX[0], y);
-      doc.text('Test', colX[1], y);
-      doc.text('Specimen', colX[2], y);
-      doc.text('Fasting', colX[3], y);
-      y += 12;
-      doc.setDrawColor(220);
-      doc.line(left, y, 560, y);
-      y += 8;
-
-      payload.items.forEach((it: any) => {
-        if (y > 720) { doc.addPage(); y = 40; }
-        doc.text(it.code || '—', colX[0], y);
-        doc.text(String(it.title || '—').slice(0, 40), colX[1], y);
-        doc.text(String(it.specimen || '—'), colX[2], y);
-        doc.text(it.fasting ? 'Yes' : 'No', colX[3], y);
-        y += 14;
-      });
-
-      y = Math.max(y + 10, 200);
-      doc.setFontSize(8);
-      doc.text('Order created from MedReach by Ambulant+', left, y);
-
-      const blob = doc.output('blob');
-      return blob;
-    } catch (e) {
-      // fallback: return null to indicate not available
-      return null;
+    const response = await fetch('/api/clinical-documents/render', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json', accept: 'application/pdf' },
+      body: JSON.stringify({
+        kind: 'lab-requisition',
+        encounterId,
+        createdAt: payload.createdAt,
+        patient: payload.patient,
+        clinician: { name: payload.clinician },
+        tests: payload.items,
+      }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error?.error || 'Unable to render laboratory requisition.');
     }
-  }, []);
+    return await response.blob();
+  }, [encounterId]);
 
   const downloadPreviewPdf = useCallback(async () => {
     if (!previewPayload) return;
-    const blob = await generatePdfBlob(previewPayload);
-    if (blob) {
+    try {
+      const blob = await generatePdfBlob(previewPayload);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -575,10 +547,9 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
       a.remove();
       URL.revokeObjectURL(url);
       setToast({ msg: 'PDF downloaded', kind: 'success' });
-      return;
+    } catch (error: any) {
+      setToast({ msg: error?.message || 'Unable to generate laboratory requisition PDF.', kind: 'error' });
     }
-    // fallback to print
-    window.print();
   }, [previewPayload, generatePdfBlob]);
 
   /* LabInline component */

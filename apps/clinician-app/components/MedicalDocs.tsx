@@ -13,9 +13,6 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
-import Chart from "chart.js/auto"; // offscreen mini-chart -> image
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 import { normalizeVitals } from "@/lib/sfu/vitals";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
@@ -55,10 +52,8 @@ export interface MedicalDocProps {
 }
 
 // ---------------- constants ----------------
-const CLINIC_NAME_DEFAULT = "Ambulant+ Center";
+const CLINIC_NAME_DEFAULT = "Ambulant+";
 const CLINIC_ADDRESS_DEFAULT = "0B Meadowbrook Ln, Bryanston 2152, ZA";
-const FOOTER_TEXT = (patientName?: string) =>
-  `Generated for ${patientName || "patient"} on MedReach/CarePort via Ambulant+ Center (c) 2026 Cloven Technology Impilo +27 78 552 6420`;
 
 // ---------------- helpers ----------------
 const prettyDate = (d?: string) => {
@@ -71,308 +66,33 @@ const prettyDate = (d?: string) => {
   }
 };
 
-async function fetchImageAsDataUrl(url?: string): Promise<string | undefined> {
-  if (!url) return undefined;
-  try {
-    if (url.startsWith("data:")) return url;
-    const res = await fetch(url, { mode: "cors" });
-    if (!res.ok) throw new Error(`Image fetch failed ${res.status}`);
-    const blob = await res.blob();
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return undefined;
-  }
-}
-
-function vitalsRows(vitals: Array<{ date: string; bp?: string; pulse?: number; temp?: number }>) {
-  const rows = (vitals || [])
-    .slice()
-    .reverse()
-    .map((v) => [prettyDate(v.date), v.bp ?? "—", v.pulse != null ? String(v.pulse) : "—", v.temp != null ? String(v.temp) : "—"]);
-  return rows.length ? rows : [["—", "—", "—", "—"]];
-}
-
-async function tinyVitalsChartImage(vitals: Array<{ date: string; pulse?: number; temp?: number }>) {
-  const labels = vitals.map((v) => new Date(v.date).toISOString().slice(5, 10));
-  const pulse = vitals.map((v) => (typeof v.pulse === "number" ? v.pulse : null));
-  const temp = vitals.map((v) => (typeof v.temp === "number" ? v.temp : null));
-  if (!pulse.some((n) => n != null) && !temp.some((n) => n != null)) return undefined;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = 1000;
-  canvas.height = 260;
-  // eslint-disable-next-line no-new
-  new Chart(canvas, {
-    type: "line",
-    data: {
-      labels,
-      datasets: [
-        { label: "Pulse (bpm)", data: pulse, borderColor: "#2563eb", fill: false, spanGaps: true, tension: 0.25 },
-        { label: "Temp (°C)", data: temp, borderColor: "#ef4444", fill: false, spanGaps: true, tension: 0.25 },
-      ],
-    },
-    options: {
-      responsive: false,
-      animation: false,
-      scales: { y: { beginAtZero: false } },
-      plugins: { legend: { position: "bottom" } },
-    },
-  });
-  return canvas.toDataURL("image/png");
-}
-
-// ---------------- core: jsPDF generator ----------------
+// ---------------- core: governed server-side clinical document renderer ----------------
 export const generatePdfBlob = async (props: any): Promise<Blob> => {
-  const {
-    type, // 'rx' | 'sick' | 'fitness'
-    patientName,
-    patientId,
-    clinicianName,
-    clinicianReg,
-    clinicName = CLINIC_NAME_DEFAULT,
-    clinicLogoUrl = "/logo.png",
-    clinicAddress = CLINIC_ADDRESS_DEFAULT,
-    date = new Date().toISOString(),
-    notes,
-    plan,
-    durationDays = 0,
-    vitals = [], // [{date, bp, pulse, temp}]
-    rxItems = [], // [{drug, dose, route, freq, duration, qty, notes}]
-    labTests = [], // [{name, notes}]
-  } = props;
-
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const left = 48;
-  const right = pageW - 48;
-
-  // Header
-  const logo = await fetchImageAsDataUrl(clinicLogoUrl);
-  let y = 44;
-  if (logo) {
-    try {
-      doc.addImage(logo, "PNG", left, y, 50, 50);
-    } catch {}
+  const type = props?.type === 'sick' ? 'sick' : props?.type === 'fitness' ? 'fitness' : props?.type;
+  if (type !== 'sick' && type !== 'fitness') {
+    throw new Error('Use the encounter ePrescription workflow for medication prescriptions.');
   }
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text(clinicName, left + (logo ? 58 : 0), y + 18);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(clinicAddress, left + (logo ? 58 : 0), y + 36);
-
-  // Title badge
-  const title =
-    type === "rx"
-      ? "Electronic Prescription (eRx)"
-      : type === "sick"
-      ? "Medical Sick Note"
-      : "Fitness for Work Certificate";
-
-  y = 118;
-  if (type === "rx") {
-    // Futuristic badge
-    doc.setDrawColor(90, 130, 255);
-    doc.setFillColor(242, 247, 255);
-    doc.roundedRect(left, y - 24, 220, 26, 6, 6, "FD");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.setTextColor(45, 70, 160);
-    doc.text("eRx • Electronic Prescription", left + 12, y - 6);
-    doc.setTextColor(0, 0, 0);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.text(title, left, (y += 22));
-  } else {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.text(title, left, y);
+  const response = await fetch('/api/clinical-documents/render', {
+    method: 'POST',
+    cache: 'no-store',
+    headers: { 'content-type': 'application/json', accept: 'application/pdf' },
+    body: JSON.stringify({
+      kind: type,
+      encounterId: props?.encounterId,
+      issuedAt: props?.date || new Date().toISOString(),
+      patient: { id: props?.patientId, name: props?.patientName },
+      clinician: { name: props?.clinicianName },
+      durationDays: Number(props?.durationDays || 0),
+      notes: props?.notes || '',
+      plan: props?.plan || '',
+      simulation: Boolean(props?.simulation),
+    }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.error || 'Clinical document rendering failed.');
   }
-
-  // Patient/Clinician block
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
-  const infoTop = y + 14;
-  const colMid = left + (pageW - 2 * left) / 2;
-
-  doc.text(`Patient: ${patientName || "—"}${patientId ? `  /  ${patientId}` : ""}`, left, infoTop);
-  doc.text(`Date: ${prettyDate(date)}`, left, infoTop + 16);
-  doc.text(`Clinician: ${clinicianName || "—"}${clinicianReg ? ` (Reg: ${clinicianReg})` : ""}`, left, infoTop + 32);
-
-  // dividing rule
-  let cursorY = infoTop + 44;
-  doc.setDrawColor(230, 230, 230);
-  doc.line(left, cursorY, right, cursorY);
-  cursorY += 16;
-
-  // --- Document bodies ---
-  if (type === "sick") {
-    doc.setFont("helvetica", "bold");
-    doc.text("Certification", left, cursorY);
-    cursorY += 16;
-    doc.setFont("helvetica", "normal");
-    const t = `This is to certify that ${patientName || "the patient"} presented for consultation and is medically unfit for work for a period of ${durationDays} day${durationDays === 1 ? "" : "s"}.`;
-    const wrap = doc.splitTextToSize(t, right - left);
-    doc.text(wrap, left, cursorY);
-    cursorY += 14 * wrap.length + 10;
-
-    if (plan) {
-      doc.setFont("helvetica", "bold");
-      doc.text("Plan / Recommendations", left, cursorY);
-      cursorY += 14;
-      doc.setFont("helvetica", "normal");
-      const s = doc.splitTextToSize(plan, right - left);
-      doc.text(s, left, cursorY);
-      cursorY += 14 * s.length + 10;
-    }
-    if (notes) {
-      doc.setFont("helvetica", "bold");
-      doc.text("Additional Notes", left, cursorY);
-      cursorY += 14;
-      doc.setFont("helvetica", "normal");
-      const s = doc.splitTextToSize(notes, right - left);
-      doc.text(s, left, cursorY);
-      cursorY += 14 * s.length + 10;
-    }
-  }
-
-  if (type === "fitness") {
-    if (vitals?.length) {
-      doc.setFont("helvetica", "bold");
-      doc.text("Recent Vitals", left, cursorY);
-      cursorY += 8;
-      autoTable(doc, {
-        startY: cursorY + 4,
-        head: [["Date", "BP", "Pulse", "Temp"]],
-        body: vitalsRows(vitals),
-        styles: { fontSize: 9 },
-        margin: { left },
-        tableWidth: right - left,
-      });
-      cursorY = (doc as any).lastAutoTable?.finalY ?? cursorY + 64;
-
-      const img = await tinyVitalsChartImage(vitals);
-      if (img) {
-        doc.addImage(img, "PNG", left, cursorY + 10, right - left, 140);
-        cursorY += 160;
-      }
-      cursorY += 6;
-    }
-
-    if (plan) {
-      doc.setFont("helvetica", "bold");
-      doc.text("Plan / Recommendations", left, cursorY);
-      cursorY += 14;
-      doc.setFont("helvetica", "normal");
-      const s = doc.splitTextToSize(plan, right - left);
-      doc.text(s, left, cursorY);
-      cursorY += 14 * s.length + 10;
-    }
-    if (notes) {
-      doc.setFont("helvetica", "bold");
-      doc.text("Additional Notes", left, cursorY);
-      cursorY += 14;
-      doc.setFont("helvetica", "normal");
-      const s = doc.splitTextToSize(notes, right - left);
-      doc.text(s, left, cursorY);
-      cursorY += 14 * s.length + 10;
-    }
-  }
-
-  if (type === "rx") {
-    // Rx main table
-    doc.setFont("helvetica", "bold");
-    doc.text("Prescribed Medication", left, cursorY);
-    cursorY += 6;
-
-    const rows =
-      Array.isArray(rxItems) && rxItems.length
-        ? rxItems.map((r: any) => [
-            r.drug || "—",
-            r.dose || "—",
-            r.route || "—",
-            r.freq || "—",
-            r.duration || "—",
-            r.qty || "—",
-          ])
-        : [["—", "—", "—", "—", "—", "—"]];
-
-    autoTable(doc, {
-      startY: cursorY + 6,
-      head: [["Drug", "Dose", "Route", "Freq.", "Duration", "Qty"]],
-      body: rows,
-      styles: { fontSize: 9 },
-      margin: { left },
-      tableWidth: right - left,
-      columnStyles: { 0: { cellWidth: 200 } },
-      headStyles: { fillColor: [30, 64, 175], textColor: 255 },
-      alternateRowStyles: { fillColor: [245, 248, 255] },
-    });
-    cursorY = (doc as any).lastAutoTable?.finalY ?? cursorY + 70;
-
-    // Lab tests (new)
-    if (Array.isArray(labTests) && labTests.length) {
-      cursorY += 14;
-      doc.setFont("helvetica", "bold");
-      doc.text("Requested Lab Tests", left, cursorY);
-      cursorY += 6;
-
-      autoTable(doc, {
-        startY: cursorY + 6,
-        head: [["Test", "Notes"]],
-        body: labTests.map((t: any) => [t.name || "—", t.notes || ""]),
-        styles: { fontSize: 9 },
-        margin: { left },
-        tableWidth: right - left,
-        headStyles: { fillColor: [16, 185, 129], textColor: 255 },
-        alternateRowStyles: { fillColor: [245, 255, 248] },
-      });
-      cursorY = (doc as any).lastAutoTable?.finalY ?? cursorY + 50;
-    }
-
-    // Optional notes
-    const noteLines: string[] = [];
-    (rxItems || []).forEach((r: any) => {
-      if (r?.notes) noteLines.push(`• ${r.drug}: ${r.notes}`);
-    });
-    if (noteLines.length || notes) {
-      cursorY += 12;
-      doc.setFont("helvetica", "bold");
-      doc.text("Notes", left, cursorY);
-      cursorY += 14;
-      doc.setFont("helvetica", "normal");
-      const s = doc.splitTextToSize([noteLines.join("\n"), notes].filter(Boolean).join("\n"), right - left);
-      doc.text(s, left, cursorY);
-      cursorY += 14 * s.length + 10;
-    }
-  }
-
-  // Signature near bottom (push down if plenty of space)
-  const sigBlockH = 70;
-  if (cursorY < pageH - sigBlockH - 90) cursorY = pageH - sigBlockH - 90;
-
-  cursorY += 18;
-  doc.setDrawColor(200, 200, 200);
-  doc.line(left, cursorY, left + 260, cursorY);
-  cursorY += 14;
-  doc.setFont("helvetica", "normal");
-  doc.text(clinicianName || "—", left, cursorY);
-  cursorY += 12;
-  if (clinicianReg) doc.text(`Reg No: ${clinicianReg}`, left, cursorY);
-
-  // Footer (exact spec)
-  const footerY = pageH - 24;
-  doc.setFontSize(9);
-  doc.setTextColor(100);
-  doc.text(FOOTER_TEXT(patientName), left, footerY);
-
-  return doc.output("blob");
+  return await response.blob();
 };
 
 // ---------------- Main component UI ----------------
@@ -390,7 +110,6 @@ export default function MedicalDocs(props: MedicalDocProps) {
     initialSessionVitals = [],
     onGenerated,
     uploadEndpoint = "/api/MedicalDocs",
-    hideErx = false,
     defaultNoteType = "none",
   } = props;
 
@@ -562,10 +281,14 @@ export default function MedicalDocs(props: MedicalDocProps) {
   }
 
   async function buildPdfBlob(): Promise<Blob> {
+    if (noteType !== "sick" && noteType !== "fitness") {
+      throw new Error("Select Sick Note or Fitness Certificate.");
+    }
     const docProps = {
-      type: (noteType === "sick" ? "sick" : noteType === "fitness" ? "fitness" : noteType === "rx" ? "rx" : "fitness") as DocType,
-      patientName,
+      type: (noteType === "sick" ? "sick" : noteType === "fitness" ? "fitness" : "none") as any,
+      encounterId,
       patientId,
+      patientName,
       clinicianName: clinicianDisplay,
       clinicianReg: clinicianRegDisplay,
       clinicName,
@@ -575,9 +298,6 @@ export default function MedicalDocs(props: MedicalDocProps) {
       notes,
       plan,
       durationDays,
-      vitals: composeVitalsForPdf(),
-      rxItems,
-      labTests: parseLabTests(),
     };
     return generatePdfBlob(docProps);
   }
@@ -589,7 +309,7 @@ export default function MedicalDocs(props: MedicalDocProps) {
       const form = new FormData();
       form.append("file", new File([blob], filename, { type: "application/pdf" }));
       if (patientId) form.append("patientId", String(patientId));
-      form.append("docType", noteType === "rx" ? "erx" : noteType === "sick" ? "sick-note" : "fitness-note");
+      form.append("docType", noteType === "sick" ? "sick-note" : "fitness-note");
       form.append("title", filename);
       form.append("source", "clinician-app");
       const res = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/docs`, {
@@ -730,10 +450,9 @@ export default function MedicalDocs(props: MedicalDocProps) {
 
   // ------- UI -------
   const docTypeOptions = [
-    { value: "none", label: "Clinical Note" },
+    { value: "none", label: "Select document type" },
     { value: "sick", label: "Sick Note" },
     { value: "fitness", label: "Fitness Certificate" },
-    ...(hideErx ? [] : [{ value: "rx", label: "Prescription (eRx)" }]),
   ] as const;
 
   return (
@@ -816,35 +535,16 @@ export default function MedicalDocs(props: MedicalDocProps) {
             </>
           )}
 
-          {noteType === "rx" && (
-            <div className="space-y-3">
-              <div className="text-sm font-medium">Prescription Items</div>
-              <RxEditor items={rxItems} setItems={setRxItems} />
-              <label className="block text-sm">
-                Lab Tests (one per line, optional “ - notes”)
-                <textarea
-                  value={labTestsText}
-                  onChange={(e) => setLabTestsText(e.target.value)}
-                  rows={3}
-                  className="mt-1 w-full border rounded p-2"
-                  placeholder={`CRP - urgent\nFBC\nU&E - add eGFR`}
-                />
-              </label>
-              <label className="block text-sm">
-                General Notes (optional)
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={3}
-                  className="mt-1 w-full border rounded p-2"
-                />
-              </label>
+          {noteType === "rx" ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Use the encounter ePrescription workflow for medication prescribing. This document panel creates sick notes and fitness certificates only.
             </div>
-          )}
+          ) : null}
         </div>
 
         <div className="space-y-2">
-          <div className="text-sm font-medium">Include in Report</div>
+          <div className="text-sm font-medium">Encounter vitals reference</div>
+          <div className="text-[11px] text-slate-500">Visible here for clinical context; routine vitals are not printed on the certificate.</div>
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -977,21 +677,21 @@ export default function MedicalDocs(props: MedicalDocProps) {
         <button
           onClick={handlePreview}
           className="px-4 py-2 bg-gray-600 text-white rounded"
-          disabled={loading}
+          disabled={loading || noteType === "none"}
         >
           Preview
         </button>
         <button
           onClick={handleDownload}
           className="px-4 py-2 bg-blue-600 text-white rounded"
-          disabled={loading}
+          disabled={loading || noteType === "none"}
         >
           Download PDF
         </button>
         <button
           onClick={handleAttachToPatient}
           className="px-4 py-2 bg-green-600 text-white rounded"
-          disabled={loading}
+          disabled={loading || noteType === "none"}
         >
           Attach to Patient
         </button>
