@@ -86,6 +86,10 @@ type PayoutSummary = {
     bankName?: string | null;
     accountName?: string | null;
     accountMasked?: string | null;
+    accountHolderType?: string | null;
+    businessRegistrationMasked?: string | null;
+    vatRegistered?: boolean | null;
+    vatNumberMasked?: string | null;
     verifiedAt?: string | null;
     recipientConfigured?: boolean;
   };
@@ -104,6 +108,28 @@ type PayoutSummary = {
     amountCents?: number;
     at?: string | null;
   };
+};
+
+
+type IdentityOnFile = {
+  available: boolean;
+  documentType: 'identityNumber' | 'passportNumber' | null;
+  documentLabel: string | null;
+  masked: string | null;
+  accountHolderName: string | null;
+  source: string | null;
+};
+
+type BankDraft = {
+  bankCode: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  accountType: 'personal' | 'business';
+  documentType: 'identityNumber' | 'passportNumber';
+  documentNumber: string;
+  businessRegistrationNumber: string;
+  vatNumber: string;
 };
 
 function sameOrigin(path: string, params?: URLSearchParams) {
@@ -165,7 +191,8 @@ export default function ClinicianPayoutPage() {
   const [banks, setBanks] = useState<any[]>([]);
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
-  const [bankDraft, setBankDraft] = useState({ bankCode: '', bankName: '', accountNumber: '', accountName: '', accountType: 'personal', documentType: 'identityNumber', documentNumber: '' });
+  const [identityOnFile, setIdentityOnFile] = useState<IdentityOnFile | null>(null);
+  const [bankDraft, setBankDraft] = useState<BankDraft>({ bankCode: '', bankName: '', accountNumber: '', accountName: '', accountType: 'personal', documentType: 'identityNumber', documentNumber: '', businessRegistrationNumber: '', vatNumber: '' });
 
   async function load() {
     setLoading(true);
@@ -218,14 +245,35 @@ export default function ClinicianPayoutPage() {
   }, [error, items.length, loading, summary]);
 
   async function openPayoutAccount() {
-    setAccountOpen(true); setAccountMessage(null);
-    if (banks.length) return;
+    setAccountOpen(true);
+    setAccountMessage(null);
     try {
       const res = await fetch('/api/clinicians/me/payout-account?banks=1', { cache: 'no-store' });
       const js = await res.json();
       if (!res.ok || !js?.ok) throw new Error(js?.error || 'Unable to load supported banks.');
+      const nextIdentity = (js.identityOnFile || null) as IdentityOnFile | null;
+      setIdentityOnFile(nextIdentity);
       setBanks(Array.isArray(js.banks) ? js.banks : []);
-    } catch (e: any) { setAccountMessage(e?.message || 'Unable to load supported banks.'); }
+      setBankDraft((current) => ({
+        ...current,
+        accountName: current.accountName || nextIdentity?.accountHolderName || '',
+        documentType: nextIdentity?.documentType === 'passportNumber' ? 'passportNumber' : 'identityNumber',
+      }));
+    } catch (e: any) {
+      setAccountMessage(e?.message || 'Unable to load supported banks.');
+    }
+  }
+
+  function closePayoutAccount() {
+    setAccountOpen(false);
+    setAccountMessage(null);
+    setBankDraft((current) => ({
+      ...current,
+      accountNumber: '',
+      documentNumber: '',
+      businessRegistrationNumber: '',
+      vatNumber: '',
+    }));
   }
 
   async function savePayoutAccount() {
@@ -235,11 +283,29 @@ export default function ClinicianPayoutPage() {
       const js = await res.json();
       if (!res.ok || !js?.ok) throw new Error(js?.verificationMessage || js?.error || 'Payout account verification failed.');
       setAccountMessage('Bank account verified and activated for payouts.');
-      setBankDraft((p) => ({ ...p, accountNumber: '', documentNumber: '' }));
+      setBankDraft((p) => ({ ...p, accountNumber: '', documentNumber: '', businessRegistrationNumber: '', vatNumber: '' }));
       await load();
     } catch (e: any) { setAccountMessage(e?.message || 'Payout account verification failed.'); }
     finally { setAccountBusy(false); }
   }
+
+  const supportedBanks = useMemo(() => {
+    return banks.filter((bank: any) => {
+      const supported = Array.isArray(bank?.supportedTypes) ? bank.supportedTypes.map((value: any) => String(value)) : [];
+      return supported.length === 0 || supported.includes(bankDraft.accountType);
+    });
+  }, [banks, bankDraft.accountType]);
+
+  const canVerifyPayoutAccount = Boolean(
+    bankDraft.bankCode &&
+    bankDraft.accountNumber &&
+    bankDraft.accountName.trim() &&
+    (
+      bankDraft.accountType === 'business'
+        ? bankDraft.businessRegistrationNumber.trim()
+        : identityOnFile?.available || bankDraft.documentNumber.trim()
+    )
+  );
 
   function downloadCsv() {
     const params = new URLSearchParams();
@@ -392,24 +458,102 @@ export default function ClinicianPayoutPage() {
             {summary?.payoutAccount?.status === 'verified' ? 'Replace payout account' : 'Set up payout account'}
           </button>
         </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border bg-gray-50 p-3"><div className="text-[11px] uppercase tracking-wide text-gray-500">Status</div><div className="mt-1 text-sm font-semibold text-gray-900">{summary?.payoutAccount?.status === 'verified' ? 'Verified' : 'Not configured'}</div></div>
           <div className="rounded-2xl border bg-gray-50 p-3"><div className="text-[11px] uppercase tracking-wide text-gray-500">Bank</div><div className="mt-1 text-sm font-semibold text-gray-900">{summary?.payoutAccount?.bankName || '—'}</div></div>
           <div className="rounded-2xl border bg-gray-50 p-3"><div className="text-[11px] uppercase tracking-wide text-gray-500">Account</div><div className="mt-1 text-sm font-semibold text-gray-900">{summary?.payoutAccount?.accountMasked || '—'}</div></div>
+          <div className="rounded-2xl border bg-gray-50 p-3"><div className="text-[11px] uppercase tracking-wide text-gray-500">Account holder</div><div className="mt-1 text-sm font-semibold text-gray-900">{summary?.payoutAccount?.accountHolderType === 'business' ? 'Business / organisation' : summary?.payoutAccount?.accountHolderType === 'personal' ? 'Individual / personal' : '—'}</div>{summary?.payoutAccount?.vatRegistered ? <div className="mt-1 text-[11px] text-gray-500">VAT registered{summary?.payoutAccount?.vatNumberMasked ? ` · ${summary.payoutAccount.vatNumberMasked}` : ''}</div> : null}</div>
         </div>
         {accountOpen ? (
           <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
             <div className="grid gap-3 md:grid-cols-2">
-              <label className="text-xs font-medium text-gray-700">Bank<select value={bankDraft.bankCode} onChange={(e) => { const b = banks.find((x: any) => String(x.code) === e.target.value); setBankDraft((p) => ({ ...p, bankCode: e.target.value, bankName: String(b?.name || '') })); }} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm"><option value="">Select bank</option>{banks.map((b: any) => <option key={String(b.code)} value={String(b.code)}>{String(b.name)}</option>)}</select></label>
-              <label className="text-xs font-medium text-gray-700">Account holder name<input value={bankDraft.accountName} onChange={(e) => setBankDraft((p) => ({ ...p, accountName: e.target.value }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm" autoComplete="name" /></label>
-              <label className="text-xs font-medium text-gray-700">Account number<input value={bankDraft.accountNumber} onChange={(e) => setBankDraft((p) => ({ ...p, accountNumber: e.target.value.replace(/[^0-9]/g, '') }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm" inputMode="numeric" autoComplete="off" /></label>
-              <label className="text-xs font-medium text-gray-700">Account type<select value={bankDraft.accountType} onChange={(e) => setBankDraft((p) => ({ ...p, accountType: e.target.value, documentType: e.target.value === 'business' ? 'businessRegistrationNumber' : 'identityNumber' }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm"><option value="personal">Personal</option><option value="business">Business</option></select></label>
-              {bankDraft.accountType === 'personal' ? <label className="text-xs font-medium text-gray-700">Identity document type<select value={bankDraft.documentType} onChange={(e) => setBankDraft((p) => ({ ...p, documentType: e.target.value }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm"><option value="identityNumber">South African ID</option><option value="passportNumber">Passport</option></select></label> : null}
-              <label className="text-xs font-medium text-gray-700">{bankDraft.accountType === 'business' ? 'Business registration number' : bankDraft.documentType === 'passportNumber' ? 'Passport number' : 'Identity number'}<input value={bankDraft.documentNumber} onChange={(e) => setBankDraft((p) => ({ ...p, documentNumber: e.target.value }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm" autoComplete="off" /></label>
+              <label className="text-xs font-medium text-gray-700">
+                Bank
+                <select
+                  value={bankDraft.bankCode}
+                  onChange={(e) => {
+                    const bank = supportedBanks.find((item: any) => String(item.code) === e.target.value);
+                    setBankDraft((current) => ({ ...current, bankCode: e.target.value, bankName: String(bank?.name || '') }));
+                  }}
+                  className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">Select bank</option>
+                  {supportedBanks.map((bank: any) => <option key={String(bank.code)} value={String(bank.code)}>{String(bank.name)}</option>)}
+                </select>
+              </label>
+              <label className="text-xs font-medium text-gray-700">
+                Account holder name
+                <input value={bankDraft.accountName} onChange={(e) => setBankDraft((current) => ({ ...current, accountName: e.target.value }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm" autoComplete="name" />
+              </label>
+              <label className="text-xs font-medium text-gray-700">
+                Account number
+                <input value={bankDraft.accountNumber} onChange={(e) => setBankDraft((current) => ({ ...current, accountNumber: e.target.value.replace(/[^0-9]/g, '') }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm" inputMode="numeric" autoComplete="off" />
+              </label>
+              <label className="text-xs font-medium text-gray-700">
+                Account holder type
+                <select
+                  value={bankDraft.accountType}
+                  onChange={(e) => {
+                    const nextType = e.target.value === 'business' ? 'business' : 'personal';
+                    setBankDraft((current) => ({
+                      ...current,
+                      accountType: nextType,
+                      bankCode: '',
+                      bankName: '',
+                      accountName: nextType === 'personal' ? (identityOnFile?.accountHolderName || current.accountName) : '',
+                      documentType: identityOnFile?.documentType === 'passportNumber' ? 'passportNumber' : 'identityNumber',
+                      documentNumber: '',
+                      businessRegistrationNumber: '',
+                      vatNumber: '',
+                    }));
+                  }}
+                  className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm"
+                >
+                  <option value="personal">Individual / personal</option>
+                  <option value="business">Business / organisation</option>
+                </select>
+              </label>
+
+              {bankDraft.accountType === 'personal' ? (
+                identityOnFile?.available ? (
+                  <div className="md:col-span-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-900">
+                    <div className="font-semibold">Identity already on file</div>
+                    <div className="mt-1">{identityOnFile.documentLabel || 'Identity document'} · {identityOnFile.masked || 'masked'}</div>
+                    <div className="mt-1 text-emerald-800">The full identity number stays server-side and is used directly for Paystack validation. It is not returned to this page.</div>
+                  </div>
+                ) : (
+                  <>
+                    <label className="text-xs font-medium text-gray-700">
+                      Identity document type
+                      <select value={bankDraft.documentType} onChange={(e) => setBankDraft((current) => ({ ...current, documentType: e.target.value === 'passportNumber' ? 'passportNumber' : 'identityNumber' }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm">
+                        <option value="identityNumber">South African ID</option>
+                        <option value="passportNumber">Passport</option>
+                      </select>
+                    </label>
+                    <label className="text-xs font-medium text-gray-700">
+                      {bankDraft.documentType === 'passportNumber' ? 'Passport number' : 'Identity number'}
+                      <input value={bankDraft.documentNumber} onChange={(e) => setBankDraft((current) => ({ ...current, documentNumber: e.target.value }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm" autoComplete="off" />
+                    </label>
+                    <p className="md:col-span-2 text-[11px] text-amber-800">No usable ID/passport number was found in your clinician profile, so an identity document is required for this validation.</p>
+                  </>
+                )
+              ) : (
+                <>
+                  <label className="text-xs font-medium text-gray-700">
+                    Business registration number
+                    <input value={bankDraft.businessRegistrationNumber} onChange={(e) => setBankDraft((current) => ({ ...current, businessRegistrationNumber: e.target.value }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm" autoComplete="off" />
+                  </label>
+                  <label className="text-xs font-medium text-gray-700">
+                    VAT registration number <span className="font-normal text-gray-400">(optional)</span>
+                    <input value={bankDraft.vatNumber} onChange={(e) => setBankDraft((current) => ({ ...current, vatNumber: e.target.value }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2 text-sm" autoComplete="off" />
+                  </label>
+                  <p className="md:col-span-2 text-[11px] text-gray-500">Paystack validates a South African business account against its business registration number. VAT details are optional Ambulant+ tax-profile information and are not used as the Paystack identity document.</p>
+                </>
+              )}
             </div>
-            <p className="mt-3 text-[11px] text-gray-500">Your account and identity details are sent server-side to Paystack for South African account validation. Ambulant+ stores the verified recipient reference and masked account details, not the full account or identity number in the clinician profile.</p>
+            <p className="mt-3 text-[11px] text-gray-500">Your bank details are sent server-side to Paystack for South African account validation. For individual accounts, Ambulant+ uses the identity already held in your clinician profile where available. The payout profile stores the verified recipient reference and masked bank/identity details, not the full bank account number.</p>
             {accountMessage ? <div className="mt-3 rounded-xl border bg-white px-3 py-2 text-xs text-gray-700">{accountMessage}</div> : null}
-            <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setAccountOpen(false)} className="rounded-xl border bg-white px-3 py-2 text-sm">Cancel</button><button type="button" onClick={() => void savePayoutAccount()} disabled={accountBusy} className="rounded-xl bg-gray-950 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{accountBusy ? 'Verifying…' : 'Verify & activate'}</button></div>
+            <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={closePayoutAccount} className="rounded-xl border bg-white px-3 py-2 text-sm">Cancel</button><button type="button" onClick={() => void savePayoutAccount()} disabled={accountBusy || !canVerifyPayoutAccount} className="rounded-xl bg-gray-950 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{accountBusy ? 'Verifying…' : 'Verify & activate'}</button></div>
           </div>
         ) : null}
       </section>

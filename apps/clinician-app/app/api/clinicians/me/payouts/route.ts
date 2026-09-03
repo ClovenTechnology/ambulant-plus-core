@@ -364,12 +364,18 @@ function buildPayload(clinician: any, rows: any[], range: any) {
       billingCycle: payoutSettings.billingCycle || 'monthly',
     },
     payoutAccount: (() => {
-      const state = asObject(asObject(clinician?.meta).payoutAccount);
+      const meta = asObject(clinician?.meta);
+      const state = asObject(meta.payoutAccount);
+      const tax = asObject(meta.payoutTaxProfile);
       return {
         status: text(state.status, 40) || 'not_configured',
         bankName: text(state.bankName, 180) || null,
         accountName: text(state.accountName, 180) || null,
         accountMasked: text(state.accountMasked, 80) || null,
+        accountHolderType: text(state.accountHolderType || state.accountType, 40) || null,
+        businessRegistrationMasked: text(state.businessRegistrationMasked, 80) || null,
+        vatRegistered: tax.accountHolderType === 'business' ? tax.vatRegistered === true : null,
+        vatNumberMasked: text(tax.vatNumberMasked, 80) || null,
         verifiedAt: text(state.verifiedAt, 80) || null,
         recipientConfigured: Boolean(text(state.recipientCode || clinician?.payoutAccountId, 180)),
       };

@@ -23,7 +23,7 @@ export const DEFAULT_CLINICAL_DOCUMENT_BRANDING: ClinicalDocumentBranding = {
   version: CLINICAL_DOCUMENT_BRANDING_VERSION,
   organizationName: 'Ambulant+',
   serviceLine: 'Contactless Medicine',
-  address: '0B Meadowbrook Lane, Epsom Downs, Bryanston 2152, South Africa',
+  address: 'Block D, 0B Meadowbrook Lane, Epsom Downs, Bryanston 2152, South Africa',
   phone: '069 669 0899',
   email: 'support@ambulantplus.co.za',
   website: 'ambulantplus.co.za',
