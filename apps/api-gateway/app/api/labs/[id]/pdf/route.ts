@@ -22,14 +22,7 @@ function asObject(value: unknown): Record<string, any> {
   return {};
 }
 
-async function canReadLab(req: NextRequest, lab: any) {
-  const who = readIdentity(req.headers);
-  try {
-    requireTrustedIdentityInProduction(req.headers, who);
-  } catch {
-    return false;
-  }
-
+async function canReadLab(who: any, lab: any) {
   if (!who?.uid) return false;
   if (['admin', 'admin_staff'].includes(String(who.role || '').toLowerCase())) return true;
 
@@ -61,6 +54,16 @@ export async function GET(
   { params }: { params: { id: string } },
 ) {
   try {
+    const who = readIdentity(req.headers);
+    try {
+      requireTrustedIdentityInProduction(req.headers, who);
+    } catch {
+      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401, headers: { 'cache-control': 'no-store' } });
+    }
+    if (!who?.uid) {
+      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401, headers: { 'cache-control': 'no-store' } });
+    }
+
     const id = clean(params.id, 180);
     if (!id) {
       return NextResponse.json({ ok: false, error: 'lab_order_id_required' }, { status: 400 });
@@ -70,7 +73,7 @@ export async function GET(
     if (!lab) {
       return NextResponse.json({ ok: false, error: 'lab_order_not_found' }, { status: 404 });
     }
-    if (!(await canReadLab(req, lab))) {
+    if (!(await canReadLab(who, lab))) {
       return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
     }
     if (String(lab.status || '').toLowerCase() !== 'issued') {

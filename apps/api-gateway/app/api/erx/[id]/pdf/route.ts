@@ -9,9 +9,7 @@ export const dynamic = 'force-dynamic';
 function clean(value: unknown, max = 2000) { return String(value ?? '').trim().slice(0, max); }
 function asObject(value: unknown): Record<string, any> { if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, any>; if (typeof value === 'string') { try { const v = JSON.parse(value); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch {} } return {}; }
 
-async function canReadErx(req: NextRequest, erx: any) {
-  const who = readIdentity(req.headers);
-  try { requireTrustedIdentityInProduction(req.headers, who); } catch { return false; }
+async function canReadErx(who: any, erx: any) {
   if (!who?.uid) return false;
   if (['admin', 'admin_staff'].includes(String(who.role || '').toLowerCase())) return true;
   if (who.role === 'clinician') {
@@ -27,11 +25,21 @@ async function canReadErx(req: NextRequest, erx: any) {
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
+    const who = readIdentity(req.headers);
+    try {
+      requireTrustedIdentityInProduction(req.headers, who);
+    } catch {
+      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401, headers: { 'cache-control': 'no-store' } });
+    }
+    if (!who?.uid) {
+      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401, headers: { 'cache-control': 'no-store' } });
+    }
+
     const id = clean(params.id, 180);
     if (!id) return NextResponse.json({ ok: false, error: 'erx_id_required' }, { status: 400 });
     const erx = await (prisma as any).erxOrder.findUnique({ where: { id } });
     if (!erx) return NextResponse.json({ ok: false, error: 'erx_not_found' }, { status: 404 });
-    if (!(await canReadErx(req, erx))) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+    if (!(await canReadErx(who, erx))) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
     if (String(erx.status || '').toLowerCase() !== 'issued') {
       return NextResponse.json({
         ok: false,
