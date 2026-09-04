@@ -32,6 +32,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const erx = await (prisma as any).erxOrder.findUnique({ where: { id } });
     if (!erx) return NextResponse.json({ ok: false, error: 'erx_not_found' }, { status: 404 });
     if (!(await canReadErx(req, erx))) return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+    if (String(erx.status || '').toLowerCase() !== 'issued') {
+      return NextResponse.json({
+        ok: false,
+        error: 'erx_not_issued',
+        message: 'Only issued prescriptions can be rendered as dispensing documents.',
+      }, { status: 409, headers: { 'cache-control': 'no-store' } });
+    }
 
     const notes = asObject(erx.notes);
     const issueTime = erx.signedAt || erx.createdAt;
@@ -91,7 +98,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       simulation: Boolean(notes.simulation || notes.simulationOnly),
     });
     const filename = `ambulant-erx-${id.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
-    return new NextResponse(pdf, { status: 200, headers: { 'content-type': 'application/pdf', 'content-disposition': `inline; filename="${filename}"`, 'cache-control': 'no-store' } });
+    return new NextResponse(Uint8Array.from(pdf), { status: 200, headers: { 'content-type': 'application/pdf', 'content-disposition': `inline; filename="${filename}"`, 'cache-control': 'no-store' } });
   } catch (err: any) {
     console.error('[api-gateway][erx/:id/pdf][GET] error', err);
     return NextResponse.json({ ok: false, error: String(err?.message || 'failed_to_render_erx_pdf') }, { status: 500 });

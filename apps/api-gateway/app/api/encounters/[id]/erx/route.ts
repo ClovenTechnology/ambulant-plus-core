@@ -683,8 +683,10 @@ function normalizedScope(value: unknown): 'medications' | 'labs' | 'all' {
   return 'all';
 }
 
-function normalizedAction(value: unknown): 'save-draft' | 'finalize' {
-  return clean(value, 40).toLowerCase() === 'save-draft' ? 'save-draft' : 'finalize';
+function normalizedAction(value: unknown): 'save-draft' | 'finalize' | 'clear-draft' {
+  const action = clean(value, 40).toLowerCase();
+  if (action === 'save-draft' || action === 'clear-draft') return action;
+  return 'finalize';
 }
 
 function parseNotesJson(value: unknown) {
@@ -696,6 +698,94 @@ function parseNotesJson(value: unknown) {
   } catch {
     return {};
   }
+}
+
+function isSimulationEncounter(encounter: any) {
+  const encounterSummary = parseNotesJson(encounter?.summaryPayload);
+  const settlement = parseNotesJson(encounter?.settlementSnapshot);
+
+  if (
+    encounterSummary.simulation === true ||
+    String(encounterSummary.billingMode || '').toLowerCase() === 'simulation' ||
+    settlement.simulation === true ||
+    String(settlement.billingMode || '').toLowerCase() === 'simulation'
+  ) {
+    return true;
+  }
+
+  return (encounter?.appointments || []).some((appointment: any) => {
+    const meta = parseNotesJson(appointment?.metadata || appointment?.meta);
+    const bookingSource = String(appointment?.bookingSource || '').toLowerCase();
+    const billingMode = String(meta.billingMode || appointment?.billingMode || '').toLowerCase();
+    const source = String(meta.source || '').toLowerCase();
+    const roomId = String(appointment?.roomId || '');
+
+    return (
+      bookingSource === 'admin_simulation' ||
+      meta.simulation === true ||
+      billingMode === 'simulation' ||
+      source === 'admin.simulation' ||
+      roomId.startsWith('simulation-')
+    );
+  });
+}
+
+function issuedMedicationReference(order: any) {
+  return {
+    id: clean(order?.id, 180),
+    scope: 'medications' as const,
+    status: clean(order?.status, 80) || 'issued',
+    label: clean(order?.drug, 500) || 'ePrescription',
+    issuedAt: order?.signedAt || order?.createdAt || null,
+    pdfUrl: order?.id ? `/api/erx/${encodeURIComponent(String(order.id))}/pdf` : null,
+  };
+}
+
+function issuedLabReference(order: any) {
+  return {
+    id: clean(order?.id, 180),
+    scope: 'labs' as const,
+    status: clean(order?.status, 80) || 'issued',
+    label: clean(order?.panel, 500) || 'Laboratory requisition',
+    issuedAt: order?.createdAt || null,
+    pdfUrl: order?.id ? `/api/labs/${encodeURIComponent(String(order.id))}/pdf` : null,
+  };
+}
+
+function issuedMedicationReferences(orders: any[]) {
+  const groups = new Map<string, any[]>();
+  for (const order of orders) {
+    const key = clean(order?.signedAt || order?.createdAt || order?.id, 180);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(order);
+  }
+  return Array.from(groups.values()).map((group) => {
+    const first = group[0];
+    const reference = issuedMedicationReference(first);
+    return {
+      ...reference,
+      label: group.length > 1 ? `${group.length} medications` : reference.label,
+    };
+  });
+}
+
+function issuedLabReferences(orders: any[]) {
+  const groups = new Map<string, any[]>();
+  for (const order of orders) {
+    const authorization = parseNotesJson(order?.authorizationSnapshot);
+    const key = clean(authorization.authoredAt || order?.createdAt || order?.id, 180);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(order);
+  }
+  return Array.from(groups.values()).map((group) => {
+    const first = group[0];
+    const reference = issuedLabReference(first);
+    return {
+      ...reference,
+      label: group.length > 1 ? `${group.length} laboratory investigations` : reference.label,
+      issuedAt: parseNotesJson(first?.authorizationSnapshot).authoredAt || reference.issuedAt,
+    };
+  });
 }
 
 function medDraftFromOrder(order: any) {
@@ -758,8 +848,11 @@ export async function POST(
     const meds = scope === 'labs' ? [] : (Array.isArray(body.medications) ? body.medications : []);
     const labs = scope === 'medications' ? [] : (Array.isArray(body.labs) ? body.labs : []);
 
-    if (meds.length === 0 && labs.length === 0) {
+    if (action !== 'clear-draft' && meds.length === 0 && labs.length === 0) {
       return NextResponse.json({ ok: false, error: 'at_least_one_order_required' }, { status: 400 });
+    }
+    if (action === 'clear-draft' && scope === 'all') {
+      return NextResponse.json({ ok: false, error: 'clear_draft_scope_required' }, { status: 400 });
     }
 
     const encounter = await prisma.encounter.findUnique({
@@ -783,6 +876,26 @@ export async function POST(
     if (!identity.clinician) return NextResponse.json({ ok: false, error: 'clinician_not_found' }, { status: 404 });
     if (clean(who.role, 40).toLowerCase() === 'clinician' && !clinicianCanAccessEncounter(encounter, identity.refs)) {
       return NextResponse.json({ ok: false, error: 'forbidden_encounter_scope' }, { status: 403 });
+    }
+
+    const simulationRequested = body?.simulation === true || body?.simulationOnly === true;
+    const simulationEncounter = isSimulationEncounter(encounter);
+    if (simulationRequested || simulationEncounter) {
+      await prisma.auditEvent.create({
+        data: {
+          kind: 'simulation_order_persistence_blocked',
+          actorId: who.uid,
+          actorRole: who.role,
+          subjectId: encounterId,
+          meta: jsonSafe({ action, scope, simulationRequested, simulationEncounter }) as any,
+        },
+      }).catch(() => null);
+
+      return NextResponse.json({
+        ok: false,
+        error: 'simulation_order_persistence_forbidden',
+        message: 'Simulation prescriptions and laboratory requests are local training artifacts and cannot be persisted or fulfilled.',
+      }, { status: 409, headers: { 'Cache-Control': 'no-store' } });
     }
 
     const clinician = identity.clinician;
@@ -814,6 +927,48 @@ export async function POST(
     }
     if (!operational.allowedWorkspaces.includes('erx')) {
       return NextResponse.json({ ok: false, error: 'workspace_not_authorized', blockers: operational.blockers, operational }, { status: 403 });
+    }
+
+    if (action === 'clear-draft') {
+      const cleared = await prisma.$transaction(async (tx) => {
+        if (scope === 'medications') {
+          const result = await tx.erxOrder.deleteMany({
+            where: { encounterId, clinicianId: clinician.id, kind: 'medication', status: 'draft' },
+          });
+          return { medications: result.count, labs: 0 };
+        }
+
+        const result = await tx.labOrder.deleteMany({
+          where: { encounterId, clinicianId: clinician.id, kind: 'lab', status: 'draft' },
+        });
+        return { medications: 0, labs: result.count };
+      });
+
+      await prisma.auditEvent.create({
+        data: {
+          kind: scope === 'medications' ? 'encounter_erx_draft_cleared' : 'encounter_lab_draft_cleared',
+          actorId: who.uid,
+          actorRole: who.role,
+          subjectId: encounterId,
+          meta: jsonSafe({ patientId, clinicianId: clinician.id, scope, cleared }) as any,
+        },
+      }).catch(() => null);
+
+      return NextResponse.json({
+        ok: true,
+        encounterId,
+        patientId,
+        clinicianId: clinician.id,
+        action,
+        scope,
+        status: 'empty',
+        cleared,
+        medications: [],
+        labs: [],
+      }, {
+        status: 200,
+        headers: { 'Cache-Control': 'no-store', 'access-control-allow-origin': '*' },
+      });
     }
 
     // Drafting is allowed without silently turning the draft into a clinical order.
@@ -1114,6 +1269,25 @@ export async function GET(
       return NextResponse.json({ ok: false, error: 'forbidden_encounter_scope' }, { status: 403 });
     }
 
+    if (isSimulationEncounter(encounter)) {
+      return NextResponse.json({
+        ok: true,
+        encounterId,
+        simulation: true,
+        erxOrders: [],
+        labOrders: [],
+        issued: { medications: [], labs: [] },
+        draft: {
+          medications: [],
+          labs: [],
+          hasMedicationDraft: false,
+          hasLabDraft: false,
+        },
+      }, {
+        headers: { 'Cache-Control': 'no-store', 'access-control-allow-origin': '*' },
+      });
+    }
+
     const [erxOrders, labOrders] = await Promise.all([
       prisma.erxOrder.findMany({ where: { encounterId }, orderBy: { createdAt: 'desc' } }),
       prisma.labOrder.findMany({ where: { encounterId }, orderBy: { createdAt: 'desc' } }),
@@ -1132,6 +1306,18 @@ export async function GET(
       encounterId,
       erxOrders,
       labOrders,
+      issued: {
+        medications: clinicianId
+          ? issuedMedicationReferences(
+              erxOrders.filter((order: any) => order.clinicianId === clinicianId && order.kind === 'medication' && order.status === 'issued'),
+            )
+          : [],
+        labs: clinicianId
+          ? issuedLabReferences(
+              labOrders.filter((order: any) => order.clinicianId === clinicianId && order.kind === 'lab' && order.status === 'issued'),
+            )
+          : [],
+      },
       draft: {
         medications: draftMedOrders.map(medDraftFromOrder),
         labs: draftLabOrders.map(labDraftFromOrder),

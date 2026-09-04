@@ -127,12 +127,51 @@ type ErxResult = {
   dispenseCode: string;
   error?: string;
   scope?: OrderScope;
+  pdfUrl?: string;
+};
+
+type IssuedOrderReference = {
+  id: string;
+  scope: OrderScope;
+  status: string;
+  label: string;
+  issuedAt?: string;
+  pdfUrl?: string;
+};
+
+type RecoveryDraft = {
+  version: 1;
+  savedAt: string;
+  rxRows: RxRow[];
+  labRows: LabRow[];
+  medicationState: OrderState;
+  labState: OrderState;
+  erxResult: ErxResult | null;
 };
 
 const EMPTY_RX: RxRow = {
   drug: '', strength: '', form: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0,
 };
 const EMPTY_LAB: LabRow = { test: '', priority: '', specimen: '', icd: '', instructions: '' };
+
+function parseRecoveryDraft(raw: string | null): RecoveryDraft | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== 1) return null;
+    return {
+      version: 1,
+      savedAt: String(parsed.savedAt || ''),
+      rxRows: Array.isArray(parsed.rxRows) ? parsed.rxRows : [],
+      labRows: Array.isArray(parsed.labRows) ? parsed.labRows : [],
+      medicationState: ['empty', 'draft', 'issued'].includes(parsed.medicationState) ? parsed.medicationState : 'empty',
+      labState: ['empty', 'draft', 'issued'].includes(parsed.labState) ? parsed.labState : 'empty',
+      erxResult: parsed.erxResult && typeof parsed.erxResult === 'object' ? parsed.erxResult : null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function parseSig(sig: string) {
   const parts = sig.trim().split(/\s+/);
@@ -225,13 +264,33 @@ export default function ErxComposer({
   const [medicationState, setMedicationState] = useState<OrderState>('empty');
   const [labState, setLabState] = useState<OrderState>('empty');
   const [erxResult, setErxResult] = useState<ErxResult | null>(null);
+  const [issuedOrders, setIssuedOrders] = useState<IssuedOrderReference[]>([]);
   const [busyScope, setBusyScope] = useState<OrderScope | null>(null);
   const [previewScope, setPreviewScope] = useState<OrderScope | null>(null);
-  const [draftHydrated, setDraftHydrated] = useState(simulation || !encounterId);
+  const [brandedPreviewBusy, setBrandedPreviewBusy] = useState<OrderScope | null>(null);
+  const [draftHydrated, setDraftHydrated] = useState(false);
   const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const hydratingRef = useRef(true);
   const previousMedSignature = useRef('');
   const previousLabSignature = useRef('');
+  const persistedMedSignature = useRef('');
+  const persistedLabSignature = useRef('');
+  const latestDraftRef = useRef<{
+    medications: { signature: string; payload: Record<string, unknown> };
+    labs: { signature: string; payload: Record<string, unknown> };
+  } | null>(null);
+
+  const recoveryKey = useMemo(() => {
+    const consultationKey = encounterId || appt.id || appt.roomId || 'unbound';
+    return [
+      'ambulant',
+      'orders-recovery-v1',
+      simulation ? 'simulation' : 'production',
+      consultationKey,
+      clinicianId || 'clinician',
+      patientId || 'patient',
+    ].join(':');
+  }, [appt.id, appt.roomId, clinicianId, encounterId, patientId, simulation]);
 
   const [operational, setOperational] = useState<null | {
     canPrescribe?: boolean;
@@ -316,31 +375,141 @@ export default function ErxComposer({
   }, []);
 
   useEffect(() => {
+    let alive = true;
+    hydratingRef.current = true;
+    setDraftHydrated(false);
+
+    const recovery = typeof window !== 'undefined'
+      ? parseRecoveryDraft(window.sessionStorage.getItem(recoveryKey))
+      : null;
+
+    const applyRecovery = (source: 'simulation' | 'server-fallback') => {
+      if (!recovery) return false;
+      const recoveredMeds = validMedicationRows(recovery.rxRows || []);
+      const recoveredLabs = validLabRows(recovery.labRows || []);
+      const rx = recoveredMeds.length ? recovery.rxRows.map((row) => ({ ...EMPTY_RX, ...row, refills: Number(row?.refills || 0) })) : [{ ...EMPTY_RX }];
+      const labs = recoveredLabs.length ? recovery.labRows.map((row) => ({ ...EMPTY_LAB, ...row })) : [{ ...EMPTY_LAB }];
+
+      setRxRows(rx);
+      setLabRows(labs);
+      setMedicationState(recoveredMeds.length ? recovery.medicationState || 'draft' : recovery.medicationState === 'issued' ? 'issued' : 'empty');
+      setLabState(recoveredLabs.length ? recovery.labState || 'draft' : recovery.labState === 'issued' ? 'issued' : 'empty');
+      setErxResult(recovery.erxResult || null);
+
+      const recoveredMedSignature = JSON.stringify(recoveredMeds);
+      const recoveredLabSignature = JSON.stringify(recoveredLabs);
+      previousMedSignature.current = source === 'simulation' ? recoveredMedSignature : '';
+      previousLabSignature.current = source === 'simulation' ? recoveredLabSignature : '';
+      return recoveredMeds.length > 0 || recoveredLabs.length > 0 || Boolean(recovery.erxResult);
+    };
+
     if (simulation || !encounterId) {
+      applyRecovery('simulation');
       hydratingRef.current = false;
       setDraftHydrated(true);
-      return;
+      return () => { alive = false; };
     }
-    let alive = true;
+
     void (async () => {
+      let hydratedFromServer = false;
       try {
-        const res = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/erx`, { cache: 'no-store' });
+        const res = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/erx`, {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+        });
         const js = await res.json().catch(() => null as any);
         if (!alive) return;
-        if (res.ok && js?.draft) {
-          const meds = Array.isArray(js.draft.medications) ? js.draft.medications : [];
-          const labs = Array.isArray(js.draft.labs) ? js.draft.labs : [];
-          if (meds.length) {
-            setRxRows(meds.map((row: any) => ({ ...EMPTY_RX, ...row, refills: Number(row?.refills || 0) })));
+
+        if (res.ok && js?.ok) {
+          const meds = Array.isArray(js?.draft?.medications) ? js.draft.medications : [];
+          const labs = Array.isArray(js?.draft?.labs) ? js.draft.labs : [];
+          const hydratedMeds = meds.map((row: any) => ({ ...EMPTY_RX, ...row, refills: Number(row?.refills || 0) }));
+          const hydratedLabs = labs.map((row: any) => ({ ...EMPTY_LAB, ...row }));
+
+          if (hydratedMeds.length) {
+            setRxRows(hydratedMeds);
             setMedicationState('draft');
           }
-          if (labs.length) {
-            setLabRows(labs.map((row: any) => ({ ...EMPTY_LAB, ...row })));
+          if (hydratedLabs.length) {
+            setLabRows(hydratedLabs);
             setLabState('draft');
           }
+
+          const medServerSignature = JSON.stringify(validMedicationRows(hydratedMeds));
+          const labServerSignature = JSON.stringify(validLabRows(hydratedLabs));
+          previousMedSignature.current = medServerSignature;
+          previousLabSignature.current = labServerSignature;
+          persistedMedSignature.current = medServerSignature;
+          persistedLabSignature.current = labServerSignature;
+
+          const medIssued = Array.isArray(js?.issued?.medications)
+            ? js.issued.medications
+            : (Array.isArray(js?.erxOrders) ? js.erxOrders : [])
+                .filter((row: any) => String(row?.status || '').toLowerCase() === 'issued')
+                .map((row: any) => ({
+                  id: String(row?.id || ''),
+                  scope: 'medications',
+                  status: String(row?.status || 'issued'),
+                  label: String(row?.drug || 'ePrescription'),
+                  issuedAt: String(row?.signedAt || row?.createdAt || ''),
+                  pdfUrl: row?.id ? `/api/erx/${encodeURIComponent(String(row.id))}/pdf` : undefined,
+                }));
+          const labIssued = Array.isArray(js?.issued?.labs)
+            ? js.issued.labs
+            : (Array.isArray(js?.labOrders) ? js.labOrders : [])
+                .filter((row: any) => String(row?.status || '').toLowerCase() === 'issued')
+                .map((row: any) => ({
+                  id: String(row?.id || ''),
+                  scope: 'labs',
+                  status: String(row?.status || 'issued'),
+                  label: String(row?.panel || 'Laboratory requisition'),
+                  issuedAt: String(row?.createdAt || ''),
+                  pdfUrl: row?.id ? `/api/labs/${encodeURIComponent(String(row.id))}/pdf` : undefined,
+                }));
+
+          const normalizedIssued = [...medIssued, ...labIssued]
+            .filter((row: any) => row?.id)
+            .map((row: any) => ({
+              id: String(row.id),
+              scope: row.scope === 'labs' ? 'labs' : 'medications',
+              status: String(row.status || 'issued'),
+              label: String(row.label || (row.scope === 'labs' ? 'Laboratory requisition' : 'ePrescription')),
+              issuedAt: row.issuedAt ? String(row.issuedAt) : undefined,
+              pdfUrl: row.pdfUrl ? String(row.pdfUrl) : undefined,
+            })) as IssuedOrderReference[];
+          setIssuedOrders(normalizedIssued.slice(0, 12));
+
+          if (!hydratedMeds.length && medIssued.length) setMedicationState('issued');
+          if (!hydratedLabs.length && labIssued.length) setLabState('issued');
+
+          hydratedFromServer = hydratedMeds.length > 0 || hydratedLabs.length > 0;
+          if (!hydratedFromServer && recovery) {
+            const recoverySavedAt = Date.parse(recovery.savedAt || '');
+            const newestIssuedAt = normalizedIssued.reduce((latest, order) => {
+              const timestamp = Date.parse(order.issuedAt || '');
+              return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
+            }, Number.NEGATIVE_INFINITY);
+            const recoveryPredatesIssued =
+              Number.isFinite(newestIssuedAt) &&
+              (!Number.isFinite(recoverySavedAt) || recoverySavedAt <= newestIssuedAt);
+
+            if (recoveryPredatesIssued) {
+              window.sessionStorage.removeItem(recoveryKey);
+            } else {
+              const recovered = applyRecovery('server-fallback');
+              if (recovered) setAutosaveState('saving');
+            }
+          }
+        } else if (recovery) {
+          const recovered = applyRecovery('server-fallback');
+          if (recovered) setAutosaveState('error');
         }
       } catch {
-        // The local UI remains usable; a visible save failure appears on the next write.
+        if (alive && recovery) {
+          const recovered = applyRecovery('server-fallback');
+          if (recovered) setAutosaveState('error');
+        }
       } finally {
         if (alive) {
           hydratingRef.current = false;
@@ -348,8 +517,42 @@ export default function ErxComposer({
         }
       }
     })();
+
     return () => { alive = false; };
-  }, [encounterId, simulation]);
+  }, [encounterId, recoveryKey, simulation]);
+
+  useEffect(() => {
+    if (!draftHydrated || hydratingRef.current || typeof window === 'undefined') return;
+
+    const authoredMeds = validMedicationRows(rxRows);
+    const authoredLabs = validLabRows(labRows);
+    const shouldKeepRecovery =
+      authoredMeds.length > 0 ||
+      authoredLabs.length > 0 ||
+      (simulation && Boolean(erxResult));
+
+    if (!shouldKeepRecovery) {
+      window.sessionStorage.removeItem(recoveryKey);
+      return;
+    }
+
+    const snapshot: RecoveryDraft = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      rxRows,
+      labRows,
+      medicationState,
+      labState,
+      erxResult,
+    };
+
+    try {
+      window.sessionStorage.setItem(recoveryKey, JSON.stringify(snapshot));
+      if (simulation) setAutosaveState('saved');
+    } catch {
+      setAutosaveState('error');
+    }
+  }, [draftHydrated, erxResult, labRows, labState, medicationState, recoveryKey, rxRows, simulation]);
 
   useEffect(() => {
     if (!onSummaryChange) return;
@@ -378,10 +581,12 @@ export default function ErxComposer({
     });
   }, [labState, labsToAuthor, medicationState, medsToAuthor, onSummaryChange]);
 
-  function payloadFor(scope: OrderScope, action: 'save-draft' | 'finalize') {
+  function payloadFor(scope: OrderScope, action: 'save-draft' | 'finalize' | 'clear-draft') {
     return {
       action,
       scope,
+      simulation,
+      simulationOnly: simulation,
       encounterId,
       patientId,
       patientName: profile.name || appt.patientName,
@@ -399,11 +604,11 @@ export default function ErxComposer({
 
   async function persistScope(
     scope: OrderScope,
-    action: 'save-draft' | 'finalize',
+    action: 'save-draft' | 'finalize' | 'clear-draft',
     opts: { quiet?: boolean } = {},
   ) {
     const rows = scope === 'medications' ? medsToAuthor : labsToAuthor;
-    if (!rows.length) {
+    if (action !== 'clear-draft' && !rows.length) {
       if (!opts.quiet) onToast(`Add at least one ${scope === 'medications' ? 'medication' : 'lab test'} first.`, 'warning', 'Nothing to save');
       return false;
     }
@@ -436,12 +641,33 @@ export default function ErxComposer({
     }
 
     if (simulation) {
+      if (action === 'clear-draft') {
+        if (scope === 'medications') {
+          setMedicationState('empty');
+          setRxRows([{ ...EMPTY_RX }]);
+        } else {
+          setLabState('empty');
+          setLabRows([{ ...EMPTY_LAB }]);
+        }
+        setAutosaveState('saved');
+        return true;
+      }
+
       if (scope === 'medications') setMedicationState(action === 'finalize' ? 'issued' : 'draft');
       else setLabState(action === 'finalize' ? 'issued' : 'draft');
       setAutosaveState('saved');
+
       if (action === 'finalize') {
         const simulatedId = `sim-${scope === 'medications' ? 'erx' : 'lab'}-${Date.now()}`;
-        setErxResult({ id: simulatedId, status: 'SIMULATION — NOT FOR CLINICAL FULFILMENT', dispenseCode: 'NOT FOR DISPENSING', scope });
+        setErxResult({
+          id: simulatedId,
+          status: 'SIMULATION — NOT FOR CLINICAL FULFILMENT',
+          dispenseCode: 'NOT FOR DISPENSING',
+          scope,
+        });
+        if (scope === 'medications') setRxRows([{ ...EMPTY_RX }]);
+        else setLabRows([{ ...EMPTY_LAB }]);
+
         if (!opts.quiet) onToast(
           `Simulated ${scope === 'medications' ? 'prescription' : 'lab order'} finalized. No production patient record, CarePort, MedReach, pharmacy or laboratory was updated.`,
           'success',
@@ -458,36 +684,102 @@ export default function ErxComposer({
 
     if (!opts.quiet) setBusyScope(scope);
     else setAutosaveState('saving');
+
     try {
+      const requestPayload = payloadFor(scope, action);
       const res = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/erx`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payloadFor(scope, action)),
+        body: JSON.stringify(requestPayload),
+        credentials: 'same-origin',
       });
       const js = await res.json().catch(() => null as any);
       if (!res.ok || !js?.ok) throw new Error(js?.message || js?.error || `HTTP ${res.status}`);
 
-      if (scope === 'medications') setMedicationState(action === 'finalize' ? 'issued' : 'draft');
-      else setLabState(action === 'finalize' ? 'issued' : 'draft');
+      if (action === 'clear-draft') {
+        if (scope === 'medications') {
+          setMedicationState('empty');
+          persistedMedSignature.current = '';
+        } else {
+          setLabState('empty');
+          persistedLabSignature.current = '';
+        }
+        setAutosaveState('saved');
+        return true;
+      }
+
+      const currentSignature = scope === 'medications' ? medSignature : labSignature;
+      if (action === 'save-draft') {
+        if (scope === 'medications') {
+          setMedicationState('draft');
+          persistedMedSignature.current = currentSignature;
+        } else {
+          setLabState('draft');
+          persistedLabSignature.current = currentSignature;
+        }
+        setAutosaveState('saved');
+        if (!opts.quiet) {
+          onToast(`${scope === 'medications' ? 'Prescription' : 'Lab'} draft saved to the encounter.`, 'success', 'Draft saved');
+        }
+        return true;
+      }
+
+      if (scope === 'medications') {
+        setMedicationState('issued');
+        // Mark the just-issued payload as already persisted before clearing the
+        // authoring rows. This prevents an immediate component/page unmount from
+        // re-posting the pre-finalization draft via the keepalive recovery flush.
+        persistedMedSignature.current = currentSignature;
+      } else {
+        setLabState('issued');
+        persistedLabSignature.current = currentSignature;
+      }
       setAutosaveState('saved');
 
-      if (action === 'finalize') {
-        const first = scope === 'medications' ? js?.medications?.[0] : js?.labs?.[0];
-        setErxResult({
-          id: String(first?.id || ''), status: String(js?.status || 'issued'),
-          dispenseCode: String(first?.dispenseCode || 'Patient action required'), scope,
-        });
-        if (!opts.quiet) onToast(
-          `${scope === 'medications' ? 'Prescription' : 'Lab order'} issued to the patient record. No ${scope === 'medications' ? 'CarePort' : 'MedReach'} marketplace request was sent; the patient chooses if and when to route it.`,
-          'success',
-          'Issued to patient',
-        );
-        onAudit(scope === 'medications' ? 'erx.issued_to_patient' : 'lab.issued_to_patient', {
-          encounterId, count: rows.length, marketplaceDispatched: false, fulfilmentOwner: 'patient',
-        });
-      } else if (!opts.quiet) {
-        onToast(`${scope === 'medications' ? 'Prescription' : 'Lab'} draft saved to the encounter.`, 'success', 'Draft saved');
+      const first = scope === 'medications' ? js?.medications?.[0] : js?.labs?.[0];
+      const issuedId = String(first?.id || '');
+      const pdfUrl = issuedId
+        ? (scope === 'medications'
+            ? `/api/erx/${encodeURIComponent(issuedId)}/pdf`
+            : `/api/labs/${encodeURIComponent(issuedId)}/pdf`)
+        : undefined;
+      const result: ErxResult = {
+        id: issuedId,
+        status: String(js?.status || 'issued'),
+        dispenseCode: String(first?.dispenseCode || 'Patient action required'),
+        scope,
+        pdfUrl,
+      };
+      setErxResult(result);
+
+      if (issuedId) {
+        const issuedReference: IssuedOrderReference = {
+          id: issuedId,
+          scope,
+          status: String(js?.status || 'issued'),
+          label: scope === 'medications'
+            ? String(first?.drug || 'ePrescription')
+            : String(first?.panel || 'Laboratory requisition'),
+          issuedAt: String(first?.signedAt || first?.createdAt || new Date().toISOString()),
+          pdfUrl,
+        };
+        setIssuedOrders((current) => [
+          issuedReference,
+          ...current.filter((item) => item.id !== issuedId),
+        ].slice(0, 12));
       }
+
+      if (scope === 'medications') setRxRows([{ ...EMPTY_RX }]);
+      else setLabRows([{ ...EMPTY_LAB }]);
+
+      if (!opts.quiet) onToast(
+        `${scope === 'medications' ? 'Prescription' : 'Lab order'} issued to the patient record. No ${scope === 'medications' ? 'CarePort' : 'MedReach'} marketplace request was sent; the patient chooses if and when to route it.`,
+        'success',
+        'Issued to patient',
+      );
+      onAudit(scope === 'medications' ? 'erx.issued_to_patient' : 'lab.issued_to_patient', {
+        encounterId, count: rows.length, marketplaceDispatched: false, fulfilmentOwner: 'patient',
+      });
       return true;
     } catch (error: any) {
       setAutosaveState('error');
@@ -498,34 +790,193 @@ export default function ErxComposer({
     }
   }
 
-  // Debounced server-backed recovery. Finalization remains a separate explicit act.
+  latestDraftRef.current = {
+    medications: { signature: medSignature, payload: payloadFor('medications', medSignature ? 'save-draft' : 'clear-draft') },
+    labs: { signature: labSignature, payload: payloadFor('labs', labSignature ? 'save-draft' : 'clear-draft') },
+  };
+
+  // Debounced server-backed recovery. Session storage is updated synchronously above,
+  // while production drafts are also flushed on Orders unmount so a tab change cannot
+  // cancel the only persistence opportunity.
   useEffect(() => {
     if (!draftHydrated || hydratingRef.current) return;
     if (previousMedSignature.current === medSignature) return;
+
+    const previous = previousMedSignature.current;
     previousMedSignature.current = medSignature;
+
     if (!medsToAuthor.length) {
-      setMedicationState('empty');
+      setMedicationState((state) => state === 'issued' ? 'issued' : 'empty');
+      if (!simulation && previous && persistedMedSignature.current) {
+        void persistScope('medications', 'clear-draft', { quiet: true });
+      }
       return;
     }
+
     setMedicationState((state) => state === 'issued' ? 'draft' : state === 'empty' ? 'draft' : state);
-    const id = window.setTimeout(() => { void persistScope('medications', 'save-draft', { quiet: true }); }, 1200);
+    if (simulation) {
+      setAutosaveState('saved');
+      return;
+    }
+
+    const id = window.setTimeout(() => {
+      void persistScope('medications', 'save-draft', { quiet: true });
+    }, 500);
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftHydrated, medSignature]);
+  }, [draftHydrated, medSignature, simulation]);
 
   useEffect(() => {
     if (!draftHydrated || hydratingRef.current) return;
     if (previousLabSignature.current === labSignature) return;
+
+    const previous = previousLabSignature.current;
     previousLabSignature.current = labSignature;
+
     if (!labsToAuthor.length) {
-      setLabState('empty');
+      setLabState((state) => state === 'issued' ? 'issued' : 'empty');
+      if (!simulation && previous && persistedLabSignature.current) {
+        void persistScope('labs', 'clear-draft', { quiet: true });
+      }
       return;
     }
+
     setLabState((state) => state === 'issued' ? 'draft' : state === 'empty' ? 'draft' : state);
-    const id = window.setTimeout(() => { void persistScope('labs', 'save-draft', { quiet: true }); }, 1200);
+    if (simulation) {
+      setAutosaveState('saved');
+      return;
+    }
+
+    const id = window.setTimeout(() => {
+      void persistScope('labs', 'save-draft', { quiet: true });
+    }, 500);
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftHydrated, labSignature]);
+  }, [draftHydrated, labSignature, simulation]);
+
+  useEffect(() => {
+    if (simulation || !encounterId) return;
+
+    const flushLatest = () => {
+      const latest = latestDraftRef.current;
+      if (!latest) return;
+
+      const flush = (entry: { signature: string; payload: Record<string, unknown> }, persistedSignature: string) => {
+        if (entry.signature === persistedSignature) return;
+        void fetch(`/api/encounters/${encodeURIComponent(encounterId)}/erx`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(entry.payload),
+          credentials: 'same-origin',
+          keepalive: true,
+        }).catch(() => {});
+      };
+
+      flush(latest.medications, persistedMedSignature.current);
+      flush(latest.labs, persistedLabSignature.current);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushLatest();
+    };
+    window.addEventListener('pagehide', flushLatest);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      window.removeEventListener('pagehide', flushLatest);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      flushLatest();
+    };
+  }, [encounterId, simulation]);
+
+  async function openBrandedSimulationPreview(scope: OrderScope) {
+    if (!simulation) return;
+    const rows = scope === 'medications' ? medsToAuthor : labsToAuthor;
+    if (!rows.length) {
+      onToast(`Add at least one ${scope === 'medications' ? 'medication' : 'lab test'} first.`, 'warning', 'Nothing to preview');
+      return;
+    }
+
+    const previewWindow = window.open('', '_blank');
+    if (previewWindow) {
+      try { previewWindow.opener = null; } catch {}
+      previewWindow.document.title = 'Ambulant+ branded simulation preview';
+      previewWindow.document.body.innerHTML = '<p style="font-family:system-ui;padding:24px">Preparing branded simulation PDF…</p>';
+    }
+
+    setBrandedPreviewBusy(scope);
+    try {
+      const severeAllergyAlert = severeAllergies.length
+        ? `Documented severe allergy: ${severeAllergies.map((allergy) => allergy.substance).filter(Boolean).join(', ')}.`
+        : '';
+      const body = scope === 'medications'
+        ? {
+            kind: 'prescription',
+            simulation: true,
+            encounterId: encounterId || undefined,
+            patient: { id: patientId || undefined, name: profile.name || appt.patientName },
+            clinician: { name: appt.clinicianName },
+            prescriptionId: `SIM-${appt.id || appt.roomId || 'PREVIEW'}`,
+            medications: medsToAuthor.map((row) => ({
+              name: row.drug,
+              strength: row.strength,
+              form: row.form,
+              dose: row.dose,
+              route: row.route,
+              frequency: row.freq,
+              duration: row.duration,
+              quantity: row.qty,
+              repeats: row.refills,
+              notes: row.notes,
+              rxcui: row.rxcui,
+              nappi: row.nappi,
+            })),
+            severeAllergyAlert,
+          }
+        : {
+            kind: 'lab-requisition',
+            simulation: true,
+            encounterId: encounterId || undefined,
+            patient: { id: patientId || undefined, name: profile.name || appt.patientName },
+            clinician: { name: appt.clinicianName },
+            orderId: `SIM-${appt.id || appt.roomId || 'PREVIEW'}`,
+            clinicalContext: soap.clinicalNote || soap.clinicalReasoning || soap.a || appt.reason || '',
+            tests: labsToAuthor.map((row) => ({
+              code: row.catalogCode,
+              codeSystem: row.catalogSystem,
+              name: row.test,
+              specimen: row.specimen,
+              priority: row.priority || 'Routine',
+              note: row.instructions || row.icd || '',
+            })),
+          };
+
+      const response = await fetch('/api/clinical-documents/render', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/pdf' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const message = await response.text().catch(() => '');
+        throw new Error(message || `Branded preview failed (HTTP ${response.status}).`);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      if (previewWindow && !previewWindow.closed) previewWindow.location.href = objectUrl;
+      else window.open(objectUrl, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 120000);
+      onAudit(scope === 'medications' ? 'erx.simulation_branded_preview' : 'lab.simulation_branded_preview', {
+        encounterId, persisted: false, fulfilmentCapable: false,
+      });
+    } catch (error: any) {
+      if (previewWindow && !previewWindow.closed) previewWindow.close();
+      onToast(error?.message || 'Branded simulation PDF preview failed.', 'error', 'Preview unavailable');
+    } finally {
+      setBrandedPreviewBusy(null);
+    }
+  }
 
   const addRxRow = () => setRxRows((rows) => [...rows, { ...EMPTY_RX }]);
   const removeRxRow = (index: number) => setRxRows((rows) => rows.filter((_, i) => i !== index));
@@ -641,6 +1092,31 @@ export default function ErxComposer({
           <div className="font-semibold">{erxResult.scope === 'labs' ? 'Lab order' : 'Prescription'}: {erxResult.status}</div>
           {erxResult.id ? <div className="mt-1">Reference: <span className="font-mono">{erxResult.id}</span></div> : null}
           <div className="mt-1">{simulation ? 'Simulation only · no production patient record or marketplace dispatch' : 'Fulfilment owner: patient · marketplace dispatch: none'}</div>
+          {!simulation && erxResult.pdfUrl ? (
+            <a className="mt-2 inline-flex rounded border border-emerald-300 bg-white px-2 py-1 font-semibold text-emerald-900 hover:bg-emerald-100" href={erxResult.pdfUrl} target="_blank" rel="noreferrer">
+              Open branded {erxResult.scope === 'labs' ? 'lab requisition' : 'ePrescription'} PDF
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!simulation && issuedOrders.length ? (
+        <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+          <div className="text-xs font-semibold text-slate-900">Issued Orders for this encounter</div>
+          <div className="mt-2 space-y-2">
+            {issuedOrders.map((order) => (
+              <div key={`${order.scope}-${order.id}`} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-2 py-2 text-xs">
+                <span className="font-medium text-slate-900">{order.scope === 'labs' ? 'Lab requisition' : 'ePrescription'}</span>
+                <span className="min-w-0 flex-1 truncate text-slate-600">{order.label}</span>
+                {order.issuedAt ? <span className="text-[11px] text-slate-500">{new Date(order.issuedAt).toLocaleString()}</span> : null}
+                {order.pdfUrl ? (
+                  <a className="rounded border bg-white px-2 py-1 font-semibold text-slate-700 hover:bg-slate-100" href={order.pdfUrl} target="_blank" rel="noreferrer">
+                    Branded PDF
+                  </a>
+                ) : null}
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -674,6 +1150,18 @@ export default function ErxComposer({
               ))}
             </div>
             <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">{simulation ? 'Simulation preview only. Finalizing remains inside this training session and does not issue to a production patient record or trigger CarePort/MedReach.' : "Finalizing issues this clinician-authored order to the patient's record only. CarePort/MedReach discovery is a later patient-owned action."}</div>
+            {simulation ? (
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  className="rounded border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-900 disabled:opacity-50"
+                  disabled={brandedPreviewBusy !== null}
+                  onClick={() => void openBrandedSimulationPreview(previewScope)}
+                >
+                  {brandedPreviewBusy === previewScope ? 'Preparing branded PDF…' : `Open branded simulation ${previewScope === 'medications' ? 'ePrescription' : 'lab requisition'} PDF`}
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

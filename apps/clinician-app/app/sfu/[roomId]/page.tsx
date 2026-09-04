@@ -3026,7 +3026,11 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                     </Card>
                   )}
 
-                  {rightTab === 'erx' && (
+                  <div
+                    className={rightTab === 'erx' ? 'block' : 'hidden'}
+                    aria-hidden={rightTab !== 'erx'}
+                    data-orders-workspace-mounted="persistent"
+                  >
                     <ErxComposer
                       dense={dense}
                       soap={soap}
@@ -3058,7 +3062,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                       onAudit={audit}
                       onSummaryChange={setErxSummary}
                     />
-                  )}
+                  </div>
 
                   {(rightTab as string) === 'conclusions' && (
                     <Card title="Conclusions" dense={dense} gradient>

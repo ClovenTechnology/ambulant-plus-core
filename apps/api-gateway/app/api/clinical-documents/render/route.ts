@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { readIdentity, requireTrustedIdentityInProduction } from '@/src/lib/identity';
 import { getClinicalDocumentBranding } from '@/src/clinical-documents/branding';
-import { renderLabRequisitionPdf, renderMedicalCertificatePdf } from '@/src/clinical-documents/templates';
+import { renderLabRequisitionPdf, renderMedicalCertificatePdf, renderPrescriptionPdf } from '@/src/clinical-documents/templates';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -106,7 +106,51 @@ export async function POST(req: NextRequest) {
     const context = await resolveContext(who, body);
     let pdf: Buffer;
     let filename: string;
-    if (kind === 'lab' || kind === 'lab-requisition') {
+    if (kind === 'prescription' || kind === 'erx') {
+      // This stateless route is preview-only for prescriptions. Real dispensing
+      // documents are rendered only from persisted issued ErxOrder records at
+      // /api/erx/:id/pdf. Keeping this branch simulation-only prevents an
+      // ad-hoc preview payload from becoming a clinically valid prescription.
+      if (body?.simulation !== true) {
+        return NextResponse.json({
+          ok: false,
+          error: 'prescription_preview_requires_simulation',
+          message: 'Production prescription PDFs must be rendered from an issued encounter-linked eRx order.',
+        }, { status: 409, headers: { 'cache-control': 'no-store' } });
+      }
+      const items = Array.isArray(body?.medications || body?.items) ? (body.medications || body.items) : [];
+      if (!items.length) {
+        return NextResponse.json({ ok: false, error: 'prescription_items_required' }, { status: 400 });
+      }
+      pdf = renderPrescriptionPdf({
+        branding,
+        prescriptionId: clean(body?.prescriptionId || body?.orderId || body?.encounterId || 'SIMULATION-PREVIEW', 180),
+        rxNumber: clean(body?.rxNumber || 'SIMULATION PREVIEW', 120),
+        status: 'SIMULATION PREVIEW - NOT VALID FOR DISPENSING',
+        issuedAt: body?.issuedAt || body?.createdAt || new Date(),
+        patient: context.patient,
+        prescriber: context.prescriber,
+        medications: items.map((item: any) => ({
+          name: clean(item?.name || item?.drug || item?.title, 260),
+          strength: clean(item?.strength, 120),
+          form: clean(item?.form || item?.dosageForm, 120),
+          directions: clean(
+            item?.directions ||
+            [item?.dose, item?.route, item?.freq || item?.frequency, item?.duration].filter(Boolean).join(' '),
+            900,
+          ),
+          quantity: clean(item?.quantity || item?.qty, 120),
+          repeats: Number(item?.repeats ?? item?.refills ?? 0),
+          duration: clean(item?.duration, 120),
+          code: clean(item?.code || item?.rxcui || item?.nappi, 100),
+          codeSystem: clean(item?.codeSystem || (item?.nappi ? 'NAPPI' : item?.rxcui ? 'RxNorm' : ''), 100),
+          note: clean(item?.note || item?.notes, 600),
+        })),
+        severeAllergyAlert: clean(body?.severeAllergyAlert, 1000) || null,
+        simulation: true,
+      });
+      filename = 'ambulant-simulation-prescription-preview.pdf';
+    } else if (kind === 'lab' || kind === 'lab-requisition') {
       const items = Array.isArray(body?.tests || body?.items) ? (body.tests || body.items) : [];
       pdf = renderLabRequisitionPdf({
         branding,
