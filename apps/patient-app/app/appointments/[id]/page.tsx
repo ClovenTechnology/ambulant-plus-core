@@ -235,13 +235,13 @@ function appointmentPaymentIsFailed(appt: Appt) {
 }
 
 function appointmentJoinBlockReason(appt: Appt) {
-  if (!appt.patientJoinUrl && !appt.roomId) return 'Televisit room is not ready yet.';
-  if (appointmentPaymentIsPending(appt)) return 'Complete payment before joining the televisit.';
-  if (appointmentPaymentIsFailed(appt)) return 'Payment failed or expired. Please rebook or retry checkout.';
-
   const status = normalizeStatus(appt.status);
   if (['completed', 'done', 'closed'].includes(status)) return 'This appointment has already been completed.';
   if (['cancelled', 'canceled'].includes(status)) return 'This appointment has been cancelled.';
+
+  if (!appt.patientJoinUrl && !appt.roomId) return 'Televisit room is not ready yet.';
+  if (appointmentPaymentIsPending(appt)) return 'Complete payment before joining the televisit.';
+  if (appointmentPaymentIsFailed(appt)) return 'Payment failed or expired. Please rebook or retry checkout.';
 
   return 'This appointment is not ready for televisit entry yet.';
 }

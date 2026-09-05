@@ -113,7 +113,7 @@ export function bookingStateShape(intent: any, authorization?: any | null) {
   const authorizationStatus = clean(authorization?.status, 80).toUpperCase() || null;
   const canResumePayment =
     holdActive &&
-    ['PAYMENT_ACTION_REQUIRED', 'COPAY_REQUIRED', 'PAYMENT_FAILED'].includes(intentStatus) &&
+    ['PAYMENT_ACTION_REQUIRED', 'PAYMENT_PROCESSING', 'COPAY_REQUIRED', 'PAYMENT_FAILED'].includes(intentStatus) &&
     Number(intent.patientPayableMinor || 0) > 0;
 
   return {
