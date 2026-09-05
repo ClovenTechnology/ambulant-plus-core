@@ -261,25 +261,26 @@ export async function POST(req: NextRequest) {
     240,
   );
 
-  const isFamily = body?.person?.mode === 'FAMILY';
+  const requestedSubjectPatientId = clean(
+    body?.person?.subjectPatientId ||
+      body.subjectPatientId ||
+      body.subject_patient_id,
+  );
+  const isFamily =
+    body?.person?.mode === 'FAMILY' ||
+    Boolean(
+      requestedSubjectPatientId &&
+      requestedSubjectPatientId !== patientId,
+    );
 
   const subjectPatientId = isFamily
-    ? clean(
-        body?.person?.subjectPatientId ||
-          body.subjectPatientId ||
-          body.subject_patient_id,
-      )
+    ? requestedSubjectPatientId
     : patientId;
-  const familyRelationshipId = isFamily
-    ? clean(
-        body?.person?.relationshipId ||
-          body.familyRelationshipId ||
-          body.family_relationship_id,
-      )
-    : clean(
-        body.familyRelationshipId ||
-          body.family_relationship_id,
-      );
+  const familyRelationshipId = clean(
+    body?.person?.relationshipId ||
+      body.familyRelationshipId ||
+      body.family_relationship_id,
+  );
 
   const payload: any = {
     clinicianId,
@@ -348,6 +349,22 @@ export async function POST(req: NextRequest) {
     price_lock:
       body.priceLock ||
       body.price_lock ||
+      null,
+    clientId:
+      body.clientId ||
+      body.client_id ||
+      null,
+    client_id:
+      body.clientId ||
+      body.client_id ||
+      null,
+    voucherCode:
+      body.voucherCode ||
+      body.voucher_code ||
+      null,
+    voucher_code:
+      body.voucherCode ||
+      body.voucher_code ||
       null,
     source: 'patient-app-calendar',
   };
@@ -419,11 +436,15 @@ export async function POST(req: NextRequest) {
       data?.payment?.redirect_url ||
       '';
 
+    const booking = data?.booking || appointment?.booking || null;
     const shouldStartCardCheckout =
-      paymentMethod === 'card' &&
       amountCents > 0 &&
       appointmentId &&
-      !redirectUrl;
+      !redirectUrl &&
+      (
+        paymentMethod === 'card' ||
+        Boolean(booking?.canResumePayment)
+      );
 
     if (shouldStartCardCheckout) {
       if (!patientEmail) {
@@ -523,6 +544,7 @@ export async function POST(req: NextRequest) {
         case_id: caseId,
         roomId: data?.roomId || appointment?.roomId || roomId,
         paymentMethod,
+        booking,
         payment,
         paymentRef,
         payment_ref: paymentRef,

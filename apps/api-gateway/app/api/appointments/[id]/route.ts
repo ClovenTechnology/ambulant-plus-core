@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { updateAppointment } from '@/src/store/appointments';
+import { bookingStateForAppointment } from '@/src/appointments/booking-reservation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -85,9 +86,12 @@ export async function OPTIONS() {
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
   try {
     const id = clean(params.id);
-    const row = await prisma.appointment.findUnique({ where: { id } });
+    let row = await prisma.appointment.findUnique({ where: { id } });
 
     if (!row) return json({ ok: false, error: 'not_found' }, 404);
+
+    const booking = await bookingStateForAppointment(row.id);
+    row = (await prisma.appointment.findUnique({ where: { id } })) || row;
 
     const [visit, clinician, patient] = await Promise.all([
       prisma.televisit.findFirst({
@@ -132,8 +136,11 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
       }).catch(() => null),
     ]);
 
-    const appointment = shape(row, visit, clinician, patient);
-    return json({ ok: true, appointment, ...appointment });
+    const appointment = {
+      ...shape(row, visit, clinician, patient),
+      booking,
+    };
+    return json({ ok: true, appointment, ...appointment, booking });
   } catch (err: any) {
     return json({ ok: false, error: err?.message || 'appointment_load_failed' }, 500);
   }

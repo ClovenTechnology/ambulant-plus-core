@@ -1,9 +1,41 @@
-// apps/patient-app/app/televisit/[id]/page.tsx
-'use client';
+import { redirect } from 'next/navigation';
 
-// Reuse the SFU room page, but adapt param name: id -> roomId
-import SfuPage from '../../sfu/[roomId]/page';
+type SearchParams =
+  Record<string, string | string[] | undefined>;
 
-export default function Televisit({ params }: { params: { id: string } }) {
-  return <SfuPage params={{ roomId: params.id }} />;
+function firstValue(
+  ...values: Array<string | string[] | undefined>
+) {
+  for (const value of values) {
+    const candidate = Array.isArray(value)
+      ? value[0]
+      : value;
+
+    const clean = String(candidate || '').trim();
+    if (clean) return clean;
+  }
+
+  return '';
+}
+
+export default function LegacyTelevisitRoute({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
+  const appointmentId = firstValue(
+    searchParams?.appointmentId,
+    searchParams?.appointment,
+    searchParams?.appt,
+  );
+
+  if (appointmentId) {
+    redirect(
+      `/lobby?appointmentId=${encodeURIComponent(
+        appointmentId,
+      )}`,
+    );
+  }
+
+  redirect('/televisit');
 }

@@ -19,6 +19,19 @@ import {
   AvailabilityError,
   validateAvailabilityInterval,
 } from '@/src/availability/resolver';
+import {
+  bookingIntentId,
+  bookingSlotKey,
+  bookingStateForAppointment,
+  computeBookingHoldExpiresAt,
+  lockClinicianBookingLane,
+  sha256Hex as reservationSha256Hex,
+} from '@/src/appointments/booking-reservation';
+import {
+  normalizeBookingFundingMethod,
+  previewBookingFunding,
+} from '@/src/appointments/booking-funding';
+import { createCoverageAuthorization } from '@ambulant/client-core/src/authorizations';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -942,17 +955,9 @@ export async function POST(req: NextRequest) {
       ),
     });
 
-    const paymentMethodRaw = clean(
-      body.paymentMethod || body.payment_method,
-    ).toUpperCase();
-    const paymentMethod =
-      paymentMethodRaw === 'MEDICAL_AID' ||
-      paymentMethodRaw === 'VOUCHER' ||
-      paymentMethodRaw === 'MPESA'
-        ? paymentMethodRaw
-        : paymentMethodRaw === 'CARD'
-          ? 'CARD'
-          : null;
+    const paymentMethod = normalizeBookingFundingMethod(
+      body.paymentMethod || body.payment_method || 'CARD',
+    );
 
     const appointmentId = deterministicId(
       'appt',
@@ -1015,6 +1020,9 @@ export async function POST(req: NextRequest) {
             orderBy: { sequence: 'asc' },
           }),
         ]);
+
+      const existingBooking =
+        await bookingStateForAppointment(existingAppointment.id);
 
       const replayAppointment = {
         ...existingAppointment,
@@ -1086,8 +1094,43 @@ export async function POST(req: NextRequest) {
             existingAppointment.paymentStatus,
           status: existingAppointment.status,
           multiCare: existingMeta.multiCare || null,
+          booking: existingBooking,
         },
         200,
+      );
+    }
+
+    const orgId = clean(who.orgId) || 'org-default';
+    const fundingPreview = await previewBookingFunding({
+      method: paymentMethod,
+      patientId: recipients[0].patientId,
+      clinicianUserId: clean(clinician.userId || clinician.id),
+      clinicianId: clinician.id,
+      hostUserId,
+      kind: appointmentKind,
+      totalAmountMinor: quote.totalAmountMinor,
+      currency: quote.currency,
+      orgId,
+      clientId: clean(body.clientId || body.client_id) || undefined,
+      voucherCode: clean(body.voucherCode || body.voucher_code, 160) || undefined,
+    });
+
+    if (quote.multiCare && paymentMethod !== 'CARD') {
+      throw new MultiCareBookingError(
+        'multi_care_non_card_funding_requires_individual_coverage_review',
+        409,
+      );
+    }
+
+    if (!fundingPreview.canProceed) {
+      return json(
+        {
+          ok: false,
+          error: 'funding_preflight_blocked',
+          funding: fundingPreview,
+          message: fundingPreview.reason,
+        },
+        409,
       );
     }
 
@@ -1136,7 +1179,6 @@ export async function POST(req: NextRequest) {
     }
 
     const now = new Date();
-    const orgId = clean(who.orgId) || 'org-default';
     const primaryRecipient = recipients[0];
     const primaryEncounterId = deterministicId(
       'enc',
@@ -1195,14 +1237,33 @@ export async function POST(req: NextRequest) {
     const clinicianTakeCents =
       Math.max(0, priceCents - platformFeeCents);
 
-    const paymentStatus =
-      priceCents <= 0
-        ? 'NOT_REQUIRED'
-        : 'PENDING';
-    const appointmentStatus =
-      paymentStatus === 'NOT_REQUIRED'
-        ? 'confirmed'
-        : 'pending_payment';
+    const fundingDecision = clean(fundingPreview.decision, 80).toUpperCase();
+    const sponsorReviewRequired =
+      paymentMethod === 'MEDICAL_AID' &&
+      fundingPreview.authorizationRequired;
+    const patientPayableMinor = Math.max(
+      0,
+      Number(fundingPreview.patientPayableMinor || 0),
+    );
+    const sponsorAmountMinor = Math.max(
+      0,
+      Number(fundingPreview.sponsorAmountMinor || 0),
+    );
+    const immediatelyConfirmed =
+      priceCents <= 0 ||
+      (!sponsorReviewRequired && patientPayableMinor <= 0);
+    const intentId = bookingIntentId(hostUserId, idempotencyKey);
+    const slotKey = bookingSlotKey({
+      clinicianId: clinician.id,
+      startsAt,
+      endsAt: finalEndsAt,
+    });
+    const holdExpiresAt = immediatelyConfirmed
+      ? null
+      : computeBookingHoldExpiresAt({
+          startsAt,
+          now,
+        });
 
     const joinOpensAt = new Date(
       startsAt.getTime() - 15 * 60 * 1000,
@@ -1282,6 +1343,16 @@ export async function POST(req: NextRequest) {
         requestFingerprint,
         priceLockHash: sha256Hex(suppliedPriceLock),
         trustedIdentitySource: who.source,
+      },
+      bookingReservation: {
+        bookingIntentId: intentId,
+        slotKey,
+        holdExpiresAt: holdExpiresAt?.toISOString() || null,
+        ttlMinutes: 20,
+        fundingMethod: paymentMethod,
+        fundingDecision,
+        sponsorAmountMinor,
+        patientPayableMinor,
       },
       ticketIssuance: {
         mode: 'ON_DEMAND_VIA_TELEVISIT_ISSUE',
@@ -1381,6 +1452,8 @@ export async function POST(req: NextRequest) {
 
     const created = await prisma.$transaction(
       async (tx: any) => {
+        await lockClinicianBookingLane(tx, clinician.id);
+
         const transactionConflicts =
           await findMultiCareConflicts({
             db: tx,
@@ -1412,6 +1485,318 @@ export async function POST(req: NextRequest) {
             'patient_conflict',
             409,
           );
+        }
+
+        const transactionFunding = await previewBookingFunding({
+          method: paymentMethod,
+          patientId: recipients[0].patientId,
+          clinicianUserId: clean(clinician.userId || clinician.id),
+          clinicianId: clinician.id,
+          hostUserId,
+          kind: appointmentKind,
+          totalAmountMinor: quote.totalAmountMinor,
+          currency: quote.currency,
+          orgId,
+          clientId: clean(body.clientId || body.client_id) || undefined,
+          voucherCode: clean(body.voucherCode || body.voucher_code, 160) || undefined,
+          db: tx,
+        });
+
+        if (!transactionFunding.canProceed) {
+          throw new MultiCareBookingError(
+            'funding_preflight_changed',
+            409,
+            {
+              decision: transactionFunding.decision,
+              reason: transactionFunding.reason,
+            },
+          );
+        }
+
+        const txSponsorReviewRequired =
+          paymentMethod === 'MEDICAL_AID' &&
+          transactionFunding.authorizationRequired;
+        const txPatientPayableMinor = Math.max(
+          0,
+          Number(transactionFunding.patientPayableMinor || 0),
+        );
+        const txSponsorAmountMinor = Math.max(
+          0,
+          Number(transactionFunding.sponsorAmountMinor || 0),
+        );
+        const txImmediatelyConfirmed =
+          priceCents <= 0 ||
+          (!txSponsorReviewRequired && txPatientPayableMinor <= 0);
+        const txPaymentStatus =
+          priceCents <= 0
+            ? 'NOT_REQUIRED'
+            : txImmediatelyConfirmed
+              ? 'AUTHORIZED'
+              : 'PENDING';
+        const txAppointmentStatus = txImmediatelyConfirmed
+          ? 'confirmed'
+          : 'pending_payment';
+        const txIntentStatus = txImmediatelyConfirmed
+          ? 'CONFIRMED'
+          : txSponsorReviewRequired
+            ? 'SPONSOR_REVIEW'
+            : paymentMethod === 'CARD'
+              ? 'PAYMENT_ACTION_REQUIRED'
+              : 'COPAY_REQUIRED';
+        const txHoldExpiresAt = txImmediatelyConfirmed
+          ? null
+          : computeBookingHoldExpiresAt({ startsAt, now });
+
+        const existingIntent = await tx.bookingIntent.findFirst({
+          where: {
+            hostUserId,
+            idempotencyKeyHash: reservationSha256Hex(idempotencyKey),
+          },
+        });
+        if (existingIntent) {
+          throw new MultiCareBookingError(
+            'booking_intent_already_exists_without_replayable_appointment',
+            409,
+          );
+        }
+
+        const intent = await tx.bookingIntent.create({
+          data: {
+            id: intentId,
+            requestFingerprint,
+            idempotencyKeyHash: reservationSha256Hex(idempotencyKey),
+            hostUserId,
+            actorPatientId,
+            clinicianId: clinician.id,
+            status: txIntentStatus,
+            fundingMethod: paymentMethod,
+            kind: appointmentKind,
+            visitMode: 'TELEVISIT',
+            startsAt,
+            endsAt: finalEndsAt,
+            slotKey,
+            slotOfferHash: reservationSha256Hex(
+              `${clinician.id}\u0000${startsAt.toISOString()}\u0000${requestedEndsAt.toISOString()}`,
+            ),
+            slotOfferExpiresAt: startsAt,
+            priceLockHash: reservationSha256Hex(suppliedPriceLock),
+            priceLockExpiresAt: new Date(lockPayload.expiresAt),
+            holdExpiresAt: txHoldExpiresAt,
+            amountMinor: priceCents,
+            subtotalMinor: priceCents,
+            taxMinor: 0,
+            discountMinor: 0,
+            totalMinor: priceCents,
+            sponsorAmountMinor: txSponsorAmountMinor,
+            patientPayableMinor: txPatientPayableMinor,
+            currency: quote.currency,
+            coverageDecision: transactionFunding.decision,
+            reason:
+              clean(body.reason || body.title || body.notes) ||
+              'Televisit consultation',
+            caseId: primaryCaseId,
+            confirmedAt: txImmediatelyConfirmed ? now : null,
+            quoteSnapshot: {
+              totalAmountMinor: quote.totalAmountMinor,
+              durationMin: quote.durationMin,
+              currency: quote.currency,
+              policy: quote.policy,
+              allocations: quote.allocations,
+            },
+            coverageSnapshot: transactionFunding,
+            recipientSnapshot: careRecipientSnapshot,
+            metadata: {
+              source: 'patient.booking',
+              clinicianDisplayName: clinician.displayName || 'Clinician',
+              selectedFundingMethod: paymentMethod,
+            },
+            orgId,
+          } as any,
+        });
+
+        await tx.bookingSlotLease.create({
+          data: {
+            bookingIntentId: intent.id,
+            slotKey,
+            clinicianId: clinician.id,
+            startsAt,
+            endsAt: finalEndsAt,
+            status: txImmediatelyConfirmed ? 'CONSUMED' : 'ACTIVE',
+            holdTokenHash: reservationSha256Hex(
+              `${intent.id}\u0000${idempotencyKey}\u0000${slotKey}`,
+            ),
+            expiresAt: txHoldExpiresAt || finalEndsAt,
+            consumedAt: txImmediatelyConfirmed ? now : null,
+            metadata: {
+              source: 'canonical_patient_booking',
+              ttlMinutes: 20,
+            },
+            orgId,
+          } as any,
+        });
+
+        let coverageAuthorizationId: string | null = null;
+
+        if (txSponsorReviewRequired) {
+          if (
+            !transactionFunding.clientId ||
+            !transactionFunding.clientMemberId ||
+            !transactionFunding.coveragePlanId
+          ) {
+            throw new MultiCareBookingError(
+              'coverage_authorization_context_missing',
+              409,
+            );
+          }
+
+          const authorization = await createCoverageAuthorization({
+            orgId,
+            clientId: transactionFunding.clientId,
+            coveragePlanId: transactionFunding.coveragePlanId,
+            clientMemberId: transactionFunding.clientMemberId,
+            userId: hostUserId,
+            patientId: primaryRecipient.patientId,
+            scopeType: 'APPOINTMENT',
+            scopeId: appointmentId,
+            serviceType:
+              appointmentKind === 'FOLLOWUP'
+                ? 'CONSULT_FOLLOWUP'
+                : 'CONSULT_STANDARD',
+            requestedAmountMinor: priceCents,
+            currency: quote.currency,
+            ruleSnapshot: {
+              ...(transactionFunding.ruleSnapshot || {}),
+              bookingIntentId: intent.id,
+              preflightDecision: transactionFunding.decision,
+              sponsorAmountMinor: txSponsorAmountMinor,
+              patientPayableMinor: txPatientPayableMinor,
+            },
+            metadata: {
+              source: 'patient.booking',
+              bookingIntentId: intent.id,
+              appointmentId,
+              clinicianId: clinician.id,
+              visitMode: 'TELEVISIT',
+            },
+            tx,
+            idempotencyKey: `booking:${intent.id}:coverage`,
+          });
+
+          coverageAuthorizationId = authorization.id;
+          await tx.coverageAuthorization.update({
+            where: { id: authorization.id },
+            data: {
+              appointmentId,
+              clinicianId: clinician.id,
+              visitMode: 'TELEVISIT',
+            },
+          });
+          await tx.bookingIntent.update({
+            where: { id: intent.id },
+            data: { coverageAuthorizationId },
+          });
+        }
+
+        if (paymentMethod === 'VOUCHER') {
+          if (!transactionFunding.voucherId) {
+            throw new MultiCareBookingError('voucher_authority_missing', 409);
+          }
+
+          const voucher = await tx.voucherCode.findUnique({
+            where: { id: transactionFunding.voucherId },
+          });
+          if (!voucher || !voucher.active) {
+            throw new MultiCareBookingError('voucher_no_longer_available', 409);
+          }
+
+          const nextUsedCount = voucher.usedCount + 1;
+          const mutation = await tx.voucherCode.updateMany({
+            where: {
+              id: voucher.id,
+              active: true,
+              usedCount: voucher.usedCount,
+            },
+            data: {
+              usedCount: nextUsedCount,
+              active:
+                voucher.maxUses === 0 || nextUsedCount < voucher.maxUses,
+            },
+          });
+          if (mutation.count !== 1) {
+            throw new MultiCareBookingError('voucher_concurrent_redemption', 409);
+          }
+
+          await tx.voucherRedemption.create({
+            data: {
+              voucherId: voucher.id,
+              userId: hostUserId,
+              creditedZar: Math.floor(txSponsorAmountMinor / 100),
+              meta: {
+                source: 'canonical_patient_booking',
+                bookingIntentId: intent.id,
+                appointmentId,
+                amountMinor: txSponsorAmountMinor,
+                currency: quote.currency,
+                provisional: !txImmediatelyConfirmed,
+                voucherUsedCountBefore: voucher.usedCount,
+                voucherAutoDeactivated:
+                  voucher.maxUses > 0 && nextUsedCount >= voucher.maxUses,
+              },
+              orgId,
+            },
+          });
+        }
+
+        for (const recipient of runtimeRecipients) {
+          const allocation = recipient.allocation;
+          await tx.bookingIntentRecipient.create({
+            data: {
+              bookingIntentId: intent.id,
+              patientId: recipient.patientId,
+              patientUserId: recipient.patientUserId,
+              hostUserId,
+              familyRelationshipId: recipient.familyRelationshipId,
+              role: recipient.sequence === 0 ? 'PRIMARY' : recipient.role,
+              sequence: recipient.sequence,
+              status: recipient.identityVerified
+                ? paymentMethod === 'MEDICAL_AID'
+                  ? txSponsorReviewRequired
+                    ? 'PENDING_COVERAGE'
+                    : txPatientPayableMinor > 0
+                      ? 'COPAY_REQUIRED'
+                      : 'COVERED'
+                  : 'READY'
+                : 'PENDING_IDENTITY_VERIFICATION',
+              identityVerifiedAt: recipient.identityVerified ? now : null,
+              reason: recipient.reason || null,
+              caseId: recipient.caseId,
+              baseAmountMinor: allocation.baseAmountMinor,
+              additionalAmountMinor: allocation.additionalAmountMinor,
+              discountMinor: allocation.discountMinor,
+              grossAmountMinor: allocation.grossAmountMinor,
+              sponsorAmountMinor:
+                recipient.sequence === 0 ? txSponsorAmountMinor : 0,
+              patientPayableMinor:
+                recipient.sequence === 0
+                  ? txPatientPayableMinor
+                  : allocation.patientPayableMinor,
+              currency: allocation.currency,
+              coverageDecision: transactionFunding.decision,
+              coverageAuthorizationId:
+                recipient.sequence === 0 ? coverageAuthorizationId : null,
+              pricingSnapshot: {
+                policyId: quote.policy?.id || null,
+                policyVersion: quote.policy?.version || null,
+                allocation,
+              },
+              coverageSnapshot: transactionFunding,
+              metadata: {
+                displayName: recipient.displayName,
+                partyId: recipient.partyId,
+              },
+              orgId,
+            } as any,
+          });
         }
 
         const encounterRows: any[] = [];
@@ -1467,16 +1852,15 @@ export async function POST(req: NextRequest) {
               visitMode: 'TELEVISIT',
               startsAt,
               endsAt: finalEndsAt,
-              status: appointmentStatus,
+              status: txAppointmentStatus,
               confirmedAt:
-                appointmentStatus ===
-                'confirmed'
+                txAppointmentStatus === 'confirmed'
                   ? now
                   : null,
               paymentMethod:
                 paymentMethod as any,
               paymentStatus:
-                paymentStatus as any,
+                txPaymentStatus as any,
               paymentProvider: null,
               paymentRef: null,
               priceCents,
@@ -1489,21 +1873,25 @@ export async function POST(req: NextRequest) {
               discountMinor: 0,
               totalMinor: priceCents,
               patientCopayMinor:
-                priceCents,
-              sponsorAmountMinor: 0,
+                txPatientPayableMinor,
+              sponsorAmountMinor: txSponsorAmountMinor,
               sponsorCurrency:
                 quote.currency,
               coverageDecision:
-                paymentMethod ===
-                'MEDICAL_AID'
-                  ? 'pending_authorisation'
-                  : null,
+                transactionFunding.decision,
               bookingSource:
                 'patient_app',
               meta: baseMeta,
               orgId,
             } as any,
           });
+
+        await tx.bookingIntent.update({
+          where: { id: intent.id },
+          data: {
+            appointmentId: appointment.id,
+          },
+        });
 
         const session =
           await tx.consultationSession.create({
@@ -1607,19 +1995,22 @@ export async function POST(req: NextRequest) {
                 grossAmountMinor:
                   allocation
                     .grossAmountMinor,
-                sponsorAmountMinor: 0,
+                sponsorAmountMinor:
+                  recipient.sequence === 0
+                    ? txSponsorAmountMinor
+                    : 0,
                 patientPayableMinor:
-                  allocation
-                    .patientPayableMinor,
+                  recipient.sequence === 0
+                    ? txPatientPayableMinor
+                    : allocation.patientPayableMinor,
                 currency:
                   allocation.currency,
                 coverageDecision:
-                  paymentMethod ===
-                  'MEDICAL_AID'
-                    ? 'pending_authorisation'
-                    : 'self_pay',
+                  transactionFunding.decision,
                 coverageAuthorizationId:
-                  null,
+                  recipient.sequence === 0
+                    ? coverageAuthorizationId
+                    : null,
                 pricingSnapshot: {
                   policyId:
                     quote.policy?.id || null,
@@ -1634,11 +2025,12 @@ export async function POST(req: NextRequest) {
                 },
                 coverageSnapshot: {
                   paymentMethod,
-                  state:
-                    paymentMethod ===
-                    'MEDICAL_AID'
-                      ? 'pending_authorisation'
-                      : 'self_pay',
+                  state: txIntentStatus,
+                  decision: transactionFunding.decision,
+                  authorizationRequired:
+                    transactionFunding.authorizationRequired,
+                  sponsorAmountMinor: txSponsorAmountMinor,
+                  patientPayableMinor: txPatientPayableMinor,
                 },
                 metadata: {
                   displayName:
@@ -1811,7 +2203,10 @@ export async function POST(req: NextRequest) {
                   startsAt.toISOString(),
                 endsAt:
                   finalEndsAt.toISOString(),
-                paymentStatus,
+                paymentStatus: txPaymentStatus,
+                bookingIntentId: intent.id,
+                bookingIntentStatus: txIntentStatus,
+                holdExpiresAt: txHoldExpiresAt?.toISOString() || null,
                 totalAmountMinor:
                   priceCents,
               },
@@ -1846,6 +2241,11 @@ export async function POST(req: NextRequest) {
             careRecipientRows,
           participants:
             participantRows,
+          bookingIntentId: intent.id,
+          bookingIntentStatus: txIntentStatus,
+          holdExpiresAt: txHoldExpiresAt,
+          funding: transactionFunding,
+          coverageAuthorizationId,
         };
       },
     );
@@ -1916,6 +2316,9 @@ export async function POST(req: NextRequest) {
       })
       .catch(() => null);
 
+    const booking =
+      await bookingStateForAppointment(created.appointment.id);
+
     const appointment = {
       ...created.appointment,
       startsAt:
@@ -1951,6 +2354,7 @@ export async function POST(req: NextRequest) {
         baseMeta.clinicianLocation,
       multiCare:
         baseMeta.multiCare,
+      booking,
     };
 
     return json(
@@ -1979,9 +2383,14 @@ export async function POST(req: NextRequest) {
         roomId,
         clinicianJoinUrl,
         patientJoinUrl,
-        paymentStatus,
+        paymentStatus:
+          created.appointment.paymentStatus,
         status:
-          appointmentStatus,
+          created.appointment.status,
+        funding: created.funding,
+        booking,
+        coverageAuthorizationId:
+          created.coverageAuthorizationId,
         multiCare: {
           ...baseMeta.multiCare,
           careRecipientIds:

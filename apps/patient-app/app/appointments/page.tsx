@@ -632,6 +632,7 @@ function UpcomingAppointmentCard({
     addSuffix: true,
   });
 
+  const paymentPending = paymentIsPending(appointment, paymentState);
   const canJoin = canJoinAppointment(appointment, paymentState);
   const joinReason = joinBlockReason(appointment, paymentState);
 
@@ -657,7 +658,7 @@ function UpcomingAppointmentCard({
 
           <div className="mt-4 flex flex-wrap gap-2 text-xs">
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
-              {appointment.clinicianName || appointment.clinicianId}
+              {appointment.clinicianName || 'Clinician'}
             </span>
 
             {appointment.location && (
@@ -666,7 +667,7 @@ function UpcomingAppointmentCard({
               </span>
             )}
 
-            {paymentIsPending(appointment, paymentState) && (
+            {paymentPending && (
               <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-800">
                 Awaiting payment
               </span>
@@ -681,6 +682,15 @@ function UpcomingAppointmentCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+          {paymentPending ? (
+            <Link
+              href={`${detailHref}${detailHref.includes('?') ? '&' : '?'}payment=1#booking-payment`}
+              className="rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700"
+            >
+              Continue booking / payment
+            </Link>
+          ) : null}
+
           <Link
             href={detailHref}
             className="rounded-full border px-3 py-2 text-xs font-medium hover:bg-slate-50"
@@ -696,22 +706,26 @@ function UpcomingAppointmentCard({
             Add to calendar
           </a>
 
-          <Link
-            href={`${detailHref}${
-              detailHref.includes('?') ? '&' : '?'
-            }reschedule=1`}
-            className="rounded-full border px-3 py-2 text-xs font-medium hover:bg-slate-50"
-          >
-            Reschedule
-          </Link>
+          {!paymentPending ? (
+            <>
+              <Link
+                href={`${detailHref}${
+                  detailHref.includes('?') ? '&' : '?'
+                }reschedule=1`}
+                className="rounded-full border px-3 py-2 text-xs font-medium hover:bg-slate-50"
+              >
+                Reschedule
+              </Link>
 
-          <button
-            type="button"
-            onClick={() => onCancel(appointment.id)}
-            className="rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-100"
-          >
-            Cancel
-          </button>
+              <button
+                type="button"
+                onClick={() => onCancel(appointment.id)}
+                className="rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-100"
+              >
+                Cancel
+              </button>
+            </>
+          ) : null}
 
           {canJoin ? (
             <Link

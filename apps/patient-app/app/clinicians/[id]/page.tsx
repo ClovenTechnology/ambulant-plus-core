@@ -622,7 +622,7 @@ export default function ClinicianBioPage({ params }: { params: { id: string } })
               {/* Right: CTAs */}
               <div className="flex flex-col gap-3 sm:flex-row lg:flex-col lg:items-end">
                 <Link
-                  href={`/clinicians/${encodeURIComponent(c.id)}/calendar?type=standard&country=${encodeURIComponent(c.country || 'ZA')}`}
+                  href={`/clinicians/${encodeURIComponent(c.id)}/calendar?type=standard&country=${encodeURIComponent(c.country || 'ZA')}&funding=card`}
                   className={cx(
                     'inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-semibold shadow-lg transition',
                     canBook ? 'bg-white text-slate-950 hover:bg-slate-100' : 'pointer-events-none bg-white/10 text-white/40'
@@ -875,7 +875,7 @@ export default function ClinicianBioPage({ params }: { params: { id: string } })
                 </Link>
                 {c.acceptsMedicalAid && canBook && (
                   <Link
-                    href={`/appointments/new?clinicianId=${encodeURIComponent(c.id)}`}
+                    href={`/clinicians/${encodeURIComponent(c.id)}/calendar?type=standard&country=${encodeURIComponent(c.country || 'ZA')}&funding=medical_aid`}
                     className="flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100"
                   >
                     <ShieldCheckIcon className="h-4 w-4" />

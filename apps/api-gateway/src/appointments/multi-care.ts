@@ -14,6 +14,9 @@ const ACTIVE_APPOINTMENT_EXCLUSIONS = [
   'Cancelled',
   'completed',
   'Completed',
+  'payment_expired',
+  'cancelled_payment_timeout',
+  'payment_init_failed',
 ];
 
 export type RequestedCareRecipient = {

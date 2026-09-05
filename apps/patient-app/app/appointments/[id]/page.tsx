@@ -40,6 +40,23 @@ type Appt = {
   clinicianLocation?: string | null;
   patientName?: string | null;
   patientAvatarUrl?: string | null;
+  booking?: {
+    intentId?: string | null;
+    status?: string | null;
+    fundingMethod?: string | null;
+    holdExpiresAt?: string | null;
+    holdActive?: boolean;
+    slotLeaseStatus?: string | null;
+    patientPayableMinor?: number;
+    sponsorAmountMinor?: number;
+    currency?: string | null;
+    coverageDecision?: string | null;
+    coverageAuthorizationId?: string | null;
+    coverageAuthorizationStatus?: string | null;
+    canResumePayment?: boolean;
+    requiresSponsorReview?: boolean;
+    requiresExplicitFundingChange?: boolean;
+  } | null;
 };
 
 type Rating = {
@@ -70,6 +87,23 @@ function moneyMinor(value: unknown, currency = 'ZAR') {
     style: 'currency',
     currency,
   }).format(n / 100);
+}
+
+function bookingFundingLabel(value: unknown) {
+  const method = String(value || '').toUpperCase();
+  if (method === 'MEDICAL_AID') return 'Medical Aid / Sponsor';
+  if (method === 'VOUCHER') return 'Voucher';
+  return 'Card / Self-pay';
+}
+
+function holdCountdown(expiresAt?: string | null, nowMs = Date.now()) {
+  const end = Date.parse(String(expiresAt || ''));
+  if (!Number.isFinite(end)) return null;
+  const remaining = Math.max(0, end - nowMs);
+  const totalSeconds = Math.ceil(remaining / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 function asObj(v: unknown): Record<string, any> {
@@ -345,6 +379,9 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
   const [appt, setAppt] = useState<Appt | null | 'notfound'>(null);
   const [rating, setRating] = useState<Rating | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentMessage, setPaymentMessage] = useState('');
+  const [clockNow, setClockNow] = useState(() => Date.now());
 
   const [ratingOpen, setRatingOpen] = useState(false);
   const [ratingScore, setRatingScore] = useState<number>(0);
@@ -410,6 +447,12 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
     void loadReimbursementClaims();
   }, [id]);
 
+  useEffect(() => {
+    if (!appt || appt === 'notfound' || !appt.booking?.holdExpiresAt) return;
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [appt]);
+
   const canJoin = useMemo(() => {
     if (!appt || appt === 'notfound') return false;
     const s = normalizeStatus(appt.status);
@@ -439,6 +482,169 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
     autoOpened.current = true;
     setRatingOpen(true);
   }, [shouldPromptRating, appt, canRate, hasRating]);
+
+  async function refreshAppointment() {
+    const next = await fetchAppointmentById(id, me);
+    if (next) setAppt(next);
+    return next;
+  }
+
+  async function patientCheckoutEmail() {
+    try {
+      const response = await fetch('/api/profile', {
+        cache: 'no-store',
+        credentials: 'include',
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data) return '';
+      const profile = data?.profile || data?.patient || data;
+      return String(
+        profile?.email ||
+          profile?.contactEmail ||
+          profile?.patientEmail ||
+          '',
+      ).trim();
+    } catch {
+      return '';
+    }
+  }
+
+  async function continuePayment() {
+    if (!appt || appt === 'notfound' || paymentBusy) return;
+    const booking = appt.booking;
+    const legacyCardPending =
+      !booking &&
+      appointmentPaymentIsPending(appt) &&
+      ['card', 'self-pay-card', 'self_pay_card', 'self-pay'].includes(
+        String(appt.paymentMethod || '').trim().toLowerCase(),
+      );
+
+    if (!booking?.canResumePayment && !legacyCardPending) {
+      setPaymentMessage(
+        booking?.requiresSponsorReview
+          ? 'Medical Aid / sponsor authorisation is still being reviewed.'
+          : 'This booking does not currently have a resumable payment action.',
+      );
+      await refreshAppointment();
+      return;
+    }
+
+    setPaymentBusy(true);
+    setPaymentMessage('');
+    try {
+      const email = await patientCheckoutEmail();
+      if (!email) {
+        throw new Error('A patient email is required for secure card checkout. Please update your profile and try again.');
+      }
+
+      const key =
+        globalThis.crypto?.randomUUID?.() ||
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const response = await fetch('/api/payments', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-idempotency-key': key,
+        },
+        credentials: 'include',
+        cache: 'no-store',
+        body: JSON.stringify({
+          action: 'initialize',
+          appointmentId: appt.id,
+          paymentMethod: 'CARD',
+          email,
+          callbackUrl: `${window.location.origin}/payments/return?appointmentId=${encodeURIComponent(appt.id)}`,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || data?.ok === false) {
+        throw new Error(data?.error || `Payment could not be resumed (HTTP ${response.status}).`);
+      }
+
+      const redirectUrl = String(data?.redirectUrl || data?.redirect_url || '').trim();
+      if (!redirectUrl) {
+        await refreshAppointment();
+        throw new Error('Secure payment was prepared but no payment redirect was returned. Please try again.');
+      }
+
+      window.location.href = redirectUrl;
+    } catch (error: any) {
+      setPaymentMessage(error?.message || 'Could not resume payment. Please try again.');
+      await refreshAppointment();
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  async function cancelPendingBooking() {
+    if (!appt || appt === 'notfound' || paymentBusy) return;
+    if (!window.confirm('Cancel this pending booking and release the reserved appointment time?')) return;
+
+    setPaymentBusy(true);
+    setPaymentMessage('');
+    try {
+      const key =
+        globalThis.crypto?.randomUUID?.() ||
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const response = await fetch('/api/payments', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-idempotency-key': key,
+        },
+        credentials: 'include',
+        cache: 'no-store',
+        body: JSON.stringify({
+          action: 'cancel_booking',
+          appointmentId: appt.id,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Could not cancel this pending booking.');
+      }
+      setPaymentMessage('Booking cancelled and the appointment time has been released.');
+      await refreshAppointment();
+    } catch (error: any) {
+      setPaymentMessage(error?.message || 'Could not cancel this pending booking.');
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  async function switchFundingToCard() {
+    if (!appt || appt === 'notfound' || paymentBusy) return;
+    setPaymentBusy(true);
+    setPaymentMessage('');
+    try {
+      const key =
+        globalThis.crypto?.randomUUID?.() ||
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const response = await fetch('/api/payments', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-idempotency-key': key,
+        },
+        credentials: 'include',
+        cache: 'no-store',
+        body: JSON.stringify({
+          action: 'switch_funding_to_card',
+          appointmentId: appt.id,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Could not switch this booking to Card / Self-pay.');
+      }
+      setPaymentMessage('Funding changed to Card / Self-pay. You can now continue to secure payment.');
+      await refreshAppointment();
+    } catch (error: any) {
+      setPaymentMessage(error?.message || 'Could not change the funding method.');
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -599,6 +805,50 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
   const joinHref = lobbyHrefForAppointment(appt);
   const joinReason = appointmentJoinBlockReason(appt);
 
+  const booking = appt.booking || null;
+  const bookingStatus = String(booking?.status || '').trim().toUpperCase();
+  const bookingCurrency = String(booking?.currency || appt.currency || 'ZAR').trim().toUpperCase() || 'ZAR';
+  const holdExpiresAtMs = Date.parse(String(booking?.holdExpiresAt || ''));
+  const holdStillActive = Boolean(
+    booking?.holdActive &&
+      Number.isFinite(holdExpiresAtMs) &&
+      holdExpiresAtMs > clockNow,
+  );
+  const holdRemaining = booking?.holdExpiresAt
+    ? holdCountdown(booking.holdExpiresAt, clockNow)
+    : null;
+  const bookingTerminal = ['CONFIRMED', 'CANCELLED', 'EXPIRED'].includes(bookingStatus);
+  const bookingNeedsAction = Boolean(
+    booking &&
+      !bookingTerminal &&
+      (appointmentPaymentIsPending(appt) ||
+        appointmentPaymentIsFailed(appt) ||
+        booking?.requiresSponsorReview ||
+        booking?.requiresExplicitFundingChange ||
+        booking?.canResumePayment),
+  );
+  const legacyCardPending = Boolean(
+    !booking &&
+      appointmentPaymentIsPending(appt) &&
+      ['card', 'self-pay-card', 'self_pay_card', 'self-pay'].includes(
+        String(appt.paymentMethod || '').trim().toLowerCase(),
+      ),
+  );
+  const showBookingRecovery = bookingNeedsAction || legacyCardPending;
+  const canCancelPending = Boolean(booking && holdStillActive && !bookingTerminal);
+  const canContinuePayment = Boolean(
+    (booking?.canResumePayment && holdStillActive) || legacyCardPending,
+  );
+  const fundingQuery =
+    String(booking?.fundingMethod || appt.paymentMethod || '').toUpperCase() === 'MEDICAL_AID'
+      ? 'medical_aid'
+      : String(booking?.fundingMethod || appt.paymentMethod || '').toUpperCase() === 'VOUCHER'
+        ? 'voucher'
+        : 'card';
+  const rebookHref = appt.clinicianId
+    ? `/clinicians/${encodeURIComponent(appt.clinicianId)}/calendar?type=standard&country=ZA&funding=${fundingQuery}`
+    : '/clinicians?class=doctor';
+
   return (
     <main data-p-ui="patient-appointment-detail-page" className="min-w-0 overflow-x-clip p-6 space-y-4 max-w-3xl mx-auto">
       <h1 className="text-xl font-semibold">Appointment</h1>
@@ -616,7 +866,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
         </div>
         <div>
           <span className="opacity-60">Clinician:</span>{' '}
-          {appt.clinicianName ?? appt.clinicianId ?? '—'}
+          {appt.clinicianName ?? 'Clinician'}
         </div>
         <div>
           <span className="opacity-60">Reason:</span> {appt.reason ?? 'Consultation'}
@@ -640,6 +890,149 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
           </div>
         )}
       </div>
+
+      {showBookingRecovery ? (
+        <section
+          id="booking-payment"
+          className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm"
+          aria-live="polite"
+        >
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-base font-semibold text-amber-950">
+                {booking?.requiresSponsorReview
+                  ? 'Medical Aid / sponsor authorisation in progress'
+                  : booking?.requiresExplicitFundingChange
+                    ? 'Funding decision required'
+                    : appointmentPaymentIsFailed(appt)
+                      ? 'Payment needs attention'
+                      : 'Booking awaiting payment'}
+              </div>
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-amber-900">
+                {booking?.requiresSponsorReview
+                  ? 'Your appointment time is reserved while the selected Medical Aid / sponsor authorisation is reviewed. No card charge will be started during sponsor review.'
+                  : booking?.requiresExplicitFundingChange
+                    ? 'The selected Medical Aid / sponsor route was not approved. Ambulant+ will not silently switch you to self-pay; choose Card / Self-pay only if you want to continue on that basis.'
+                    : booking
+                      ? 'This is the same booking and reserved clinician slot. Continue payment to complete it; a payment retry does not create a second appointment.'
+                      : 'This earlier Card / Self-pay booking is still awaiting payment. Continue checkout to complete the existing appointment.'}
+              </p>
+            </div>
+
+            <span className="inline-flex w-fit rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900">
+              {booking ? bookingFundingLabel(booking.fundingMethod) : 'Card / Self-pay'}
+            </span>
+          </div>
+
+          {booking ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-amber-200 bg-white p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Reserved until</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">
+                  {booking.holdExpiresAt
+                    ? new Date(booking.holdExpiresAt).toLocaleString()
+                    : 'Reservation time unavailable'}
+                </div>
+                <div className={`mt-1 text-xs font-medium ${holdStillActive ? 'text-emerald-700' : 'text-rose-700'}`}>
+                  {holdStillActive && holdRemaining
+                    ? `${holdRemaining} remaining`
+                    : 'Reservation expired'}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-white p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Funding</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">
+                  {bookingFundingLabel(booking.fundingMethod)}
+                </div>
+                {booking.coverageAuthorizationStatus ? (
+                  <div className="mt-1 text-xs text-slate-600">
+                    Authorisation: {String(booking.coverageAuthorizationStatus).replace(/_/g, ' ')}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-white p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Patient amount</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">
+                  {moneyMinor(booking.patientPayableMinor || 0, bookingCurrency)}
+                </div>
+                <div className="mt-1 text-xs text-slate-600">Due from patient</div>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-white p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Sponsor / voucher</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">
+                  {moneyMinor(booking.sponsorAmountMinor || 0, bookingCurrency)}
+                </div>
+                <div className="mt-1 text-xs text-slate-600">Current contribution</div>
+              </div>
+            </div>
+          ) : null}
+
+          {booking && !holdStillActive && !bookingTerminal ? (
+            <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs leading-5 text-rose-800">
+              The checkout reservation has expired. The clinician slot is released by the booking authority and cannot be revived by a late payment. Choose a new live slot to continue.
+            </div>
+          ) : null}
+
+          {booking && holdStillActive ? (
+            <div className="mt-4 text-xs leading-5 text-amber-900">
+              If this reservation expires before payment or authorisation completes, Ambulant+ terminates the pending booking, invalidates active payment attempts and releases the clinician slot for booking again.
+            </div>
+          ) : null}
+
+          {paymentMessage ? (
+            <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+              {paymentMessage}
+            </div>
+          ) : null}
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {canContinuePayment ? (
+              <button
+                type="button"
+                onClick={() => void continuePayment()}
+                disabled={paymentBusy}
+                className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {paymentBusy ? 'Preparing secure payment…' : 'Continue to payment'}
+              </button>
+            ) : null}
+
+            {booking?.requiresExplicitFundingChange && holdStillActive ? (
+              <button
+                type="button"
+                onClick={() => void switchFundingToCard()}
+                disabled={paymentBusy}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Switch to Card / Self-pay
+              </button>
+            ) : null}
+
+            {canCancelPending ? (
+              <button
+                type="button"
+                onClick={() => void cancelPendingBooking()}
+                disabled={paymentBusy}
+                className="rounded-xl border border-rose-300 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel booking
+              </button>
+            ) : null}
+
+            {booking && !holdStillActive ? (
+              <Link
+                href={rebookHref}
+                className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Choose a new live slot
+              </Link>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       <section className="border rounded p-4 bg-white space-y-2">
         <div className="flex items-center justify-between gap-2">

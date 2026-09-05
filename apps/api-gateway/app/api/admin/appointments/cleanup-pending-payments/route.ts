@@ -4,6 +4,9 @@ import {
   readIdentity,
   requireTrustedIdentityInProduction,
 } from '@/src/lib/identity';
+import {
+  expireBookingIntent,
+} from '@/src/appointments/booking-reservation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -68,8 +71,28 @@ export async function POST(req: NextRequest) {
     const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
     const now = new Date();
 
+    const dueBookingIntents = await prisma.bookingIntent.findMany({
+      where: {
+        holdExpiresAt: { lte: now },
+        status: {
+          in: [
+            'SLOT_HELD',
+            'PAYMENT_ACTION_REQUIRED',
+            'PAYMENT_PROCESSING',
+            'SPONSOR_REVIEW',
+            'COPAY_REQUIRED',
+            'PAYMENT_FAILED',
+          ],
+        },
+      },
+      include: { slotLease: true },
+      orderBy: { holdExpiresAt: 'asc' },
+      take: limit,
+    });
+
     const candidates = await prisma.appointment.findMany({
       where: {
+        bookingIntent: { is: null },
         updatedAt: { lt: cutoff },
         OR: [
           { status: 'pending_payment' },
@@ -97,7 +120,18 @@ export async function POST(req: NextRequest) {
           dryRun: true,
           olderThanMinutes,
           cutoff: cutoff.toISOString(),
-          count: eligible.length,
+          count: dueBookingIntents.length + eligible.length,
+          bookingIntentCount: dueBookingIntents.length,
+          legacyAppointmentCount: eligible.length,
+          bookingIntents: dueBookingIntents.map((intent: any) => ({
+            id: intent.id,
+            appointmentId: intent.appointmentId,
+            status: intent.status,
+            fundingMethod: intent.fundingMethod,
+            holdExpiresAt: intent.holdExpiresAt,
+            slotLeaseStatus: intent.slotLease?.status || null,
+            slotLeaseExpiresAt: intent.slotLease?.expiresAt || null,
+          })),
           appointments: eligible.map((a: any) => ({
             id: a.id,
             status: a.status,
@@ -116,6 +150,38 @@ export async function POST(req: NextRequest) {
     }
 
     const cleaned: any[] = [];
+    const expiredBookingIntents: any[] = [];
+
+    for (const intent of dueBookingIntents as any[]) {
+      const expired = await prisma.$transaction(async (tx: any) => {
+        const current = await tx.bookingIntent.findUnique({ where: { id: intent.id } });
+        if (
+          !current ||
+          !current.holdExpiresAt ||
+          current.holdExpiresAt > now ||
+          ['CONFIRMED', 'EXPIRED', 'CANCELLED'].includes(String(current.status || '').toUpperCase())
+        ) {
+          return null;
+        }
+
+        return expireBookingIntent({
+          bookingIntentId: current.id,
+          reason: 'booking_hold_expired',
+          actorType: String(ident.role || 'admin'),
+          actorUserId: ident.uid,
+          tx,
+        });
+      });
+
+      if (expired) {
+        expiredBookingIntents.push({
+          id: expired.id,
+          appointmentId: expired.appointmentId,
+          status: expired.status,
+          expiredAt: expired.expiredAt,
+        });
+      }
+    }
 
     for (const appt of eligible as any[]) {
       const before = {
@@ -174,7 +240,7 @@ export async function POST(req: NextRequest) {
               cancelReason: updated.cancelReason,
               cleanupAt: now.toISOString(),
             },
-            orgId: appt.orgId ?? 'org-default',
+            orgId: appt.orgId ?? '',
           } as any,
         })
         .catch(() => null);
@@ -197,8 +263,12 @@ export async function POST(req: NextRequest) {
         dryRun: false,
         olderThanMinutes,
         cutoff: cutoff.toISOString(),
-        scanned: candidates.length,
-        cleanedCount: cleaned.length,
+        scanned: dueBookingIntents.length + candidates.length,
+        expiredBookingIntentCount: expiredBookingIntents.length,
+        expiredBookingIntents,
+        legacyScanned: candidates.length,
+        legacyCleanedCount: cleaned.length,
+        cleanedCount: expiredBookingIntents.length + cleaned.length,
         cleaned,
       },
       { headers: { 'Cache-Control': 'no-store' } },

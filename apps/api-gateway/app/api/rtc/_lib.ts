@@ -155,7 +155,7 @@ export async function verifyJoinTicket(req: NextRequest): Promise<VerifiedJoin> 
   const uid = pickClaim(payload, ['uid', 'sub', 'userId', 'u']);
   const roomId = pickClaim(payload, ['roomId', 'rid', 'room', 'r']);
   const visitId = pickClaim(payload, ['visitId', 'vid', 'visit', 'v']);
-  const orgId = pickClaim(payload, ['orgId', 'org', 'tenant']) || 'org-default';
+  const orgId = pickClaim(payload, ['orgId', 'org', 'tenant']) || '';
   const role = mustRole(pickClaim(payload, ['role', 'televisitRole', 'rRole'])) || 'patient';
 
   if (!uid || !roomId || !visitId) {
@@ -188,7 +188,7 @@ export async function verifyJoinTicket(req: NextRequest): Promise<VerifiedJoin> 
     throw new Error('ticket_mismatch');
   }
 
-  if ((ticket.orgId || 'org-default') !== (orgId || 'org-default')) {
+  if ((ticket.orgId || '') !== (orgId || '')) {
     throw new Error('tenant_mismatch');
   }
 

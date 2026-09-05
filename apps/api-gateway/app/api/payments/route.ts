@@ -17,6 +17,13 @@ import {
   resolvePaymentReference,
   syncVerifiedPaymentToAppointment,
 } from '@/src/payments/payment-sync';
+import {
+  bookingStateForAppointment,
+  cancelBookingIntent,
+  expireBookingIntent,
+  loadBookingIntentForAppointment,
+  reconcileCoverageAuthorization,
+} from '@/src/appointments/booking-reservation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -300,6 +307,11 @@ async function existingPaymentResponse(
 
   if (!payment) return null;
 
+  const paymentStatus = clean(payment.status, 40).toLowerCase();
+  if (!['captured', 'authorized', 'pending', 'pending_redirect', 'pending_review', 'processing'].includes(paymentStatus)) {
+    return null;
+  }
+
   const meta = readMeta(payment.meta);
   return {
     ok: true,
@@ -475,6 +487,179 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (action === 'cancel_booking') {
+      const idempotencyKey = normalizeIdempotencyKey(req);
+      const appointmentId = clean(
+        body.appointmentId || body.appointment_id,
+        160,
+      );
+      if (!appointmentId) {
+        return NextResponse.json(
+          { ok: false, error: 'appointmentId_required' },
+          { status: 400 },
+        );
+      }
+
+      const appointment = await loadAppointmentForPayment(appointmentId);
+      assertAppointmentAccessible(appointment, who);
+      const intent = await loadBookingIntentForAppointment(appointment.id);
+      if (!intent) {
+        return NextResponse.json(
+          { ok: false, error: 'booking_intent_not_found' },
+          { status: 409 },
+        );
+      }
+
+      await prisma.$transaction(async (tx: any) => {
+        await cancelBookingIntent({
+          bookingIntentId: intent.id,
+          reason: 'patient_cancelled_pending_booking',
+          actorType: who.role,
+          actorUserId: who.uid,
+          tx,
+        });
+        await tx.bookingIntentAuditEvent.create({
+          data: {
+            bookingIntentId: intent.id,
+            action: 'cancel_booking_idempotency_recorded',
+            actorType: who.role,
+            actorUserId: who.uid,
+            reason: `idempotency:${sha256Hex(idempotencyKey).slice(0, 16)}`,
+            orgId: appointment.orgId || 'org-default',
+          },
+        }).catch(() => null);
+      });
+
+      return NextResponse.json(
+        {
+          ok: true,
+          appointmentId: appointment.id,
+          booking: await bookingStateForAppointment(appointment.id),
+          cancelled: true,
+        },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    if (action === 'switch_funding_to_card') {
+      const idempotencyKey = normalizeIdempotencyKey(req);
+      const appointmentId = clean(
+        body.appointmentId || body.appointment_id,
+        160,
+      );
+      if (!appointmentId) {
+        return NextResponse.json(
+          { ok: false, error: 'appointmentId_required' },
+          { status: 400 },
+        );
+      }
+
+      const appointment = await loadAppointmentForPayment(appointmentId);
+      assertAppointmentAccessible(appointment, who);
+      await reconcileCoverageAuthorization({ appointmentId });
+      const intent = await loadBookingIntentForAppointment(appointmentId);
+      if (!intent) {
+        return NextResponse.json(
+          { ok: false, error: 'booking_intent_not_found' },
+          { status: 409 },
+        );
+      }
+
+      const authorization = intent.coverageAuthorizationId
+        ? await prisma.coverageAuthorization.findUnique({
+            where: { id: intent.coverageAuthorizationId },
+          })
+        : null;
+      const authorizationStatus = clean(authorization?.status, 40).toUpperCase();
+      if (
+        clean(intent.fundingMethod, 40).toUpperCase() !== 'MEDICAL_AID' ||
+        !['DENIED', 'EXPIRED', 'CANCELLED'].includes(authorizationStatus)
+      ) {
+        return NextResponse.json(
+          { ok: false, error: 'explicit_self_pay_switch_not_available' },
+          { status: 409 },
+        );
+      }
+
+      const holdExpiresAt = intent.holdExpiresAt ? new Date(intent.holdExpiresAt) : null;
+      if (!holdExpiresAt || holdExpiresAt.getTime() <= Date.now()) {
+        await expireBookingIntent({
+          bookingIntentId: intent.id,
+          reason: 'booking_hold_expired_before_funding_switch',
+        });
+        return NextResponse.json(
+          { ok: false, error: 'booking_hold_expired' },
+          { status: 409 },
+        );
+      }
+
+      const totalMinor = Math.max(0, Number(intent.totalMinor || appointment.totalMinor || appointment.priceCents || 0));
+      await prisma.$transaction(async (tx: any) => {
+        await tx.bookingIntent.update({
+          where: { id: intent.id },
+          data: {
+            fundingMethod: 'CARD',
+            status: totalMinor > 0 ? 'PAYMENT_ACTION_REQUIRED' : 'CONFIRMED',
+            sponsorAmountMinor: 0,
+            patientPayableMinor: totalMinor,
+            coverageDecision: 'PATIENT_SELECTED_SELF_PAY_AFTER_SPONSOR_DECISION',
+            failureCode: null,
+            confirmedAt: totalMinor <= 0 ? new Date() : null,
+          },
+        });
+        await tx.appointment.update({
+          where: { id: appointment.id },
+          data: {
+            paymentMethod: 'CARD',
+            paymentStatus: totalMinor > 0 ? 'PENDING' : 'NOT_REQUIRED',
+            status: totalMinor > 0 ? 'pending_payment' : 'confirmed',
+            sponsorAmountMinor: 0,
+            patientCopayMinor: totalMinor,
+            coverageDecision: 'PATIENT_SELECTED_SELF_PAY_AFTER_SPONSOR_DECISION',
+            confirmedAt: totalMinor <= 0 ? new Date() : appointment.confirmedAt,
+          },
+        });
+        await tx.bookingIntentRecipient.updateMany({
+          where: { bookingIntentId: intent.id },
+          data: {
+            status: 'READY',
+            sponsorAmountMinor: 0,
+            patientPayableMinor: totalMinor,
+            coverageDecision: 'PATIENT_SELECTED_SELF_PAY_AFTER_SPONSOR_DECISION',
+          },
+        });
+        await tx.appointmentCareRecipient.updateMany({
+          where: { appointmentId: appointment.id },
+          data: {
+            sponsorAmountMinor: 0,
+            patientPayableMinor: totalMinor,
+            coverageDecision: 'PATIENT_SELECTED_SELF_PAY_AFTER_SPONSOR_DECISION',
+          },
+        });
+        await tx.bookingIntentAuditEvent.create({
+          data: {
+            bookingIntentId: intent.id,
+            action: 'funding_switched_to_card',
+            fromStatus: intent.status,
+            toStatus: totalMinor > 0 ? 'PAYMENT_ACTION_REQUIRED' : 'CONFIRMED',
+            actorType: who.role,
+            actorUserId: who.uid,
+            reason: `explicit_patient_choice:${sha256Hex(idempotencyKey).slice(0, 16)}`,
+            orgId: appointment.orgId || 'org-default',
+          },
+        });
+      });
+
+      return NextResponse.json(
+        {
+          ok: true,
+          appointmentId,
+          booking: await bookingStateForAppointment(appointmentId),
+        },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
     const idempotencyKey = normalizeIdempotencyKey(req);
     const appointmentId = clean(
       body.appointmentId || body.appointment_id,
@@ -491,6 +676,51 @@ export async function POST(req: NextRequest) {
     let appointment =
       await loadAppointmentForPayment(appointmentId);
     assertAppointmentAccessible(appointment, who);
+
+    await reconcileCoverageAuthorization({ appointmentId });
+    appointment = await loadAppointmentForPayment(appointmentId);
+    const bookingIntent =
+      await loadBookingIntentForAppointment(appointmentId);
+
+    if (bookingIntent) {
+      const bookingStatus = clean(bookingIntent.status, 40).toUpperCase();
+      const holdExpiresAt = bookingIntent.holdExpiresAt
+        ? new Date(bookingIntent.holdExpiresAt)
+        : null;
+
+      if (
+        holdExpiresAt &&
+        holdExpiresAt.getTime() <= Date.now() &&
+        !['CONFIRMED', 'CANCELLED', 'EXPIRED'].includes(bookingStatus)
+      ) {
+        await expireBookingIntent({
+          bookingIntentId: bookingIntent.id,
+          reason: 'booking_hold_expired_before_payment_resume',
+        });
+        return NextResponse.json(
+          { ok: false, error: 'booking_hold_expired' },
+          { status: 409 },
+        );
+      }
+
+      if (bookingStatus === 'SPONSOR_REVIEW') {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'sponsor_authorization_pending',
+            booking: await bookingStateForAppointment(appointmentId),
+          },
+          { status: 409 },
+        );
+      }
+
+      if (['CANCELLED', 'EXPIRED'].includes(bookingStatus)) {
+        return NextResponse.json(
+          { ok: false, error: 'booking_not_payable', bookingStatus },
+          { status: 409 },
+        );
+      }
+    }
 
     if (
       ['CAPTURED', 'PAID', 'SETTLED', 'NOT_REQUIRED'].includes(
@@ -522,15 +752,25 @@ export async function POST(req: NextRequest) {
       40,
     ).toUpperCase();
 
-    if (
-      requestedMethod !== 'CARD' ||
-      appointmentMethod !== 'CARD'
-    ) {
+    const bookingStatus = clean(bookingIntent?.status, 40).toUpperCase();
+    const bookingPatientPayable = Number(bookingIntent?.patientPayableMinor || 0);
+    const cardSettlementAllowed = bookingIntent
+      ? (
+          requestedMethod === 'CARD' &&
+          bookingPatientPayable > 0 &&
+          ['CARD', 'MEDICAL_AID', 'VOUCHER'].includes(appointmentMethod) &&
+          ['PAYMENT_ACTION_REQUIRED', 'COPAY_REQUIRED', 'PAYMENT_FAILED', 'PAYMENT_PROCESSING'].includes(bookingStatus)
+        )
+      : requestedMethod === 'CARD' && appointmentMethod === 'CARD';
+
+    if (!cardSettlementAllowed) {
       return NextResponse.json(
         {
           ok: false,
           error:
             'payment_method_requires_authoritative_authorization_flow',
+          bookingStatus: bookingStatus || null,
+          fundingMethod: appointmentMethod || null,
         },
         { status: 409 },
       );
@@ -556,6 +796,37 @@ export async function POST(req: NextRequest) {
     );
     const reservationId =
       `init-${keyHash.slice(0, 48)}`;
+    const bookingAttemptId = bookingIntent
+      ? `bpa-${sha256Hex(`${bookingIntent.id}\u0000${idempotencyKey}`).slice(0, 32)}`
+      : null;
+
+    if (bookingIntent && bookingAttemptId) {
+      const existingAttempt = await prisma.bookingPaymentAttempt.findUnique({
+        where: { id: bookingAttemptId },
+      });
+      if (existingAttempt) {
+        const attemptStatus = clean(existingAttempt.status, 40).toUpperCase();
+        if (['FAILED', 'CANCELLED', 'EXPIRED'].includes(attemptStatus)) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: 'payment_attempt_terminal_use_new_retry_key',
+              attemptStatus,
+              booking: await bookingStateForAppointment(appointment.id),
+            },
+            { status: 409 },
+          );
+        }
+
+        const replay = await existingPaymentResponse(appointment);
+        if (replay) {
+          return NextResponse.json(
+            { ...replay, booking: await bookingStateForAppointment(appointment.id) },
+            { status: 200 },
+          );
+        }
+      }
+    }
     const appointmentMeta =
       readMeta(appointment.meta);
     const initialization =
@@ -601,7 +872,6 @@ export async function POST(req: NextRequest) {
       },
       data: {
         paymentIntentId: reservationId,
-        paymentMethod: 'CARD',
         meta: jsonSafe({
           ...readMeta(appointment.meta),
           paymentInitialization: {
@@ -635,6 +905,33 @@ export async function POST(req: NextRequest) {
         },
         { status: 409 },
       );
+    }
+
+    if (bookingIntent && bookingAttemptId) {
+      const latestAttempt = await prisma.bookingPaymentAttempt.findFirst({
+        where: { bookingIntentId: bookingIntent.id },
+        orderBy: { sequence: 'desc' },
+      });
+      const sequence = Math.max(1, Number(latestAttempt?.sequence || 0) + 1);
+      await prisma.bookingPaymentAttempt.create({
+        data: {
+          id: bookingAttemptId,
+          bookingIntentId: bookingIntent.id,
+          sequence,
+          method: 'CARD',
+          status: 'CREATED',
+          idempotencyKeyHash: keyHash,
+          amountMinor: amountCents,
+          currency,
+          expiresAt: bookingIntent.holdExpiresAt || null,
+          metadata: {
+            source: 'patient_appointment_checkout',
+            masterFundingMethod: appointment.paymentMethod || 'CARD',
+            appointmentId: appointment.id,
+          },
+          orgId: appointment.orgId || 'org-default',
+        },
+      });
     }
 
     const paymentId =
@@ -677,6 +974,7 @@ export async function POST(req: NextRequest) {
         },
         data: {
           paymentIntentId: null,
+          paymentStatus: 'FAILED',
           meta: jsonSafe({
             ...readMeta(appointment.meta),
             paymentInitialization: {
@@ -688,6 +986,26 @@ export async function POST(req: NextRequest) {
           }),
         },
       });
+      if (bookingIntent && bookingAttemptId) {
+        await prisma.bookingPaymentAttempt.updateMany({
+          where: { id: bookingAttemptId },
+          data: {
+            status: 'FAILED',
+            failedAt: new Date(),
+            failureCode: 'provider_initialization_failed',
+          },
+        });
+        await prisma.bookingIntent.updateMany({
+          where: {
+            id: bookingIntent.id,
+            status: { notIn: ['CONFIRMED', 'EXPIRED', 'CANCELLED'] },
+          },
+          data: {
+            status: 'PAYMENT_FAILED',
+            failureCode: 'provider_initialization_failed',
+          },
+        });
+      }
       throw error;
     }
 
@@ -713,6 +1031,29 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    if (bookingIntent && bookingAttemptId) {
+      await prisma.bookingPaymentAttempt.updateMany({
+        where: { id: bookingAttemptId },
+        data: {
+          provider: checkout.provider,
+          providerRef: checkout.reference,
+          status:
+            checkout.status === 'authorized'
+              ? 'AUTHORIZED'
+              : checkout.status === 'pending_review'
+                ? 'PENDING_REVIEW'
+                : checkout.status === 'pending_redirect'
+                  ? 'PENDING_REDIRECT'
+                  : 'PROCESSING',
+          providerSnapshot: jsonSafe({
+            redirectUrl: checkout.redirectUrl,
+            checkout: checkout.raw ?? null,
+            initializedAt: new Date().toISOString(),
+          }),
+        },
+      });
+    }
+
     const paymentStatus =
       paymentStatusFromCheckout(checkout.status);
     const paymentMeta = jsonSafe({
@@ -722,6 +1063,9 @@ export async function POST(req: NextRequest) {
       provider: checkout.provider,
       providerRef: checkout.reference,
       paymentMethod: 'CARD',
+      masterFundingMethod: appointment.paymentMethod || 'CARD',
+      bookingIntentId: bookingIntent?.id || null,
+      bookingPaymentAttemptId: bookingAttemptId,
       redirectUrl: checkout.redirectUrl,
       checkout: checkout.raw ?? null,
       idempotencyKeyHash: keyHash,
@@ -750,12 +1094,56 @@ export async function POST(req: NextRequest) {
           },
         });
 
+        if (bookingIntent && bookingAttemptId) {
+          const nextAttemptStatus =
+            payment.status === 'captured'
+              ? 'CAPTURED'
+              : payment.status === 'pending'
+                ? 'PENDING_REDIRECT'
+                : 'FAILED';
+          await tx.bookingPaymentAttempt.updateMany({
+            where: { id: bookingAttemptId },
+            data: {
+              status: nextAttemptStatus,
+              capturedAt:
+                nextAttemptStatus === 'CAPTURED' ? new Date() : undefined,
+              failedAt:
+                nextAttemptStatus === 'FAILED' ? new Date() : undefined,
+              failureCode:
+                nextAttemptStatus === 'FAILED' ? 'checkout_initialization_failed' : null,
+            },
+          });
+          await tx.bookingIntent.updateMany({
+            where: {
+              id: bookingIntent.id,
+              status: { notIn: ['CONFIRMED', 'EXPIRED', 'CANCELLED'] },
+            },
+            data: {
+              status:
+                nextAttemptStatus === 'CAPTURED'
+                  ? 'CONFIRMED'
+                  : nextAttemptStatus === 'FAILED'
+                    ? 'PAYMENT_FAILED'
+                    : 'PAYMENT_PROCESSING',
+              confirmedAt:
+                nextAttemptStatus === 'CAPTURED' ? new Date() : undefined,
+              failureCode:
+                nextAttemptStatus === 'FAILED' ? 'checkout_initialization_failed' : null,
+            },
+          });
+          if (nextAttemptStatus === 'CAPTURED') {
+            await tx.bookingSlotLease.updateMany({
+              where: { bookingIntentId: bookingIntent.id, status: 'ACTIVE' },
+              data: { status: 'CONSUMED', consumedAt: new Date() },
+            });
+          }
+        }
+
         const updatedAppointment =
           await tx.appointment.update({
             where: { id: appointment.id },
             data: {
               paymentIntentId: payment.id,
-              paymentMethod: 'CARD',
               paymentProvider: checkout!.provider,
               paymentRef: checkout!.reference,
               paymentStatus:
@@ -855,6 +1243,7 @@ export async function POST(req: NextRequest) {
         redirectUrl: checkout.redirectUrl,
         providerRef: checkout.reference,
         status: checkout.status,
+        booking: await bookingStateForAppointment(result.appointment.id),
       },
       { status: 201 },
     );

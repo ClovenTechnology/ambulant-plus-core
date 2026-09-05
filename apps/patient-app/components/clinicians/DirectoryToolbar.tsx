@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
 type CountryCode = 'ZA';
 
 const COUNTRY_LABELS: Record<CountryCode, string> = {
@@ -88,13 +87,6 @@ export default function DirectoryToolbar({
         <div className="px-5 py-4 md:px-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
-              <Link
-                href="/auto-triage"
-                className="text-sm text-teal-700 hover:underline shrink-0"
-              >
-                ← Back
-              </Link>
-
               <div className="min-w-0">
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500 shadow-sm">
                   Ambulant+ clinician directory

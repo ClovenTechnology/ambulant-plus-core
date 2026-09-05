@@ -2,6 +2,9 @@ import crypto from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { AppointmentPaymentStatus } from '@prisma/client';
 import { prisma } from '@/src/lib/db';
+import {
+  loadBookingIntentForAppointment,
+} from '@/src/appointments/booking-reservation';
 
 export type PaymentVerificationState =
   | 'captured'
@@ -160,6 +163,9 @@ export async function syncVerifiedPaymentToAppointment(args: {
     await resolvePaymentReference(args.reference);
   const appointment = resolved.appointment;
   const existingPayment = resolved.payment;
+  const bookingIntent = appointment
+    ? await loadBookingIntentForAppointment(appointment.id)
+    : null;
 
   if (!appointment && !existingPayment) {
     throw new Error(
@@ -203,6 +209,25 @@ export async function syncVerifiedPaymentToAppointment(args: {
     amountMismatch || currencyMismatch
       ? 'failed'
       : args.state;
+  const bookingStatus = clean(bookingIntent?.status, 80).toUpperCase();
+  const holdExpiresAt = bookingIntent?.holdExpiresAt
+    ? new Date(bookingIntent.holdExpiresAt)
+    : bookingIntent?.slotLease?.expiresAt
+      ? new Date(bookingIntent.slotLease.expiresAt)
+      : null;
+  const lateCapture =
+    effectiveState === 'captured' &&
+    Boolean(
+      bookingIntent &&
+      (
+        ['EXPIRED', 'CANCELLED'].includes(bookingStatus) ||
+        (
+          bookingStatus !== 'CONFIRMED' &&
+          holdExpiresAt &&
+          holdExpiresAt.getTime() <= Date.now()
+        )
+      ),
+    );
   const verifiedAt = new Date().toISOString();
   const verificationSnapshot = {
     provider: args.provider,
@@ -214,6 +239,9 @@ export async function syncVerifiedPaymentToAppointment(args: {
     providerCurrency,
     amountMismatch,
     currencyMismatch,
+    lateCapture,
+    bookingIntentId: bookingIntent?.id || null,
+    bookingStatus: bookingStatus || null,
     verifiedAt,
     raw: args.raw ?? null,
   };
@@ -282,6 +310,7 @@ export async function syncVerifiedPaymentToAppointment(args: {
       toAppointmentPaymentStatus(effectiveState);
     const nextAppointmentStatus =
       effectiveState === 'captured' &&
+      !lateCapture &&
       appointment.status === 'pending_payment'
         ? 'confirmed'
         : appointment.status;
@@ -297,7 +326,7 @@ export async function syncVerifiedPaymentToAppointment(args: {
           paymentStatus: nextPaymentStatus,
           status: nextAppointmentStatus,
           confirmedAt:
-            effectiveState === 'captured'
+            effectiveState === 'captured' && !lateCapture
               ? appointment.confirmedAt || new Date()
               : appointment.confirmedAt,
           meta: jsonSafe({
@@ -315,7 +344,9 @@ export async function syncVerifiedPaymentToAppointment(args: {
           action:
             amountMismatch || currencyMismatch
               ? 'payment_verification_rejected'
-              : 'payment_verified',
+              : lateCapture
+                ? 'payment_captured_after_booking_expiry'
+                : 'payment_verified',
           actorType: 'system',
           actorUserId: null,
           reason:
@@ -323,7 +354,9 @@ export async function syncVerifiedPaymentToAppointment(args: {
               ? 'payment_amount_mismatch'
               : currencyMismatch
                 ? 'payment_currency_mismatch'
-                : `payment_${effectiveState}`,
+                : lateCapture
+                  ? 'late_capture_requires_reconciliation_or_refund'
+                  : `payment_${effectiveState}`,
           beforeJson: {
             status: appointment.status,
             paymentStatus:
@@ -350,11 +383,96 @@ export async function syncVerifiedPaymentToAppointment(args: {
         },
       })
       .catch(() => null);
+
+    if (bookingIntent) {
+      const attempt = await prisma.bookingPaymentAttempt.findFirst({
+        where: {
+          bookingIntentId: bookingIntent.id,
+          OR: [
+            { providerRef: args.reference },
+            { providerRef: payment?.providerRef || undefined },
+          ].filter((value: any) => Boolean(value.providerRef)),
+        },
+        orderBy: { sequence: 'desc' },
+      }).catch(() => null);
+
+      if (attempt) {
+        await prisma.bookingPaymentAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            status:
+              effectiveState === 'captured'
+                ? 'CAPTURED'
+                : effectiveState === 'pending'
+                  ? 'PENDING_REVIEW'
+                  : 'FAILED',
+            capturedAt: effectiveState === 'captured' ? new Date() : attempt.capturedAt,
+            failedAt: effectiveState === 'failed' ? new Date() : attempt.failedAt,
+            failureCode:
+              amountMismatch
+                ? 'payment_amount_mismatch'
+                : currencyMismatch
+                  ? 'payment_currency_mismatch'
+                  : lateCapture
+                    ? 'captured_after_booking_expiry'
+                    : effectiveState === 'failed'
+                      ? 'provider_verification_failed'
+                      : null,
+            verificationSnapshot: jsonSafe(verificationSnapshot),
+          },
+        });
+      }
+
+      if (!lateCapture && effectiveState === 'captured') {
+        await prisma.$transaction(async (tx: any) => {
+          await tx.bookingIntent.updateMany({
+            where: {
+              id: bookingIntent.id,
+              status: { notIn: ['EXPIRED', 'CANCELLED'] },
+            },
+            data: {
+              status: 'CONFIRMED',
+              confirmedAt: new Date(),
+              failureCode: null,
+            },
+          });
+          await tx.bookingSlotLease.updateMany({
+            where: { bookingIntentId: bookingIntent.id, status: 'ACTIVE' },
+            data: { status: 'CONSUMED', consumedAt: new Date() },
+          });
+        });
+      } else if (!lateCapture && effectiveState === 'pending') {
+        await prisma.bookingIntent.updateMany({
+          where: {
+            id: bookingIntent.id,
+            status: { notIn: ['CONFIRMED', 'EXPIRED', 'CANCELLED'] },
+          },
+          data: { status: 'PAYMENT_PROCESSING' },
+        });
+      } else if (!lateCapture && effectiveState === 'failed') {
+        await prisma.bookingIntent.updateMany({
+          where: {
+            id: bookingIntent.id,
+            status: { notIn: ['CONFIRMED', 'EXPIRED', 'CANCELLED'] },
+          },
+          data: {
+            status: 'PAYMENT_FAILED',
+            failureCode:
+              amountMismatch
+                ? 'payment_amount_mismatch'
+                : currencyMismatch
+                  ? 'payment_currency_mismatch'
+                  : 'provider_verification_failed',
+          },
+        });
+      }
+    }
   }
 
   return {
     appointment: updatedAppointment,
     payment,
     verification: verificationSnapshot,
+    lateCapture,
   };
 }

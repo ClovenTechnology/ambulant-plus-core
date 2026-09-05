@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Clock3,
-  Copy,
   HeartPulse,
   Mic,
   Radio,
@@ -39,6 +38,7 @@ type Ctx = {
   reason?: string;
   startsAt?: string;
   visitMode?: string;
+  participantId?: string;
   participantRole?: string;
 };
 
@@ -249,101 +249,113 @@ function presenceLoadLabel(
   return 'Checking';
 }
 
-function normalizeOrigin(value?: string | null) {
-  const v = String(value || '').trim();
-  return v ? v.replace(/\/+$/, '') : '';
+function asRecord(value: unknown): Record<string, any> {
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
+  ) {
+    return value as Record<string, any>;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed)
+      ) {
+        return parsed as Record<string, any>;
+      }
+    } catch {
+      // Older records may contain non-JSON metadata.
+    }
+  }
+
+  return {};
 }
 
-function deriveClinicianOriginFromHere(here: URL) {
-  if (here.hostname === 'localhost' || here.hostname === '127.0.0.1') {
-    const u = new URL(here.toString());
-    u.port = '3001';
-    u.pathname = '/';
-    u.search = '';
-    u.hash = '';
-    return u.origin;
-  }
+function resolvePatientParticipantId(appointment: any) {
+  const meta = asRecord(appointment?.meta);
 
-  if (here.hostname.startsWith('patient.')) {
-    return `${here.protocol}//${here.hostname.replace(/^patient\./, 'clinician.')}`;
-  }
+  const direct = String(
+    appointment?.patientParticipantId ||
+      appointment?.patient_participant_id ||
+      meta.patientParticipantId ||
+      meta.patient_participant_id ||
+      '',
+  ).trim();
 
-  return here.origin;
+  if (direct) return direct;
+
+  const subjectPatientId = String(
+    appointment?.subjectPatientId ||
+      appointment?.subject_patient_id ||
+      '',
+  ).trim();
+
+  const patientId = String(
+    appointment?.patientId ||
+      appointment?.patient_id ||
+      '',
+  ).trim();
+
+  const participants = Array.isArray(appointment?.participants)
+    ? appointment.participants
+    : Array.isArray(meta.participants)
+      ? meta.participants
+      : [];
+
+  const findByPatientId = (expectedPatientId: string) =>
+    expectedPatientId
+      ? participants.find((value: any) => {
+          const item = asRecord(value);
+
+          return String(
+            item.patientId ||
+              item.patient_id ||
+              '',
+          ).trim() === expectedPatientId;
+        })
+      : undefined;
+
+  const participant =
+    findByPatientId(subjectPatientId) ||
+    findByPatientId(patientId) ||
+    participants.find((value: any) => {
+      const item = asRecord(value);
+
+      return String(item.role || '')
+        .trim()
+        .toUpperCase() === 'PRIMARY_PATIENT';
+    });
+
+  return String(
+    participant?.partyId ||
+      participant?.participantId ||
+      participant?.id ||
+      '',
+  ).trim();
 }
 
-function buildUrl(origin: string, path: string, ctx: Ctx) {
-  const u = new URL(origin);
-  u.pathname = path;
-  u.search = '';
-  u.hash = '';
+function makePatientSfuLink(roomId: string, ctx: Ctx) {
+  const room = roomId.trim();
+  const appointmentId = String(ctx.appointmentId || '').trim();
+  const participantId = String(ctx.participantId || '').trim();
 
-  const sp = u.searchParams;
+  if (!room || !appointmentId || !participantId) return '';
 
-  (Object.entries(ctx) as Array<[keyof Ctx, string | undefined]>).forEach(
-    ([key, value]) => {
-      const clean = String(value || '').trim();
-      if (clean) sp.set(String(key), clean);
-    },
-  );
+  const query = new URLSearchParams();
+  query.set('appointmentId', appointmentId);
+  query.set('participantId', participantId);
+  query.set('participantRole', 'patient');
 
-  return u.toString();
-}
+  const visitId = String(ctx.visitId || '').trim();
+  if (visitId) query.set('visitId', visitId);
 
-function makeLinks(roomId: string, ctx: Ctx) {
-  const cleanRoomValue = roomId.trim();
-
-  if (!cleanRoomValue) {
-    return {
-      patientSfu: '',
-      carerInvite: '',
-      clinicianSfu: '',
-    };
-  }
-
-  const cleanRoomId = encodeURIComponent(cleanRoomValue);
-
-  if (typeof window === 'undefined') {
-    const patientOrigin =
-      normalizeOrigin(process.env.NEXT_PUBLIC_PATIENT_APP_ORIGIN) ||
-      (process.env.NODE_ENV === 'production' ? 'https://patient.ambulantplus.co.za' : 'http://localhost:3000');
-
-    const clinicianOrigin =
-      normalizeOrigin(process.env.NEXT_PUBLIC_CLINICIAN_APP_ORIGIN) ||
-      (process.env.NODE_ENV === 'production' ? 'https://clinician.ambulantplus.co.za' : 'http://localhost:3001');
-
-    return {
-      patientSfu: buildUrl(patientOrigin, `/sfu/${cleanRoomId}`, {
-        ...ctx,
-        participantRole: ctx.participantRole || 'patient',
-      }),
-      carerInvite: buildUrl(patientOrigin, `/sfu/${cleanRoomId}`, {
-        ...ctx,
-        participantRole: 'carer',
-      }),
-      clinicianSfu: buildUrl(clinicianOrigin, `/sfu/${cleanRoomId}`, ctx),
-    };
-  }
-
-  const here = new URL(window.location.href);
-
-  const patientOrigin =
-    normalizeOrigin(process.env.NEXT_PUBLIC_PATIENT_APP_ORIGIN) || here.origin;
-
-  const clinicianOrigin =
-    normalizeOrigin(process.env.NEXT_PUBLIC_CLINICIAN_APP_ORIGIN) ||
-    deriveClinicianOriginFromHere(here);
-
-  return {
-    patientSfu: buildUrl(patientOrigin, `/sfu/${cleanRoomId}`, {
-      ...ctx,
-      participantRole: ctx.participantRole || 'patient',
-    }),
-    carerInvite: buildUrl(patientOrigin, `/sfu/${cleanRoomId}`, {
-      ...ctx,
-      participantRole: 'carer',
-    }),
-    clinicianSfu: buildUrl(clinicianOrigin, `/sfu/${cleanRoomId}`, ctx),
-  };
+  return `/sfu/${encodeURIComponent(room)}?${query.toString()}`;
 }
 
 function readVitalsSnapshot(roomId: string, patientId?: string) {
@@ -659,7 +671,6 @@ export default function PatientLobbyPage() {
     useState<AppointmentState | null>(null);
   const [appointmentBusy, setAppointmentBusy] = useState(false);
   const [appointmentError, setAppointmentError] = useState<string | null>(null);
-  const [copyState, setCopyState] = useState<string | null>(null);
   const [actionAudit, setActionAudit] = useState<string[]>([]);
   const [deviceMode, setDeviceMode] = useState<DeviceMode>('manual');
   const [vitalsSnapshot, setVitalsSnapshot] = useState<SnapshotVitals | null>(
@@ -708,59 +719,55 @@ export default function PatientLobbyPage() {
     const url = new URL(window.location.href);
     const sp = url.searchParams;
 
-    const nextCtx: Ctx = {
-      appointmentId:
-        sp.get('appointmentId') ||
-        sp.get('appointment') ||
-        sp.get('appt') ||
-        undefined,
-      patientId:
-        sp.get('patientId') ||
-        sp.get('subjectPatientId') ||
-        sp.get('patient') ||
-        undefined,
-      patientName: sp.get('patientName') || undefined,
-      encounterId: sp.get('encounterId') || undefined,
-      visitId:
-        sp.get('visitId') ||
-        sp.get('televisitId') ||
-        undefined,
-      clinicianId: sp.get('clinicianId') || undefined,
-      clinicianName: sp.get('clinicianName') || undefined,
-      clinicName: sp.get('clinicName') || undefined,
-      clinicAddress: sp.get('clinicAddress') || undefined,
-      reason: sp.get('reason') || undefined,
-      startsAt: sp.get('startsAt') || sp.get('start') || undefined,
-      visitMode: sp.get('visitMode') || undefined,
-      participantRole: sp.get('participantRole') || 'patient',
-    };
+    const appointmentId =
+      sp.get('appointmentId') ||
+      sp.get('appointment') ||
+      sp.get('appt') ||
+      '';
 
-    const urlRoomId =
-      sp.get('roomId') || sp.get('room') || sp.get('visitId') || '';
+    setCtx({
+      appointmentId: appointmentId.trim() || undefined,
+      participantRole: 'patient',
+    });
 
-    if (urlRoomId.trim()) {
-      setRoomId(urlRoomId.trim());
+    setRoomId('');
+    setVitalsSnapshot(null);
+  }, []);
+
+  useEffect(() => {
+    const assignedRoom = roomId.trim();
+
+    if (!assignedRoom) {
+      setVitalsSnapshot(null);
+      return;
     }
 
-    setCtx(nextCtx);
-
-    const snapshot = urlRoomId.trim()
-      ? readVitalsSnapshot(urlRoomId.trim(), nextCtx.patientId)
-      : null;
+    const snapshot = readVitalsSnapshot(
+      assignedRoom,
+      ctx.patientId,
+    );
 
     setVitalsSnapshot(snapshot);
 
     if (snapshot) {
       setManualVitals((prev) => ({
         ...prev,
-        hr: typeof snapshot.hr === 'number' ? String(Math.round(snapshot.hr)) : '',
+        hr:
+          typeof snapshot.hr === 'number'
+            ? String(Math.round(snapshot.hr))
+            : '',
         spo2:
           typeof snapshot.spo2 === 'number'
             ? String(Math.round(snapshot.spo2))
             : '',
         tempC:
-          typeof snapshot.tempC === 'number' ? snapshot.tempC.toFixed(1) : '',
-        rr: typeof snapshot.rr === 'number' ? String(Math.round(snapshot.rr)) : '',
+          typeof snapshot.tempC === 'number'
+            ? snapshot.tempC.toFixed(1)
+            : '',
+        rr:
+          typeof snapshot.rr === 'number'
+            ? String(Math.round(snapshot.rr))
+            : '',
         sys:
           typeof snapshot.sys === 'number'
             ? String(Math.round(snapshot.sys))
@@ -771,7 +778,7 @@ export default function PatientLobbyPage() {
             : '',
       }));
     }
-  }, []);
+  }, [roomId, ctx.patientId]);
 
   useEffect(() => {
     let mounted = true;
@@ -801,68 +808,130 @@ export default function PatientLobbyPage() {
           );
         }
 
-        const appointment = data?.appointment || data?.data?.appointment || data?.data || data;
+        const appointment =
+          data?.appointment ||
+          data?.data?.appointment ||
+          data?.data ||
+          data;
+
+        const meta = asRecord(appointment?.meta);
+        const patientId = String(
+          appointment?.subjectPatientId ||
+            appointment?.subject_patient_id ||
+            appointment?.patientId ||
+            appointment?.patient_id ||
+            '',
+        ).trim();
+
+        const participantId =
+          resolvePatientParticipantId(appointment);
+
         setAppointmentState(data);
 
-        setCtx((prev) => ({
-          ...prev,
-          appointmentId: prev.appointmentId || data?.appointmentId || appointment?.id,
-          visitId:
-            prev.visitId ||
+        setCtx({
+          appointmentId: String(
+            data?.appointmentId ||
+              appointment?.id ||
+              ctx.appointmentId ||
+              '',
+          ).trim() || undefined,
+          visitId: String(
             appointment?.visitId ||
-            appointment?.visit_id ||
-            appointment?.televisitId ||
-            appointment?.televisit_id,
-          patientId:
-            prev.patientId ||
-            appointment?.patientId ||
-            appointment?.subjectPatientId ||
-            appointment?.patient_id ||
-            appointment?.subject_patient_id,
-          patientName:
-            prev.patientName ||
+              appointment?.visit_id ||
+              appointment?.televisitId ||
+              appointment?.televisit_id ||
+              meta.visitId ||
+              meta.televisitId ||
+              '',
+          ).trim() || undefined,
+          participantId: participantId || undefined,
+          participantRole: 'patient',
+          patientId: patientId || undefined,
+          patientName: String(
             appointment?.patientName ||
-            appointment?.patient?.name ||
-            appointment?.subjectPatient?.name,
-          clinicianId:
-            prev.clinicianId ||
+              appointment?.patient?.name ||
+              appointment?.subjectPatient?.name ||
+              meta.patientDisplayName ||
+              '',
+          ).trim() || undefined,
+          encounterId: String(
+            appointment?.encounterId ||
+              appointment?.encounter_id ||
+              '',
+          ).trim() || undefined,
+          clinicianId: String(
             appointment?.clinicianId ||
-            appointment?.clinician_id ||
-            appointment?.clinician?.id,
-          clinicianName:
-            prev.clinicianName ||
+              appointment?.clinician_id ||
+              appointment?.clinician?.id ||
+              '',
+          ).trim() || undefined,
+          clinicianName: String(
             appointment?.clinicianName ||
-            appointment?.clinician?.displayName ||
-            appointment?.clinician?.name,
-          reason:
-            prev.reason ||
+              appointment?.clinician?.displayName ||
+              appointment?.clinician?.name ||
+              meta.clinicianDisplayName ||
+              '',
+          ).trim() || undefined,
+          clinicName: String(
+            appointment?.clinicName ||
+              appointment?.clinic?.name ||
+              meta.clinicName ||
+              '',
+          ).trim() || undefined,
+          clinicAddress: String(
+            appointment?.clinicAddress ||
+              appointment?.clinic?.address ||
+              meta.clinicAddress ||
+              '',
+          ).trim() || undefined,
+          reason: String(
             appointment?.reason ||
-            appointment?.title ||
-            appointment?.notes,
-          startsAt:
-            prev.startsAt ||
+              appointment?.title ||
+              appointment?.notes ||
+              '',
+          ).trim() || undefined,
+          startsAt: String(
             appointment?.startsAt ||
-            appointment?.starts_at ||
-            appointment?.start,
-          visitMode:
-            prev.visitMode ||
+              appointment?.starts_at ||
+              appointment?.start ||
+              '',
+          ).trim() || undefined,
+          visitMode: String(
             appointment?.visitMode ||
-            appointment?.visit_mode ||
-            appointment?.location,
-        }));
+              appointment?.visit_mode ||
+              appointment?.location ||
+              '',
+          ).trim() || undefined,
+        });
 
-        const nextRoom =
+        const nextRoom = String(
           appointment?.roomId ||
-          appointment?.room_id ||
-          appointment?.visitId ||
-          appointment?.visit_id;
+            appointment?.room_id ||
+            meta.roomId ||
+            '',
+        ).trim();
 
-        if (typeof nextRoom === 'string' && nextRoom.trim()) {
-          setRoomId((prev) => (prev.trim() ? prev : nextRoom.trim()));
-        }
+        setRoomId(nextRoom);
       } catch (err: any) {
         if (!mounted) return;
-        setAppointmentError(err?.message || 'Could not load appointment context');
+        const code = String(err?.message || '').toLowerCase();
+
+        const patientMessage =
+          code.includes('401') ||
+          code.includes('unauthorized') ||
+          code.includes('session')
+            ? 'Please sign in again to access this consultation.'
+            : code.includes('403') ||
+                code.includes('forbidden')
+              ? 'This consultation is not linked to your account.'
+              : code.includes('404') ||
+                  code.includes('not_found')
+                ? 'We could not find this appointment.'
+                : code.includes('payment')
+                  ? 'We could not confirm the payment status for this appointment.'
+                  : 'We could not load this consultation right now. Please return to your appointments or try again.';
+
+        setAppointmentError(patientMessage);
       } finally {
         if (mounted) setAppointmentBusy(false);
       }
@@ -884,6 +953,9 @@ export default function PatientLobbyPage() {
     const visitId =
       String(ctx.visitId || '').trim();
 
+    const participantId =
+      String(ctx.participantId || '').trim();
+
     const rawRoomId =
       roomId.trim();
 
@@ -892,11 +964,7 @@ export default function PatientLobbyPage() {
         ? ''
         : rawRoomId;
 
-    if (
-      !appointmentId &&
-      !visitId &&
-      !activeRoomId
-    ) {
+    if (!appointmentId || !participantId) {
       setPresence(null);
       setPresenceLoadState('checking');
       return;
@@ -929,6 +997,8 @@ export default function PatientLobbyPage() {
         );
       }
 
+      query.set('participantId', participantId);
+
       if (visitId) {
         query.set('visitId', visitId);
       }
@@ -954,8 +1024,8 @@ export default function PatientLobbyPage() {
             cache: 'no-store',
             body: JSON.stringify({
               surface: 'lobby',
-              appointmentId:
-                appointmentId || undefined,
+              appointmentId,
+              participantId,
               visitId:
                 visitId || undefined,
               roomId:
@@ -1049,17 +1119,22 @@ export default function PatientLobbyPage() {
     };
   }, [
     ctx.appointmentId,
+    ctx.participantId,
     ctx.visitId,
     roomId,
   ]);
 
-  const links = useMemo(() => makeLinks(roomId, ctx), [roomId, ctx]);
+  const patientSfuLink = useMemo(
+    () => makePatientSfuLink(roomId, ctx),
+    [roomId, ctx],
+  );
 
   const readinessScore = useMemo(() => {
     let score = 0;
 
     if (roomId.trim()) score += 18;
     if (ctx.appointmentId && !appointmentBusy && !appointmentError) score += 14;
+    if (ctx.participantId) score += 10;
     if (ctx.appointmentId && appointmentState?.ready) score += 12;
     if (device.hasCamera) score += 8;
     if (device.hasMicrophone) score += 8;
@@ -1071,6 +1146,7 @@ export default function PatientLobbyPage() {
   }, [
     appointmentState?.ready,
     ctx.appointmentId,
+    ctx.participantId,
     ctx.patientId,
     ctx.patientName,
     device.hasCamera,
@@ -1084,6 +1160,8 @@ export default function PatientLobbyPage() {
   const canProceed =
     Boolean(roomId.trim()) &&
     Boolean(ctx.appointmentId) &&
+    Boolean(ctx.participantId) &&
+    Boolean(patientSfuLink) &&
     Boolean(appointmentState?.ready) &&
     privacyReady &&
     !appointmentState?.pending &&
@@ -1092,6 +1170,10 @@ export default function PatientLobbyPage() {
 
   const readinessItems = [
     { label: 'Consultation room selected', ok: Boolean(roomId.trim()) },
+    {
+      label: 'Authorised patient identity resolved',
+      ok: Boolean(ctx.participantId),
+    },
     {
       label: 'Appointment context loaded',
       ok: Boolean(ctx.appointmentId) && !appointmentBusy && !appointmentError,
@@ -1106,30 +1188,6 @@ export default function PatientLobbyPage() {
     { label: 'Consent and privacy check accepted', ok: privacyReady },
     { label: 'Pre-visit vitals available', ok: Boolean(vitalsSnapshot) },
   ];
-
-  async function copyText(value: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopyState(`${label} copied`);
-    } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = value;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      textarea.remove();
-      setCopyState(`${label} copied`);
-    }
-
-    setActionAudit((prev) =>
-      [`${formatZaTime()} · ${label} copied`, ...prev].slice(
-        0,
-        8,
-      ),
-    );
-
-    window.setTimeout(() => setCopyState(null), 1400);
-  }
 
   async function testDevices() {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices) {
@@ -1508,17 +1566,11 @@ export default function PatientLobbyPage() {
                       ? 'Visit blocked'
                       : ctx.appointmentId
                         ? 'Appointment linked'
-                        : 'Direct room'}
+                        : 'Appointment required'}
               </Pill>
             </div>
           </div>
         </section>
-
-        {copyState ? (
-          <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
-            {copyState}
-          </div>
-        ) : null}
 
         {appointmentError ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -1609,7 +1661,7 @@ export default function PatientLobbyPage() {
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <a
-                  href={canProceed ? links.patientSfu : undefined}
+                  href={canProceed ? patientSfuLink : undefined}
                   className={cn(
                     'inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold shadow-sm',
                     canProceed
@@ -1633,23 +1685,26 @@ export default function PatientLobbyPage() {
             </Card>
 
             <Card
-              title="Room setup"
-              subtitle="Only change this if your appointment invite uses another room ID."
+              title="Consultation room"
+              subtitle="Assigned securely from your appointment."
             >
-              <input
-                value={roomId}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setRoomId(next);
-                  setVitalsSnapshot(readVitalsSnapshot(next, ctx.patientId));
-                }}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none ring-0 placeholder:text-slate-400"
-                placeholder="Enter room ID"
-              />
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Room reference
+                </div>
+
+                <div className="mt-1 text-sm font-semibold text-slate-900">
+                  {appointmentBusy
+                    ? 'Loading assigned room…'
+                    : roomId
+                      ? 'Assigned to this appointment'
+                      : 'Room assignment pending'}
+                </div>
+              </div>
 
               <div className="mt-3 text-xs leading-5 text-slate-500">
-                The consultation and invite links update automatically when the
-                room ID changes.
+                For your security, patients cannot change the consultation room.
+                The room is resolved from the authorised appointment record.
               </div>
             </Card>
           </div>
@@ -2128,7 +2183,7 @@ export default function PatientLobbyPage() {
               }
             >
               <a
-                href={canProceed ? links.patientSfu : undefined}
+                href={canProceed ? patientSfuLink : undefined}
                 className={cn(
                   'flex items-center justify-center gap-2 rounded-[24px] px-4 py-4 text-sm font-semibold shadow-sm',
                   canProceed
@@ -2148,68 +2203,17 @@ export default function PatientLobbyPage() {
             </Card>
 
             <Card
-              title="Invite a carer or dependant"
-              subtitle="Only share this with someone authorised to join your consultation."
+              title="Additional participants"
+              subtitle="Access is controlled from the authorised appointment record."
             >
-              <div className="space-y-3">
+              <div className="flex items-start gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm leading-6 text-sky-900">
+                <ShieldCheck className="mt-0.5 h-5 w-5 flex-none text-sky-700" />
                 <div>
-                  <div className="mb-1 text-xs text-slate-500">
-                    Your consultation link
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      readOnly
-                      value={links.patientSfu || 'Room ID required before link is generated'}
-                      className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void copyText(links.patientSfu, 'Consultation link')
-                      }
-                      className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                    >
-                      <Copy className="h-4 w-4" />
-                      Copy
-                    </button>
-                  </div>
+                  Only participants already authorised for this appointment can
+                  enter the consultation. Reusable room links are not displayed
+                  here. Manage carers, dependants or interpreters from the
+                  appointment details before the consultation.
                 </div>
-
-                <div>
-                  <div className="mb-1 text-xs text-slate-500">
-                    Carer / dependant invite
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      readOnly
-                      value={links.carerInvite || 'Room ID required before invite link is generated'}
-                      className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void copyText(links.carerInvite, 'Carer invite')
-                      }
-                      className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                    >
-                      <Copy className="h-4 w-4" />
-                      Copy
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    void copyText(
-                      `Consultation: ${links.patientSfu}\nCarer invite: ${links.carerInvite}`,
-                      'Invite links',
-                    )
-                  }
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                >
-                  Copy all invite links
-                </button>
               </div>
             </Card>
 
@@ -2225,7 +2229,7 @@ export default function PatientLobbyPage() {
                   className="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-600"
                 />
                 <span>
-                  I am in a private place, I understand the live room will ask for clinical consent, and I will only share invite links with authorised people.
+                  I am in a private place, I understand the live room will ask for clinical consent, and access is limited to participants authorised for this appointment.
                 </span>
               </label>
             </Card>
@@ -2249,7 +2253,7 @@ export default function PatientLobbyPage() {
                 </div>
                 <div className="flex items-start gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
                   <Waves className="mt-0.5 h-4 w-4 text-cyan-600" />
-                  <span>Do not share consultation links with unauthorised people.</span>
+                  <span>Only authorised appointment participants may enter the consultation.</span>
                 </div>
               </div>
             </Card>

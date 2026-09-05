@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState } from 'react';
 
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ?? 'http://localhost:3010';
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ?? '';
 
 type Slot = { start: string; end: string; booked: boolean; patientId?: string };
 
@@ -241,7 +241,7 @@ export default function AppointmentForm({
         </div>
 
         {loadingSlots ? (
-          <div className="p-3 text-xs text-gray-500">Loading slots…</div>
+          <div className="p-3 text-xs text-gray-500">Loading slotsâ€¦</div>
         ) : (
           <div className="grid grid-cols-[80px_repeat(7,1fr)]">
             {timeLabels.map((t, rowIdx) => (
@@ -333,7 +333,7 @@ export default function AppointmentForm({
           disabled={busy}
           className="px-3 py-1 rounded bg-indigo-600 text-white disabled:opacity-60"
         >
-          {busy ? 'Saving…' : 'Save Appointment'}
+          {busy ? 'Savingâ€¦' : 'Save Appointment'}
         </button>
       </div>
 

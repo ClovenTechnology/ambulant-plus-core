@@ -8,6 +8,34 @@ import RefundPolicyPanel from '@/components/RefundPolicyPanel';
 
 type SlotStatus = 'available' | 'limited' | 'blocked' | 'booked' | 'past';
 type ConsultType = 'standard' | 'followup';
+type FundingMethod = 'card' | 'medical_aid' | 'voucher';
+type CareCircleMember = {
+  patientId: string;
+  name?: string | null;
+  relationshipId?: string | null;
+};
+type PatientProfile = {
+  patientId?: string | null;
+  id?: string | null;
+  name?: string | null;
+};
+type MedicalAidPolicy = {
+  id: string;
+  patientId: string;
+  payerName: string;
+  planName?: string | null;
+  membershipNumber?: string | null;
+  active?: boolean;
+  memberStatus?: string | null;
+  eligibilityStatus?: string | null;
+  premiumStatus?: string | null;
+  verifiedUntil?: string | null;
+  clientId?: string | null;
+  metadata?: Record<string, any> | null;
+  latestEligibility?: Record<string, any> | null;
+  reasonText?: string | null;
+  reasonCode?: string | null;
+};
 type DayPhase = 'overnight' | 'morning' | 'afternoon' | 'evening' | 'night';
 
 const DAY_PHASES: DayPhase[] = ['overnight', 'morning', 'afternoon', 'evening', 'night'];
@@ -129,10 +157,73 @@ type AppointmentPreflight = {
   priceLock?: {
     token?: string;
     amountMinor?: number;
+    patientPayableMinor?: number;
+    sponsorAmountMinor?: number;
     currency?: string;
+    expiresAt?: string;
     expiresInSeconds?: number;
   };
+  funding?: {
+    method?: string;
+    decision?: string;
+    reason?: string;
+    sponsorAmountMinor?: number;
+    patientPayableMinor?: number;
+    currency?: string;
+    authorizationRequired?: boolean;
+    clientId?: string | null;
+    voucherLast4?: string | null;
+  };
+  sponsor?: {
+    decision?: string;
+    reason?: string;
+    sponsorAmountMinor?: number;
+    patientCopayMinor?: number;
+    authorizationRequired?: boolean;
+  } | null;
 };
+
+function policyClientId(policy: MedicalAidPolicy | null) {
+  return String(
+    policy?.clientId ||
+      policy?.metadata?.clientId ||
+      policy?.metadata?.sponsorId ||
+      '',
+  ).trim() || undefined;
+}
+
+function policyUsable(policy: MedicalAidPolicy | null) {
+  if (!policy || policy.active === false) return false;
+  const latest = policy.latestEligibility || {};
+  const status = String(
+    policy.eligibilityStatus ||
+      latest.eligibilityStatus ||
+      latest.status ||
+      policy.memberStatus ||
+      '',
+  ).toUpperCase();
+  const premium = String(
+    policy.premiumStatus || latest.premiumStatus || '',
+  ).toUpperCase();
+  const blocked = new Set([
+    'UNPAID', 'INACTIVE', 'SUSPENDED', 'CANCELLED', 'CANCELED',
+    'EXPIRED', 'UNVERIFIED', 'FAILED', 'LAPSED', 'PENDING',
+    'NOT_ELIGIBLE', 'NOT_FOUND',
+  ]);
+  if (blocked.has(status) || blocked.has(premium)) return false;
+  const validTo = policy.verifiedUntil || latest.validTo || latest.effectiveTo || null;
+  if (validTo) {
+    const date = new Date(String(validTo));
+    if (Number.isFinite(date.getTime()) && date.getTime() < Date.now()) return false;
+  }
+  return ['ACTIVE', 'VERIFIED', 'ELIGIBLE', 'PAID'].includes(status);
+}
+
+function fundingLabel(method: FundingMethod) {
+  if (method === 'medical_aid') return 'Medical Aid / Sponsor';
+  if (method === 'voucher') return 'Voucher';
+  return 'Card / Self-pay';
+}
 
 type Toast = { id: string; text: string; tone?: 'info' | 'success' | 'error' };
 
@@ -687,8 +778,26 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
   const caseId = sp?.get('caseId') || undefined;
 
   const queryType = sp?.get('type') === 'followup' ? 'followup' : 'standard';
+  const queryFundingRaw = String(sp?.get('funding') || '').toLowerCase();
+  const initialFunding: FundingMethod =
+    ['medical_aid', 'medical-aid', 'medicalaid'].includes(queryFundingRaw)
+      ? 'medical_aid'
+      : queryFundingRaw === 'voucher'
+        ? 'voucher'
+        : 'card';
+  const initialSubjectPatientId = String(sp?.get('subjectPatientId') || '').trim();
+  const initialRelationshipId = String(sp?.get('relationshipId') || '').trim();
   const [consultType, setConsultType] = useState<ConsultType>(queryType === 'followup' && !caseId ? 'standard' : queryType);
   const [showUnavailable, setShowUnavailable] = useState(false);
+  const [fundingMethod, setFundingMethod] = useState<FundingMethod>(initialFunding);
+  const [patientProfile, setPatientProfile] = useState<PatientProfile | null>(null);
+  const [careCircle, setCareCircle] = useState<CareCircleMember[]>([]);
+  const [subjectPatientId, setSubjectPatientId] = useState(initialSubjectPatientId);
+  const [familyRelationshipId, setFamilyRelationshipId] = useState(initialRelationshipId);
+  const [medicalAidPolicies, setMedicalAidPolicies] = useState<MedicalAidPolicy[]>([]);
+  const [selectedPolicyId, setSelectedPolicyId] = useState('');
+  const [voucherCode, setVoucherCode] = useState('');
+  const [fundingBusy, setFundingBusy] = useState(false);
 
   const [profile, setProfile] = useState<BookingProfile | null>(null);
   const [slots, setSlots] = useState<NormalizedSlot[]>([]);
@@ -744,6 +853,120 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     const src = normalizedForUi;
     return consultType === 'followup' ? src.fees.followUp : src.fees.standard;
   }, [normalizedForUi, consultType]);
+
+  const selfPatientId = String(
+    patientProfile?.patientId || patientProfile?.id || '',
+  ).trim();
+  const effectiveSubjectPatientId = subjectPatientId || selfPatientId;
+  const selectedCareMember = careCircle.find(
+    (member) => member.patientId === effectiveSubjectPatientId,
+  ) || null;
+  const selectedPolicy = medicalAidPolicies.find(
+    (policy) => policy.id === selectedPolicyId,
+  ) || null;
+  const selectedClientId = policyClientId(selectedPolicy);
+
+  useEffect(() => {
+    let alive = true;
+
+    void (async () => {
+      const [profileResult, circleResult] = await Promise.all([
+        fetch('/api/profile', { cache: 'no-store' }).then(readJsonSafe).catch(() => null),
+        fetch('/api/care-circle', { cache: 'no-store' }).then(readJsonSafe).catch(() => null),
+      ]);
+
+      if (!alive) return;
+
+      const patient =
+        profileResult?.profile && typeof profileResult.profile === 'object'
+          ? profileResult.profile
+          : profileResult?.patient && typeof profileResult.patient === 'object'
+            ? profileResult.patient
+            : profileResult;
+      setPatientProfile(patient && patient.ok !== false ? patient : null);
+
+      const rawCircle = Array.isArray(circleResult)
+        ? circleResult
+        : Array.isArray(circleResult?.members)
+          ? circleResult.members
+          : Array.isArray(circleResult?.careCircle)
+            ? circleResult.careCircle
+            : [];
+      setCareCircle(
+        rawCircle
+          .map((value: any) => ({
+            patientId: String(value?.patientId || value?.id || '').trim(),
+            name: value?.name || value?.displayName || null,
+            relationshipId: value?.relationshipId || null,
+          }))
+          .filter((value: CareCircleMember) => Boolean(value.patientId)),
+      );
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!subjectPatientId && selfPatientId) {
+      setSubjectPatientId(selfPatientId);
+    }
+  }, [selfPatientId, subjectPatientId]);
+
+  useEffect(() => {
+    const patientId = effectiveSubjectPatientId;
+    if (!patientId || fundingMethod !== 'medical_aid') {
+      if (fundingMethod !== 'medical_aid') {
+        setMedicalAidPolicies([]);
+        setSelectedPolicyId('');
+      }
+      return;
+    }
+
+    let alive = true;
+    setFundingBusy(true);
+
+    void fetch(`/api/medical-aids?patientId=${encodeURIComponent(patientId)}`, {
+      cache: 'no-store',
+    })
+      .then(readJsonSafe)
+      .then((data) => {
+        if (!alive) return;
+        const items = Array.isArray(data?.items) ? data.items : [];
+        setMedicalAidPolicies(items);
+        const preferred = items.find((policy: MedicalAidPolicy) => policyUsable(policy));
+        setSelectedPolicyId((current) =>
+          current && items.some((policy: MedicalAidPolicy) => policy.id === current)
+            ? current
+            : preferred?.id || '',
+        );
+      })
+      .catch(() => {
+        if (alive) {
+          setMedicalAidPolicies([]);
+          setSelectedPolicyId('');
+        }
+      })
+      .finally(() => {
+        if (alive) setFundingBusy(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [effectiveSubjectPatientId, fundingMethod]);
+
+  useEffect(() => {
+    clearPreflightReview();
+    setBookingRequestKey('');
+  }, [
+    fundingMethod,
+    effectiveSubjectPatientId,
+    familyRelationshipId,
+    selectedPolicyId,
+    voucherCode,
+  ]);
 
 
   useEffect(() => {
@@ -925,8 +1148,29 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     : null;
   const displayedFeeCents = lockedFeeCents ?? selectedSlot?.feeCents ?? 0;
   const displayedFeeCurrency = preflight?.priceLock?.currency || selectedSlot?.currency || fee.currency;
+  const patientPayableMinor = Number.isFinite(Number(preflight?.priceLock?.patientPayableMinor))
+    ? Number(preflight?.priceLock?.patientPayableMinor)
+    : displayedFeeCents;
+  const sponsorAmountMinor = Number.isFinite(Number(preflight?.priceLock?.sponsorAmountMinor))
+    ? Number(preflight?.priceLock?.sponsorAmountMinor)
+    : 0;
   const feeChangedDuringReview =
     lockedFeeCents !== null && selectedSlot !== null && lockedFeeCents !== selectedSlot.feeCents;
+  const reviewedFundingDecision = String(preflight?.funding?.decision || '').toUpperCase();
+  const reviewedAuthorizationRequired = Boolean(preflight?.funding?.authorizationRequired);
+  const bookingActionLabel = preflight?.priceLock?.token
+    ? fundingMethod === 'card'
+      ? 'Continue to secure card payment'
+      : fundingMethod === 'medical_aid'
+        ? reviewedAuthorizationRequired
+          ? 'Submit Medical Aid / sponsor booking'
+          : patientPayableMinor > 0
+            ? `Continue with ${formatMoney(patientPayableMinor, displayedFeeCurrency)} co-pay`
+            : 'Confirm covered booking'
+        : patientPayableMinor > 0
+          ? `Apply voucher and pay ${formatMoney(patientPayableMinor, displayedFeeCurrency)}`
+          : 'Apply voucher and confirm booking'
+    : `Review ${fundingLabel(fundingMethod)} booking`;
 
   function clearPreflightReview() {
     setPreflight(null);
@@ -994,6 +1238,27 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
       return;
     }
 
+    if (!effectiveSubjectPatientId) {
+      push('We could not resolve the patient for this booking. Please sign in again.', 'error');
+      return;
+    }
+
+    if (fundingMethod === 'medical_aid') {
+      if (normalizedForUi.clinician.acceptsMedicalAid === false) {
+        push('This clinician is not currently accepting Medical Aid / sponsor bookings.', 'error');
+        return;
+      }
+      if (!selectedPolicy || !policyUsable(selectedPolicy) || !selectedClientId) {
+        push('Choose an active, verified Medical Aid / sponsor policy before continuing.', 'error');
+        return;
+      }
+    }
+
+    if (fundingMethod === 'voucher' && !voucherCode.trim()) {
+      push('Enter your voucher code before continuing.', 'error');
+      return;
+    }
+
     try {
       setBookingBusy(true);
 
@@ -1001,7 +1266,20 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         clinicianId: params.id,
         startsAt: selectedSlot.start,
         endsAt: selectedSlot.end,
-        paymentMethod: 'card',
+        paymentMethod: fundingMethod,
+        subjectPatientId: effectiveSubjectPatientId,
+        familyRelationshipId:
+          effectiveSubjectPatientId !== selfPatientId
+            ? familyRelationshipId || selectedCareMember?.relationshipId || undefined
+            : undefined,
+        clientId:
+          fundingMethod === 'medical_aid'
+            ? selectedClientId
+            : undefined,
+        voucherCode:
+          fundingMethod === 'voucher'
+            ? voucherCode.trim()
+            : undefined,
         reason: consultType === 'followup' ? 'Follow-up consultation' : 'New consultation',
         kind: consultType,
         visitMode: 'televisit',
@@ -1033,7 +1311,14 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         } else if (reviewedRequiredCodes.length > 0) {
           push('Please review and acknowledge the booking notices before continuing.', 'info');
         } else {
-          push('Appointment details confirmed. Review the fee and continue to secure card payment.', 'info');
+          push(
+            fundingMethod === 'card'
+              ? 'Appointment details confirmed. Review the fee and continue to secure card payment.'
+              : fundingMethod === 'medical_aid'
+                ? 'Appointment details confirmed. Review your Medical Aid / sponsor decision before continuing.'
+                : 'Appointment details confirmed. Review the voucher and any remaining balance before continuing.',
+            'info',
+          );
         }
         return;
       }
@@ -1512,6 +1797,135 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                     <div className="text-xs text-slate-600">Ends {slotEndDateTimeLabel(selectedSlot)}</div>
                   </div>
 
+                  <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Paying for this consultation
+                    </div>
+                    <div className="mt-3 grid gap-2">
+                      {([
+                        ['card', 'Card / Self-pay', 'Pay securely by card.'],
+                        ['medical_aid', 'Medical Aid / Sponsor', 'Check active cover and any co-pay before booking.'],
+                        ['voucher', 'Voucher', 'Apply an eligible consultation voucher.'],
+                      ] as Array<[FundingMethod, string, string]>).map(([method, label, detail]) => {
+                        const disabled = method === 'medical_aid' && c.acceptsMedicalAid === false;
+                        return (
+                          <button
+                            key={method}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => setFundingMethod(method)}
+                            className={cx(
+                              'rounded-xl border px-3 py-3 text-left transition',
+                              fundingMethod === method
+                                ? 'border-slate-950 bg-slate-950 text-white shadow-sm'
+                                : 'border-slate-200 bg-slate-50 text-slate-800 hover:bg-white',
+                              disabled && 'cursor-not-allowed opacity-45',
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-semibold">{label}</span>
+                              {fundingMethod === method ? (
+                                <span className="rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                                  Selected
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className={cx('mt-1 text-xs', fundingMethod === method ? 'text-slate-300' : 'text-slate-500')}>
+                              {disabled ? 'Not currently offered by this clinician.' : detail}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-3">
+                      <label className="text-xs font-medium text-slate-700">Patient</label>
+                      <select
+                        value={effectiveSubjectPatientId}
+                        onChange={(event) => {
+                          const nextPatientId = event.target.value;
+                          setSubjectPatientId(nextPatientId);
+                          const member = careCircle.find((item) => item.patientId === nextPatientId);
+                          setFamilyRelationshipId(
+                            nextPatientId === selfPatientId ? '' : member?.relationshipId || '',
+                          );
+                        }}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900"
+                      >
+                        {selfPatientId ? (
+                          <option value={selfPatientId}>
+                            {patientProfile?.name ? `${patientProfile.name} (Myself)` : 'Myself'}
+                          </option>
+                        ) : null}
+                        {careCircle
+                          .filter((member) => member.patientId !== selfPatientId)
+                          .map((member) => (
+                            <option key={member.patientId} value={member.patientId}>
+                              {member.name || 'Linked family member'}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {fundingMethod === 'medical_aid' ? (
+                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                        <label className="text-xs font-semibold text-emerald-950">Medical Aid / sponsor policy</label>
+                        {fundingBusy ? (
+                          <div className="mt-2 text-xs text-emerald-800">Checking active cover...</div>
+                        ) : medicalAidPolicies.length > 0 ? (
+                          <select
+                            value={selectedPolicyId}
+                            onChange={(event) => setSelectedPolicyId(event.target.value)}
+                            className="mt-2 w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-slate-900"
+                          >
+                            <option value="">Choose active cover</option>
+                            {medicalAidPolicies.map((policy) => (
+                              <option key={policy.id} value={policy.id} disabled={!policyUsable(policy)}>
+                                {policy.payerName}
+                                {policy.planName ? ` - ${policy.planName}` : ''}
+                                {!policyUsable(policy) ? ' - unavailable' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="mt-2 text-xs leading-5 text-emerald-900">
+                            No active Medical Aid / sponsor policy is available for this patient.
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
+                    {fundingMethod === 'voucher' ? (
+                      <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+                        <label className="text-xs font-semibold text-indigo-950">Voucher code</label>
+                        <input
+                          value={voucherCode}
+                          onChange={(event) => setVoucherCode(event.target.value)}
+                          autoComplete="off"
+                          placeholder="Enter voucher code"
+                          className="mt-2 w-full rounded-xl border border-indigo-200 bg-white px-3 py-2.5 text-sm uppercase tracking-wide text-slate-900"
+                        />
+                      </div>
+                    ) : null}
+
+                    {preflight?.funding ? (
+                      <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-950">
+                        <div className="font-semibold">{fundingLabel(fundingMethod)} review</div>
+                        <div className="mt-1 leading-5">{preflight.funding.reason || reviewedFundingDecision.replace(/_/g, ' ')}</div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div>
+                            <div className="text-sky-700">Covered / sponsored</div>
+                            <div className="font-semibold">{formatMoney(sponsorAmountMinor, displayedFeeCurrency)}</div>
+                          </div>
+                          <div>
+                            <div className="text-sky-700">You pay</div>
+                            <div className="font-semibold">{formatMoney(patientPayableMinor, displayedFeeCurrency)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
                   <div className="grid grid-cols-3 gap-2">
                     <div className="rounded-2xl border border-slate-200 p-3">
                       <div className="text-xs text-slate-500">{lockedFeeCents !== null ? 'Confirmed fee' : 'Fee'}</div>
@@ -1614,9 +2028,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                       ? preflight?.priceLock?.token
                         ? 'Processing booking...'
                         : 'Reviewing appointment...'
-                      : preflight?.priceLock?.token
-                        ? 'Continue to secure card payment'
-                        : 'Review card booking'}
+                      : bookingActionLabel}
                   </button>
 
                   <button
@@ -1633,7 +2045,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                 </div>
               ) : (
                 <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                  Choose an available or limited slot. Your selected time, fee and duration will be confirmed before secure card payment.
+                  Choose an available or limited slot. Your selected time, fee, duration and funding route will be confirmed before the booking is created.
                 </div>
               )}
             </section>
@@ -1653,18 +2065,10 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
               <ul className="mt-3 space-y-2 text-xs text-slate-700">
                 <li>- A new consultation creates a new case.</li>
                 <li>- Follow-ups require an active case and must be launched from case context.</li>
-                <li>- This streamlined calendar continues to secure card payment.</li>
+                <li>- Card / Self-pay is the standard default; Medical Aid / Sponsor and Voucher use the same live calendar.</li>
                 <li>- The consultation fee is confirmed before payment.</li>
                 <li>- Appointment times include any spacing required by the clinician.</li>
               </ul>
-              <Link
-                href={`/appointments/new?clinicianId=${encodeURIComponent(params.id)}`}
-                className="mt-4 block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center text-xs font-semibold text-slate-800 transition hover:bg-slate-100"
-              >
-                {c.acceptsMedicalAid
-                  ? 'Use Medical Aid, family booking or additional participants'
-                  : 'Use family booking or additional participants'}
-              </Link>
             </section>
           </aside>
         </div>
@@ -1692,11 +2096,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
               }
               className="shrink-0 rounded-2xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
             >
-              {bookingBusy
-                ? 'Processing...'
-                : preflight?.priceLock?.token
-                  ? 'Pay by card'
-                  : 'Review card booking'}
+              {bookingBusy ? 'Processing...' : bookingActionLabel}
             </button>
           </div>
         </div>

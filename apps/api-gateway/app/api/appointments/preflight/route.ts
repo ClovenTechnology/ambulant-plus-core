@@ -17,6 +17,10 @@ import {
   AvailabilityError,
   validateAvailabilityInterval,
 } from '@/src/availability/resolver';
+import {
+  normalizeBookingFundingMethod,
+  previewBookingFunding,
+} from '@/src/appointments/booking-funding';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -381,6 +385,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const fundingMethod = normalizeBookingFundingMethod(
+      body.paymentMethod || body.payment_method || 'CARD',
+    );
+    const funding = await previewBookingFunding({
+      method: fundingMethod,
+      patientId: recipients[0].patientId,
+      clinicianUserId: clean(clinician.userId || clinician.id),
+      clinicianId: clinician.id,
+      hostUserId,
+      kind: feeKind,
+      totalAmountMinor: quote.totalAmountMinor,
+      currency: quote.currency,
+      orgId: clean(who.orgId) || 'org-default',
+      clientId: clean(body.clientId || body.client_id) || undefined,
+      voucherCode: clean(body.voucherCode || body.voucher_code, 160) || undefined,
+    });
+
     const lock = createMultiCarePriceLock({
       clinicianId: clinician.id,
       hostUserId,
@@ -400,7 +421,7 @@ export async function POST(req: NextRequest) {
       policyVersion: quote.policy?.version ?? null,
     });
 
-    const warnings = quote.multiCare
+    const warnings: any[] = quote.multiCare
       ? [
           {
             code: 'multi_care_booking',
@@ -414,9 +435,33 @@ export async function POST(req: NextRequest) {
         ]
       : [];
 
+    if (!funding.canProceed) {
+      warnings.push({
+        code: funding.decision.toLowerCase(),
+        severity: 'blocking',
+        title:
+          fundingMethod === 'MEDICAL_AID'
+            ? 'Medical Aid / sponsor cover needs attention'
+            : fundingMethod === 'VOUCHER'
+              ? 'Voucher cannot be applied'
+              : 'Funding method unavailable',
+        message: funding.reason,
+        requiresAck: false,
+      });
+    } else if (funding.authorizationRequired) {
+      warnings.push({
+        code: 'medical_aid_authorization_required',
+        severity: 'info',
+        title: 'Medical Aid authorisation required',
+        message:
+          'The appointment slot can be held while sponsor authorisation is reviewed. No card charge will be taken until an approved patient balance is known.',
+        requiresAck: false,
+      });
+    }
+
     return json({
       ok: true,
-      canProceed: true,
+      canProceed: funding.canProceed,
       decisionToken: lock.token,
       expiresAt: lock.payload.expiresAt,
       warnings,
@@ -427,10 +472,39 @@ export async function POST(req: NextRequest) {
       priceLock: {
         token: lock.token,
         amountMinor: quote.totalAmountMinor,
-        patientPayableMinor: quote.totalAmountMinor,
+        patientPayableMinor: funding.patientPayableMinor,
+        sponsorAmountMinor: funding.sponsorAmountMinor,
         currency: quote.currency,
         expiresAt: lock.payload.expiresAt,
       },
+      funding: {
+        method: funding.method,
+        decision: funding.decision,
+        reason: funding.reason,
+        sponsorAmountMinor: funding.sponsorAmountMinor,
+        patientPayableMinor: funding.patientPayableMinor,
+        currency: funding.currency,
+        authorizationRequired: funding.authorizationRequired,
+        clientId: funding.clientId || null,
+        clientMemberId: funding.clientMemberId || null,
+        coveragePlanId: funding.coveragePlanId || null,
+        voucherLast4: funding.voucherLast4 || null,
+      },
+      sponsor:
+        funding.method === 'MEDICAL_AID'
+          ? {
+              ok: funding.canProceed,
+              decision: funding.decision,
+              reason: funding.reason,
+              clientId: funding.clientId || null,
+              clientMemberId: funding.clientMemberId || null,
+              coveragePlanId: funding.coveragePlanId || null,
+              sponsorAmountMinor: funding.sponsorAmountMinor,
+              patientCopayMinor: funding.patientPayableMinor,
+              currency: funding.currency,
+              authorizationRequired: funding.authorizationRequired,
+            }
+          : null,
       multiCare: {
         enabled: quote.multiCare,
         recipientCount: quote.recipientCount,
