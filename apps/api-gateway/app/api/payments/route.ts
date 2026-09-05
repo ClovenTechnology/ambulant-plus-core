@@ -44,6 +44,14 @@ function clean(value: unknown, max = 240) {
   return String(value ?? '').trim().slice(0, max);
 }
 
+
+const PROVIDER_REDIRECT_REPLAY_MAX_AGE_MS = 10 * 60_000;
+
+function appointmentPaymentWindowClosed(appointment: any) {
+  const startsAt = Date.parse(clean(appointment?.startsAt, 120));
+  return Number.isFinite(startsAt) && startsAt <= Date.now();
+}
+
 function sha256Hex(value: string) {
   return crypto
     .createHash('sha256')
@@ -282,7 +290,7 @@ function assertAppointmentAccessible(
   }
 }
 
-async function existingPaymentResponse(
+async function existingPaymentRecord(
   appointment: any,
 ) {
   const paymentIntentId = clean(
@@ -294,21 +302,136 @@ async function existingPaymentResponse(
     160,
   );
 
-  const payment = paymentIntentId &&
+  return paymentIntentId &&
     !paymentIntentId.startsWith('init-')
-    ? await prisma.payment.findUnique({
+    ? prisma.payment.findUnique({
         where: { id: paymentIntentId },
       })
     : paymentRef
-      ? await prisma.payment.findFirst({
+      ? prisma.payment.findFirst({
           where: { providerRef: paymentRef },
         })
       : null;
+}
+
+function providerRedirectReplayIsStale(
+  payment: any,
+  appointment: any,
+) {
+  const paymentStatus = clean(payment?.status, 40).toLowerCase();
+  if (!['pending', 'pending_redirect', 'processing'].includes(paymentStatus)) {
+    return false;
+  }
+
+  const paymentMeta = readMeta(payment?.meta);
+  const appointmentMeta = readMeta(appointment?.meta);
+  const initialization = readMeta(appointmentMeta.paymentInitialization);
+  const initializedAt = Date.parse(
+    clean(
+      paymentMeta.initializedAt ||
+        initialization.initializedAt ||
+        initialization.reservedAt,
+      120,
+    ),
+  );
+
+  return (
+    Number.isFinite(initializedAt) &&
+    Date.now() - initializedAt > PROVIDER_REDIRECT_REPLAY_MAX_AGE_MS
+  );
+}
+
+async function releaseStaleProviderPaymentPointer(
+  appointment: any,
+) {
+  const payment = await existingPaymentRecord(appointment);
+  if (!payment || !providerRedirectReplayIsStale(payment, appointment)) {
+    return appointment;
+  }
+
+  const paymentIntentId = clean(appointment.paymentIntentId, 160);
+  const paymentRef = clean(appointment.paymentRef, 160);
+  const paymentMeta = readMeta(payment.meta);
+  const appointmentMeta = readMeta(appointment.meta);
+  const initialization = readMeta(appointmentMeta.paymentInitialization);
+  const bookingPaymentAttemptId = clean(
+    paymentMeta.bookingPaymentAttemptId,
+    160,
+  );
+  const releasedAt = new Date();
+
+  const where: Record<string, any> = { id: appointment.id };
+  if (paymentIntentId && !paymentIntentId.startsWith('init-')) {
+    where.paymentIntentId = paymentIntentId;
+  } else if (paymentRef) {
+    where.paymentRef = paymentRef;
+  } else {
+    return appointment;
+  }
+
+  await prisma.$transaction(async (tx: any) => {
+    const released = await tx.appointment.updateMany({
+      where,
+      data: {
+        paymentIntentId: null,
+        paymentRef: null,
+        meta: jsonSafe({
+          ...appointmentMeta,
+          paymentInitialization: {
+            ...initialization,
+            state: 'PROVIDER_SESSION_STALE_RELEASED',
+            releasedAt: releasedAt.toISOString(),
+            previousPaymentId: payment.id,
+            previousProviderRef: payment.providerRef || null,
+          },
+        }),
+      },
+    });
+
+    if (released.count !== 1) return;
+
+    if (bookingPaymentAttemptId) {
+      await tx.bookingPaymentAttempt.updateMany({
+        where: {
+          id: bookingPaymentAttemptId,
+          status: { in: ['CREATED', 'PENDING_REDIRECT', 'PROCESSING'] },
+        },
+        data: {
+          status: 'EXPIRED',
+          cancelledAt: releasedAt,
+          failureCode: 'provider_session_stale',
+        },
+      });
+    }
+
+    await tx.payment.updateMany({
+      where: { id: payment.id },
+      data: {
+        meta: jsonSafe({
+          ...paymentMeta,
+          supersededAt: releasedAt.toISOString(),
+          supersededReason: 'provider_session_stale',
+        }),
+      },
+    });
+  });
+
+  return loadAppointmentForPayment(appointment.id);
+}
+
+async function existingPaymentResponse(
+  appointment: any,
+) {
+  const payment = await existingPaymentRecord(appointment);
 
   if (!payment) return null;
 
   const paymentStatus = clean(payment.status, 40).toLowerCase();
   if (!['captured', 'authorized', 'pending', 'pending_redirect', 'pending_review', 'processing'].includes(paymentStatus)) {
+    return null;
+  }
+
+  if (providerRedirectReplayIsStale(payment, appointment)) {
     return null;
   }
 
@@ -737,6 +860,20 @@ export async function POST(req: NextRequest) {
         { status: 200 },
       );
     }
+
+    if (appointmentPaymentWindowClosed(appointment)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'appointment_payment_window_closed',
+          appointmentId: appointment.id,
+          rebookRequired: true,
+        },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    appointment = await releaseStaleProviderPaymentPointer(appointment);
 
     const replay = await existingPaymentResponse(appointment);
     if (replay) {

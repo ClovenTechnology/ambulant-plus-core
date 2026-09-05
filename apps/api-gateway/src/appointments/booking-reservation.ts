@@ -71,7 +71,11 @@ export function appointmentStatusIsTerminal(value: unknown) {
 export async function lockClinicianBookingLane(tx: any, clinicianId: string) {
   const lane = `ambulant:booking:${clean(clinicianId, 160)}`;
   await tx.$queryRawUnsafe(
-    'SELECT pg_advisory_xact_lock(hashtext($1))',
+    `WITH clinician_booking_lane AS MATERIALIZED (
+       SELECT pg_advisory_xact_lock(hashtext($1))
+     )
+     SELECT 1::int AS "lockAcquired"
+     FROM clinician_booking_lane`,
     lane,
   );
 }

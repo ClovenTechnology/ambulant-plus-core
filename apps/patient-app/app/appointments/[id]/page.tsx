@@ -518,6 +518,18 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
       ['card', 'self-pay-card', 'self_pay_card', 'self-pay'].includes(
         String(appt.paymentMethod || '').trim().toLowerCase(),
       );
+    const legacyStartsAtMs = Date.parse(String(appt.startsAt || ''));
+
+    if (
+      legacyCardPending &&
+      Number.isFinite(legacyStartsAtMs) &&
+      legacyStartsAtMs <= Date.now()
+    ) {
+      setPaymentMessage(
+        'This appointment time has passed. Payment cannot be resumed; choose a new live clinician slot instead.',
+      );
+      return;
+    }
 
     if (!booking?.canResumePayment && !legacyCardPending) {
       setPaymentMessage(
@@ -834,10 +846,17 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
         String(appt.paymentMethod || '').trim().toLowerCase(),
       ),
   );
+  const appointmentStartMs = start.getTime();
+  const legacyPaymentWindowClosed = Boolean(
+    legacyCardPending &&
+      Number.isFinite(appointmentStartMs) &&
+      appointmentStartMs <= clockNow,
+  );
   const showBookingRecovery = bookingNeedsAction || legacyCardPending;
   const canCancelPending = Boolean(booking && holdStillActive && !bookingTerminal);
   const canContinuePayment = Boolean(
-    (booking?.canResumePayment && holdStillActive) || legacyCardPending,
+    (booking?.canResumePayment && holdStillActive) ||
+      (legacyCardPending && !legacyPaymentWindowClosed),
   );
   const fundingQuery =
     String(booking?.fundingMethod || appt.paymentMethod || '').toUpperCase() === 'MEDICAL_AID'
@@ -904,18 +923,22 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
                   ? 'Medical Aid / sponsor authorisation in progress'
                   : booking?.requiresExplicitFundingChange
                     ? 'Funding decision required'
-                    : appointmentPaymentIsFailed(appt)
-                      ? 'Payment needs attention'
-                      : 'Booking awaiting payment'}
+                    : legacyPaymentWindowClosed
+                      ? 'Payment window closed'
+                      : appointmentPaymentIsFailed(appt)
+                        ? 'Payment needs attention'
+                        : 'Booking awaiting payment'}
               </div>
               <p className="mt-1 max-w-2xl text-xs leading-5 text-amber-900">
                 {booking?.requiresSponsorReview
                   ? 'Your appointment time is reserved while the selected Medical Aid / sponsor authorisation is reviewed. No card charge will be started during sponsor review.'
                   : booking?.requiresExplicitFundingChange
                     ? 'The selected Medical Aid / sponsor route was not approved. Ambulant+ will not silently switch you to self-pay; choose Card / Self-pay only if you want to continue on that basis.'
-                    : booking
-                      ? 'This is the same booking and reserved clinician slot. Continue payment to complete it; a payment retry does not create a second appointment.'
-                      : 'This earlier Card / Self-pay booking is still awaiting payment. Continue checkout to complete the existing appointment.'}
+                    : legacyPaymentWindowClosed
+                      ? 'This earlier Card / Self-pay appointment is already past its scheduled start time. Payment cannot be resumed for it; choose a new live clinician slot.'
+                      : booking
+                        ? 'This is the same booking and reserved clinician slot. Continue payment to complete it; a payment retry does not create a second appointment.'
+                        : 'This earlier Card / Self-pay booking is still awaiting payment. Continue checkout to complete the existing appointment.'}
               </p>
             </div>
 
@@ -1022,7 +1045,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
               </button>
             ) : null}
 
-            {booking && !holdStillActive ? (
+            {(booking && !holdStillActive) || legacyPaymentWindowClosed ? (
               <Link
                 href={rebookHref}
                 className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"

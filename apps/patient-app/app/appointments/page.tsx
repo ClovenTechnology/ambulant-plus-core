@@ -633,6 +633,11 @@ function UpcomingAppointmentCard({
   });
 
   const paymentPending = paymentIsPending(appointment, paymentState);
+  const paymentWindowClosed = Boolean(
+    paymentPending &&
+      Number.isFinite(start.getTime()) &&
+      start.getTime() <= Date.now(),
+  );
   const canJoin = canJoinAppointment(appointment, paymentState);
   const joinReason = joinBlockReason(appointment, paymentState);
 
@@ -669,7 +674,7 @@ function UpcomingAppointmentCard({
 
             {paymentPending && (
               <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-800">
-                Awaiting payment
+                {paymentWindowClosed ? 'Payment window closed' : 'Awaiting payment'}
               </span>
             )}
 
@@ -682,7 +687,7 @@ function UpcomingAppointmentCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-          {paymentPending ? (
+          {paymentPending && !paymentWindowClosed ? (
             <Link
               href={`${detailHref}${detailHref.includes('?') ? '&' : '?'}payment=1#booking-payment`}
               className="rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700"
