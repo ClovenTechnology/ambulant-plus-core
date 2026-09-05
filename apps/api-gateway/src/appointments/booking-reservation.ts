@@ -278,7 +278,7 @@ export async function expireBookingIntent(args: {
   actorType?: string;
   actorUserId?: string | null;
   tx?: any;
-}) {
+}): Promise<any> {
   if (!args.tx) {
     return prisma.$transaction((tx: any) =>
       expireBookingIntent({
@@ -371,7 +371,7 @@ export async function cancelBookingIntent(args: {
   actorType?: string;
   actorUserId?: string | null;
   tx?: any;
-}) {
+}): Promise<any> {
   if (!args.tx) {
     return prisma.$transaction((tx: any) =>
       cancelBookingIntent({
@@ -464,7 +464,7 @@ export async function cancelBookingIntent(args: {
 export async function reconcileCoverageAuthorization(args: {
   appointmentId: string;
   tx?: any;
-}) {
+}): Promise<any> {
   if (!args.tx) {
     return prisma.$transaction((tx: any) =>
       reconcileCoverageAuthorization({
