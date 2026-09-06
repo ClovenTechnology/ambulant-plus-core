@@ -6,11 +6,11 @@ import { readIdentity, requireTrustedIdentityInProduction } from '@/src/lib/iden
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type PlanTierId = 'solo' | 'starter' | 'team' | 'group';
+type PlanTierId = 'solo' | 'starter' | 'team' | 'group' | 'clinic_enterprise' | null;
 type SmartIdDispatchOption = 'collect' | 'courier';
 type BillingCycle = 'monthly' | 'annual';
 
-const PLAN_IDS: PlanTierId[] = ['solo', 'starter', 'team', 'group'];
+const PLAN_IDS: Exclude<PlanTierId, null>[] = ['solo', 'starter', 'team', 'group', 'clinic_enterprise'];
 
 function json(data: any, status = 200) {
   return NextResponse.json(data, {
@@ -34,7 +34,9 @@ function parseObject(value: unknown): Record<string, any> {
 }
 
 function normalizePlanId(raw: unknown): PlanTierId {
-  return typeof raw === 'string' && PLAN_IDS.includes(raw as PlanTierId) ? raw as PlanTierId : 'solo';
+  return typeof raw === 'string' && PLAN_IDS.includes(raw as Exclude<PlanTierId, null>)
+    ? (raw as Exclude<PlanTierId, null>)
+    : null;
 }
 
 function normalizeBillingCycle(raw: unknown): BillingCycle {
