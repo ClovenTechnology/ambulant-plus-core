@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import React, { useEffect, useState, useCallback } from 'react';
 
 type Encounter = {
@@ -61,7 +61,7 @@ export default function EncountersClient({ initial }: { initial: Encounter[] }) 
       {items.length === 0 ? (
         <div className="p-4 border rounded bg-white text-sm text-gray-600">
           No encounter notes yet. Add from{' '}
-          <a className="underline" href="/televisit/demo-123">Televisit</a>.
+          <a className="underline" href="/televisit">Televisit</a>.
         </div>
       ) : (
         <ul className="space-y-3">
