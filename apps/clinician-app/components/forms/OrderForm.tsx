@@ -6,10 +6,26 @@ import { useCombobox } from 'downshift';
 import { useAutocomplete, rxnormSearch } from '@/src/hooks/useAutocomplete';
 import type { RxNormHit } from '@/src/hooks/useAutocomplete';
 
+type MedicationConceptKind = 'ingredient' | 'clinical_drug' | 'product' | 'free_text';
+type LaboratoryDisciplineCode =
+  | 'CLINICAL_CHEMISTRY'
+  | 'HAEMATOLOGY'
+  | 'MICROBIOLOGY'
+  | 'IMMUNOLOGY_SEROLOGY'
+  | 'ENDOCRINOLOGY'
+  | 'MOLECULAR_GENETICS'
+  | 'HISTOPATHOLOGY_CYTOLOGY'
+  | 'GENERAL_LABORATORY';
+
 type ErxItem = {
   id: string;
   drugName: string;
   rxCui?: string | null;
+  nappi?: string | null;
+  genericName?: string;
+  conceptKind?: MedicationConceptKind;
+  strength?: string;
+  form?: string;
   dose?: string;
   route?: string;
   frequency?: string;
@@ -28,7 +44,46 @@ type LabItem = {
   fasting?: boolean;
   specimen?: string;
   notes?: string;
+  catalogSystem?: string;
+  investigationClass?: 'laboratory';
+  disciplineCode?: LaboratoryDisciplineCode;
+  disciplineText?: string;
 };
+
+function inferStrengthAndForm(label: string) {
+  const text = String(label || '').trim();
+  const strength = text.match(/\b\d+(?:\.\d+)?\s*(?:mcg|micrograms?|mg|g|kg|units?|iu|mmol|mEq)(?:\s*\/\s*(?:mL|L|dose|actuation))?\b/i)?.[0] || '';
+  const forms = ['Extended Release Oral Tablet','Delayed Release Oral Tablet','Oral Disintegrating Tablet','Sublingual Tablet','Buccal Tablet','Oral Tablet','Oral Capsule','Oral Solution','Oral Suspension','Injectable Solution','Injection','Inhalation Solution','Inhalation Powder','Metered Dose Inhaler','Transdermal Patch','Topical Cream','Topical Ointment','Topical Gel','Ophthalmic Solution','Nasal Spray','Suppository','Vaginal Tablet','Tablet','Capsule','Solution','Suspension','Cream','Ointment','Gel','Patch','Spray','Drops'];
+  const lower = text.toLowerCase();
+  return { strength, form: forms.find((form) => lower.includes(form.toLowerCase())) || '' };
+}
+
+function medicationConceptKind(hit: RxNormHit): MedicationConceptKind {
+  const raw = hit as any;
+  const termType = String(raw.tty || raw.termType || raw.term_type || raw.kind || '').trim().toUpperCase();
+  if (['IN','PIN','MIN'].includes(termType) || termType.includes('INGREDIENT')) return 'ingredient';
+  if (['SCD','SBD','SCDG','SBDG'].includes(termType) || termType.includes('CLINICAL')) return 'clinical_drug';
+  if (['GPCK','BPCK'].includes(termType) || termType.includes('PRODUCT') || String(raw.source || '').includes('careport')) return 'product';
+  if (String(raw.strength || '').trim() || String(raw.doseForm || raw.form || '').trim()) return 'clinical_drug';
+  return hit.rxcui ? 'ingredient' : 'free_text';
+}
+
+function canonicalLaboratoryDiscipline(value: unknown): { code: LaboratoryDisciplineCode; text: string } {
+  const normalized = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if (/haemat|hemat|coagulat|blood count|blood film/.test(normalized)) return { code: 'HAEMATOLOGY', text: 'Haematology' };
+  if (/chem|biochem|metabolic|renal|liver|electrolyte/.test(normalized)) return { code: 'CLINICAL_CHEMISTRY', text: 'Clinical Chemistry / Biochemistry' };
+  if (/micro|culture|bacter|virolog|parasit|mycolog/.test(normalized)) return { code: 'MICROBIOLOGY', text: 'Microbiology' };
+  if (/immun|serolog/.test(normalized)) return { code: 'IMMUNOLOGY_SEROLOGY', text: 'Immunology / Serology' };
+  if (/endocr|hormon/.test(normalized)) return { code: 'ENDOCRINOLOGY', text: 'Endocrinology' };
+  if (/molecular|genetic|genomic|pcr/.test(normalized)) return { code: 'MOLECULAR_GENETICS', text: 'Molecular / Genetics' };
+  if (/histopath|cytolog|pathology|biopsy/.test(normalized)) return { code: 'HISTOPATHOLOGY_CYTOLOGY', text: 'Histopathology / Cytology' };
+  return { code: 'GENERAL_LABORATORY', text: 'General laboratory' };
+}
+
+function looksLikeNonLaboratoryInvestigation(value: unknown) {
+  const text = String(value || '').toLowerCase();
+  return /\b(x[- ]?ray|radiograph(?:y|ic)?|ultra[- ]?sound|sonograph(?:y|ic)?|ct scan|computed tomography|mri|magnetic resonance|mammograph(?:y|ic)?|nuclear medicine|pet(?:[- ]?ct)?|fluoroscop(?:y|ic)?|angiograph(?:y|ic)|echocardiograph(?:y|ic)?|ecg|electrocardiogra(?:m|phy)|eeg|electroencephalogra(?:m|phy)|spirometr(?:y|ic))\b/i.test(text);
+}
 
 function makeId(prefix = 'i') {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -86,12 +141,12 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
 
   /* eRx items */
   const [items, setItems] = useState<ErxItem[]>(() => [
-    { id: makeId('item'), drugName: '', rxCui: null, dose: '', route: '', frequency: '', duration: '', quantity: '', refills: 0, notes: '' },
+    { id: makeId('item'), drugName: '', rxCui: null, conceptKind: 'free_text', strength: '', form: '', dose: '', route: '', frequency: '', duration: '', quantity: '', refills: 0, notes: '' },
   ]);
 
   /* Lab items */
   const [labItems, setLabItems] = useState<LabItem[]>(() => [
-    { id: makeId('lab'), testCode: '', title: '', details: '', priority: 'Routine', fasting: false, specimen: 'Blood', notes: '' },
+    { id: makeId('lab'), testCode: '', title: '', details: '', priority: 'Routine', fasting: false, specimen: 'Blood', notes: '', catalogSystem: 'local_sa_lab_catalog', investigationClass: 'laboratory', disciplineCode: 'GENERAL_LABORATORY', disciplineText: 'General laboratory' },
   ]);
 
   const storageKey = useMemo(() => `erx-composer:${encounterId || 'ad-hoc'}`, [encounterId]);
@@ -145,7 +200,7 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
   const addItem = useCallback(() => {
     setItems((prev) => [
       ...prev,
-      { id: makeId('item'), drugName: '', rxCui: null, dose: '', route: '', frequency: '', duration: '', quantity: '', refills: 0, notes: '' },
+      { id: makeId('item'), drugName: '', rxCui: null, conceptKind: 'free_text', strength: '', form: '', dose: '', route: '', frequency: '', duration: '', quantity: '', refills: 0, notes: '' },
     ]);
   }, []);
   const removeItem = useCallback((id: string) => {
@@ -170,32 +225,32 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
         } catch {
           // ignore
         }
-        setSigMap((s) => ({ ...s, [cui]: ['1 tab nocte', '1 tab bd', '5 ml bd x5d'] }));
+        setSigMap((s) => ({ ...s, [cui]: [] }));
       })();
     });
   }, [items, sigMap]);
 
   /* ---------- full lab test catalogue grouped (10-ish per category) ---------- */
   const LAB_TESTS = useMemo(() => ([
-    { category: 'Chemistry', code: 'LIPID', title: 'Lipid panel', details: 'Total cholesterol, HDL, LDL, TG', specimen: 'Blood', fastingRecommended: true, urgent: false },
-    { category: 'Chemistry', code: 'GLU', title: 'Glucose (Fasting)', details: 'Fasting plasma glucose', specimen: 'Blood', fastingRecommended: true, urgent: false },
-    { category: 'Chemistry', code: 'BMP', title: 'Basic metabolic panel', details: 'Na, K, Cl, HCO3, Urea, Creatinine, Glucose', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Chemistry', code: 'LFT', title: 'Liver function tests (LFT)', details: 'AST, ALT, ALP, bilirubin', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Chemistry', code: 'RFT', title: 'Renal function tests (RFT)', details: 'Urea, creatinine, electrolytes', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Chemistry', code: 'AMYL', title: 'Amylase', details: 'Pancreatic enzyme', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Chemistry', code: 'CRP', title: 'CRP', details: 'C-reactive protein', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Chemistry', code: 'GGT', title: 'GGT', details: 'Gamma glutamyl transferase', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Chemistry', code: 'BIL', title: 'Bilirubin (total & direct)', details: 'Assess jaundice', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Chemistry', code: 'TG', title: 'Triglycerides', details: 'Serum triglycerides', specimen: 'Blood', fastingRecommended: true, urgent: false },
+    { category: 'Clinical Chemistry / Biochemistry', code: 'LIPID', title: 'Lipid panel', details: 'Total cholesterol, HDL, LDL, TG', specimen: 'Blood', fastingRecommended: true, urgent: false },
+    { category: 'Clinical Chemistry / Biochemistry', code: 'GLU', title: 'Glucose (Fasting)', details: 'Fasting plasma glucose', specimen: 'Blood', fastingRecommended: true, urgent: false },
+    { category: 'Clinical Chemistry / Biochemistry', code: 'BMP', title: 'Basic metabolic panel', details: 'Na, K, Cl, HCO3, Urea, Creatinine, Glucose', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Clinical Chemistry / Biochemistry', code: 'LFT', title: 'Liver function tests (LFT)', details: 'AST, ALT, ALP, bilirubin', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Clinical Chemistry / Biochemistry', code: 'RFT', title: 'Renal function tests (RFT)', details: 'Urea, creatinine, electrolytes', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Clinical Chemistry / Biochemistry', code: 'AMYL', title: 'Amylase', details: 'Pancreatic enzyme', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Clinical Chemistry / Biochemistry', code: 'CRP', title: 'CRP', details: 'C-reactive protein', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Clinical Chemistry / Biochemistry', code: 'GGT', title: 'GGT', details: 'Gamma glutamyl transferase', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Clinical Chemistry / Biochemistry', code: 'BIL', title: 'Bilirubin (total & direct)', details: 'Assess jaundice', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Clinical Chemistry / Biochemistry', code: 'TG', title: 'Triglycerides', details: 'Serum triglycerides', specimen: 'Blood', fastingRecommended: true, urgent: false },
 
-    { category: 'Hematology', code: 'CBC', title: 'Complete blood count (CBC)', details: 'Hb, WCC, Platelets', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Hematology', code: 'ESR', title: 'ESR', details: 'Erythrocyte sedimentation rate', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Hematology', code: 'RETIC', title: 'Reticulocyte count', details: 'Bone marrow response', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Hematology', code: 'PT', title: 'PT/INR', details: 'Coagulation profile (Prothrombin time)', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Hematology', code: 'PB', title: 'Peripheral blood film', details: 'Morphology & differential', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Hematology', code: 'FERR', title: 'Ferritin', details: 'Iron stores', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Hematology', code: 'IRON', title: 'Serum iron', details: 'Serum iron indices', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Hematology', code: 'B12', title: 'Vitamin B12', details: 'Cobalamin level', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Haematology', code: 'CBC', title: 'Complete blood count (CBC)', details: 'Hb, WCC, Platelets', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Haematology', code: 'ESR', title: 'ESR', details: 'Erythrocyte sedimentation rate', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Haematology', code: 'RETIC', title: 'Reticulocyte count', details: 'Bone marrow response', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Haematology', code: 'PT', title: 'PT/INR', details: 'Coagulation profile (Prothrombin time)', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Haematology', code: 'PB', title: 'Peripheral blood film', details: 'Morphology & differential', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Haematology', code: 'FERR', title: 'Ferritin', details: 'Iron stores', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Haematology', code: 'IRON', title: 'Serum iron', details: 'Serum iron indices', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Haematology', code: 'B12', title: 'Vitamin B12', details: 'Cobalamin level', specimen: 'Blood', fastingRecommended: false, urgent: false },
 
     { category: 'Microbiology', code: 'CULT-URINE', title: 'Urine culture', details: 'Urine microscopy & culture', specimen: 'Urine', fastingRecommended: false, urgent: false },
     { category: 'Microbiology', code: 'CULT-BLOOD', title: 'Blood culture', details: 'Blood culture x2 sets', specimen: 'Blood', fastingRecommended: false, urgent: true },
@@ -205,15 +260,15 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
     { category: 'Microbiology', code: 'MSU', title: 'Midstream urine', details: 'Urine MC&S', specimen: 'Urine', fastingRecommended: false, urgent: false },
     { category: 'Microbiology', code: 'PCR-INFL', title: 'Influenza PCR', details: 'Flu PCR panel (swab)', specimen: 'Swab', fastingRecommended: false, urgent: false },
 
-    { category: 'Endocrine', code: 'HBA1C', title: 'HbA1c', details: 'Glycated haemoglobin', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Endocrine', code: 'TSH', title: 'TSH', details: 'Thyroid stimulating hormone', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Endocrine', code: 'FT4', title: 'Free T4', details: 'Thyroid hormone', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Endocrine', code: 'INS', title: 'Insulin (fasting)', details: 'Fasting insulin', specimen: 'Blood', fastingRecommended: true, urgent: false },
+    { category: 'Endocrinology', code: 'HBA1C', title: 'HbA1c', details: 'Glycated haemoglobin', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Endocrinology', code: 'TSH', title: 'TSH', details: 'Thyroid stimulating hormone', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Endocrinology', code: 'FT4', title: 'Free T4', details: 'Thyroid hormone', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Endocrinology', code: 'INS', title: 'Insulin (fasting)', details: 'Fasting insulin', specimen: 'Blood', fastingRecommended: true, urgent: false },
 
-    { category: 'Serology', code: 'HIV', title: 'HIV Ag/Ab', details: 'HIV 4th gen test', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Serology', code: 'HBSAG', title: 'HBsAg', details: 'Hepatitis B surface antigen', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Serology', code: 'HCV', title: 'HCV Ab', details: 'Hepatitis C antibody', specimen: 'Blood', fastingRecommended: false, urgent: false },
-    { category: 'Serology', code: 'SYPH', title: 'Syphilis (RPR/TPHA)', details: 'Syphilis serology', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Immunology / Serology', code: 'HIV', title: 'HIV Ag/Ab', details: 'HIV 4th gen test', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Immunology / Serology', code: 'HBSAG', title: 'HBsAg', details: 'Hepatitis B surface antigen', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Immunology / Serology', code: 'HCV', title: 'HCV Ab', details: 'Hepatitis C antibody', specimen: 'Blood', fastingRecommended: false, urgent: false },
+    { category: 'Immunology / Serology', code: 'SYPH', title: 'Syphilis (RPR/TPHA)', details: 'Syphilis serology', specimen: 'Blood', fastingRecommended: false, urgent: false },
   ]), []);
 
   const categories = useMemo(() => Array.from(new Set(LAB_TESTS.map(t => t.category))), [LAB_TESTS]);
@@ -226,7 +281,7 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
   const addLabItem = useCallback(() => {
     setLabItems((prev) => [
       ...prev,
-      { id: makeId('lab'), testCode: '', title: '', details: '', priority: 'Routine', fasting: false, specimen: 'Blood', notes: '' },
+      { id: makeId('lab'), testCode: '', title: '', details: '', priority: 'Routine', fasting: false, specimen: 'Blood', notes: '', catalogSystem: 'local_sa_lab_catalog', investigationClass: 'laboratory', disciplineCode: 'GENERAL_LABORATORY', disciplineText: 'General laboratory' },
     ]);
   }, []);
   const removeLabItem = useCallback((id: string) => {
@@ -236,27 +291,36 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
     setLabItems((prev) => [...prev, { ...item, id: makeId('lab') }]);
   }, []);
 
-  const buildItemsForPost = useCallback(() => items.map(it => ({
-    drugName: it.drugName || '',
-    dose: it.dose || undefined,
-    route: it.route || undefined,
-    frequency: it.frequency || undefined,
-    duration: it.duration || undefined,
-    quantity: it.quantity || undefined,
+  const buildItemsForPost = useCallback(() => items.filter((it) => it.drugName.trim()).map((it) => ({
+    drug: it.drugName.trim(),
+    rxcui: it.rxCui || undefined,
+    nappi: it.nappi || undefined,
+    genericName: it.genericName || undefined,
+    conceptKind: it.conceptKind || (it.rxCui ? 'ingredient' : 'free_text'),
+    strength: it.strength?.trim() || undefined,
+    form: it.form?.trim() || undefined,
+    dose: it.dose?.trim() || undefined,
+    route: it.route?.trim() || undefined,
+    freq: it.frequency?.trim() || undefined,
+    duration: it.duration?.trim() || undefined,
+    qty: it.quantity?.trim() || undefined,
     refills: typeof it.refills === 'number' ? it.refills : 0,
-    notes: it.notes || undefined,
-    rxCui: it.rxCui || undefined,
+    notes: it.notes?.trim() || undefined,
   })), [items]);
 
-  const buildLabForPost = useCallback(() => labItems.map(l => ({
-    testCode: l.testCode || l.title || '',
-    title: l.title || '',
-    details: l.details || '',
-    priority: l.priority || 'Routine',
-    fasting: !!l.fasting,
-    specimen: l.specimen || 'Blood',
-    notes: l.notes || undefined,
-  })), [labItems]);
+  const buildLabForPost = useCallback(() => labItems
+    .filter((l) => String(l.testCode || l.title || '').trim())
+    .map((l) => ({
+      test: String(l.title || l.testCode || '').trim(),
+      catalogCode: l.testCode?.trim() || undefined,
+      catalogSystem: l.catalogSystem || 'local_sa_lab_catalog',
+      priority: l.priority || 'Routine',
+      specimen: l.specimen || 'Blood',
+      instructions: l.notes?.trim() || undefined,
+      investigationClass: 'laboratory' as const,
+      disciplineCode: l.disciplineCode || 'GENERAL_LABORATORY',
+      disciplineText: l.disciplineText || 'General laboratory',
+    })), [labItems]);
 
   /* toast */
   const [toast, setToast] = useState<{ msg: string; kind?: 'success' | 'error' } | null>(null);
@@ -272,14 +336,17 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
     setErr(null);
     if (!encounterId) { setErr('Missing encounterId'); setBusy(false); return; }
     try {
-      const body = { appointmentId: encounterId, items: buildItemsForPost() };
-      const base = (process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL || '').replace(/\/$/, '');
-      const url = base ? `${base}/api/erx` : '/api/erx';
-      const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) throw new Error(await r.text().catch(()=>'HTTP '+r.status));
+      const medications = buildItemsForPost();
+      if (!medications.length) throw new Error('Add at least one medication before issuing the prescription.');
+      const incomplete = medications.find((item) => !item.strength || !item.form);
+      if (incomplete) throw new Error(`Strength and dosage form are required before issuing ${incomplete.drug}.`);
+      const body = { action: 'finalize', scope: 'medications', encounterId, medications, labs: [] };
+      const url = `/api/encounters/${encodeURIComponent(encounterId)}/erx`;
+      const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), credentials: 'same-origin' });
+      const js = await r.json().catch(() => null as any);
+      if (!r.ok || !js?.ok) throw new Error(js?.message || js?.error || `HTTP ${r.status}`);
       try { localStorage.removeItem(storageKey); } catch {}
-      const js = await r.json().catch(() => ({}));
-      setToast({ msg: 'eRx created', kind: 'success' });
+      setToast({ msg: 'Prescription issued to the patient record', kind: 'success' });
       onSaved(js);
     } catch (e: any) {
       setErr(e?.message || 'Failed to create order'); setToast({ msg: e?.message || 'Failed to create order', kind: 'error' });
@@ -291,14 +358,17 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
     setErr(null);
     if (!encounterId) { setErr('Missing encounterId'); setBusy(false); return; }
     try {
-      const body = { appointmentId: encounterId, items: buildLabForPost() };
-      const base = (process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL || '').replace(/\/$/, '');
-      const url = base ? `${base}/api/lab` : '/api/lab';
-      const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) throw new Error(await r.text().catch(()=>'HTTP '+r.status));
+      const labs = buildLabForPost();
+      if (!labs.length) throw new Error('Add at least one laboratory investigation before issuing the order.');
+      const misrouted = labs.find((item) => looksLikeNonLaboratoryInvestigation(item.test));
+      if (misrouted) throw new Error(`“${misrouted.test}” is not a laboratory investigation. Imaging/Radiology and other diagnostics require a separate workflow.`);
+      const body = { action: 'finalize', scope: 'labs', encounterId, medications: [], labs };
+      const url = `/api/encounters/${encodeURIComponent(encounterId)}/erx`;
+      const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), credentials: 'same-origin' });
+      const js = await r.json().catch(() => null as any);
+      if (!r.ok || !js?.ok) throw new Error(js?.message || js?.error || `HTTP ${r.status}`);
       try { localStorage.removeItem(storageKeyLab); } catch {}
-      const js = await r.json().catch(() => ({}));
-      setToast({ msg: 'Lab order created', kind: 'success' });
+      setToast({ msg: 'Laboratory order issued to the patient record', kind: 'success' });
       onSaved(js);
     } catch (e: any) {
       setErr(e?.message || 'Failed to create lab order'); setToast({ msg: e?.message || 'Failed to create lab order', kind: 'error' });
@@ -307,26 +377,48 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
 
   /* Drug combobox */
   function DrugCombobox({ row }: { row: ErxItem }) {
-    const options = useMemo(() => {
-      if (drugAuto.opts && drugAuto.opts.length) return drugAuto.opts.map(h => ({ label: h.name, rxcui: h.rxcui }));
-      return [{ label: 'Atorvastatin 20mg', rxcui: '1049630' }];
-    }, [drugAuto.opts]);
+    const options = useMemo(() => (drugAuto.opts || []).map((hit) => {
+      const raw = hit as any;
+      const inferred = inferStrengthAndForm(hit.name);
+      return {
+        label: hit.name,
+        hit,
+        strength: String(raw.strength || '').trim() || inferred.strength,
+        form: String(raw.doseForm || raw.form || '').trim() || inferred.form,
+      };
+    }), [drugAuto.opts]);
 
-    const itemsList = options.map(o => o.label);
+    const itemsList = options.map((o) => o.label);
 
     const { isOpen, getMenuProps, getInputProps, getItemProps, highlightedIndex } = useCombobox({
       items: itemsList,
       inputValue: row.drugName || '',
       onInputValueChange: ({ inputValue }) => {
         if (typeof inputValue === 'string') {
-          updateItem(row.id, { drugName: inputValue, rxCui: null });
           drugAuto.setQ(inputValue);
+          const matchesCurrentOption = options.some((option) => option.label === inputValue);
+          if (matchesCurrentOption) {
+            if (inputValue !== row.drugName) updateItem(row.id, { drugName: inputValue });
+          } else {
+            updateItem(row.id, { drugName: inputValue, rxCui: null, nappi: null, genericName: undefined, conceptKind: 'free_text', strength: '', form: '' });
+          }
         }
       },
       onSelectedItemChange: ({ selectedItem }) => {
         if (!selectedItem) return;
-        const hit = drugAuto.opts.find(h => h.name === selectedItem) || null;
-        updateItem(row.id, { drugName: selectedItem, rxCui: hit ? hit.rxcui : null });
+        const selected = options.find((option) => option.label === selectedItem);
+        const hit = selected?.hit || null;
+        const raw = hit as any;
+        updateItem(row.id, {
+          drugName: selectedItem,
+          rxCui: hit?.rxcui || null,
+          nappi: String(raw?.nappi || raw?.nappiCode || '').trim() || null,
+          genericName: String(raw?.genericName || raw?.ingredientName || '').trim() || undefined,
+          conceptKind: hit ? medicationConceptKind(hit) : 'free_text',
+          strength: selected?.strength || '',
+          form: selected?.form || '',
+          route: row.route || String(raw?.route || '').trim(),
+        });
       },
       itemToString: (i: any) => i ?? '',
     });
@@ -334,10 +426,18 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
     return (
       <div className="relative">
         <input {...getInputProps({ placeholder: 'Type drug name…', className: 'w-full border rounded px-2 py-1' })} />
-        <ul {...getMenuProps()} className={`absolute z-40 mt-1 w-full max-h-56 overflow-auto rounded border bg-white ${isOpen && itemsList.length ? '' : 'hidden'}`}>
-          {itemsList.length === 0 ? (<li className="px-3 py-2 text-sm text-gray-500">No results</li>) : itemsList.map((label, index) => (
-            <li key={`${label}-${index}`} {...getItemProps({ item: label, index })} className={`px-3 py-2 text-sm cursor-pointer ${highlightedIndex === index ? 'bg-gray-100' : ''}`}>{label}</li>
-          ))}
+        <ul {...getMenuProps()} className={`absolute z-40 mt-1 w-full max-h-56 overflow-auto rounded border bg-white ${isOpen ? '' : 'hidden'}`}>
+          {itemsList.length === 0 ? (
+            <li className="px-3 py-2 text-sm text-gray-500">No coded match. You may continue with free text, but strength and dosage form remain mandatory before issue.</li>
+          ) : itemsList.map((label, index) => {
+            const option = options[index];
+            return (
+              <li key={`${label}-${index}`} {...getItemProps({ item: label, index })} className={`px-3 py-2 text-sm cursor-pointer ${highlightedIndex === index ? 'bg-gray-100' : ''}`}>
+                <div className="font-medium">{label}</div>
+                <div className="text-[11px] text-gray-500">{[option?.strength, option?.form].filter(Boolean).join(' · ') || 'Strength/formulation not coded — required before issue'}</div>
+              </li>
+            );
+          })}
         </ul>
       </div>
     );
@@ -424,6 +524,7 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
       details?: string;
       fastingRecommended?: boolean;
       specimen?: string;
+      category?: string;
     }): LabItem => ({
       id: makeId('lab'),
       testCode: t.code,
@@ -433,6 +534,9 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
       fasting: !!t.fastingRecommended,
       specimen: t.specimen || 'Blood',
       notes: '',
+      catalogSystem: 'local_sa_lab_catalog',
+      investigationClass: 'laboratory',
+      ...(() => { const discipline = canonicalLaboratoryDiscipline((t as any).category); return { disciplineCode: discipline.code, disciplineText: discipline.text }; })(),
     }),
     []
   );
@@ -451,6 +555,8 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
       if (first) {
         updateLabItem(pickerTargetRowId, {
           testCode: first.code, title: first.title, details: first.details, specimen: first.specimen, fasting: !!first.fastingRecommended,
+          catalogSystem: 'local_sa_lab_catalog', investigationClass: 'laboratory',
+          ...(() => { const discipline = canonicalLaboratoryDiscipline(first.category); return { disciplineCode: discipline.code, disciplineText: discipline.text }; })(),
         });
       }
       const extras = tests.slice(1);
@@ -495,7 +601,7 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
   /* preview modal + server-rendered clinical PDF */
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewPayload, setPreviewPayload] = useState<any>(null);
-  const clinicianName = typeof window !== 'undefined' ? (window as any).__USER__?.name ?? 'Dr. Nomsa' : 'Dr. Nomsa';
+  const clinicianName = typeof window !== 'undefined' ? String((window as any).__USER__?.name || '').trim() : '';
   const patientPlaceholder = { name: '', id: '' };
 
   const openPreview = useCallback(() => {
@@ -507,7 +613,7 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
       createdAt: new Date().toISOString(),
       clinician: clinicianName,
       patient: patientPlaceholder,
-      items: labItems.map(l => ({ code: l.testCode || l.title, title: l.title || l.testCode, specimen: l.specimen, fasting: l.fasting, notes: l.notes })),
+      items: labItems.map(l => ({ code: l.testCode || l.title, title: l.title || l.testCode, specimen: l.specimen, fasting: l.fasting, notes: l.notes, discipline: l.disciplineText || 'General laboratory' })),
     };
     setPreviewPayload(payload);
     setPreviewOpen(true);
@@ -559,7 +665,7 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
         <input
           className="flex-1 border rounded px-2 py-1"
           value={row.testCode || row.title || ''}
-          onChange={(e) => updateLabItem(row.id, { testCode: e.target.value })}
+          onChange={(e) => updateLabItem(row.id, { testCode: e.target.value, title: '', disciplineCode: 'GENERAL_LABORATORY', disciplineText: 'General laboratory', investigationClass: 'laboratory' })}
           placeholder="Type code/title or use picker"
         />
         <button type="button" onClick={() => openPicker(row.id)} className="px-3 py-1 rounded border bg-white">Choose tests…</button>
@@ -593,7 +699,8 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
 
       <div className="flex gap-2 mt-3">
         <button onClick={() => setTab('erx')} className={`px-3 py-1 rounded border ${tab === 'erx' ? 'bg-gray-900 text-white' : 'bg-white'}`}>Pharmacy (eRx)</button>
-        <button onClick={() => setTab('lab')} className={`px-3 py-1 rounded border ${tab === 'lab' ? 'bg-gray-900 text-white' : 'bg-white'}`}>Lab</button>
+        <button onClick={() => setTab('lab')} className={`px-3 py-1 rounded border ${tab === 'lab' ? 'bg-gray-900 text-white' : 'bg-white'}`}>Laboratory</button>
+        <span className="self-center rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600">Imaging / Radiology · separate workflow</span>
       </div>
 
       {tab === 'erx' ? (
@@ -602,25 +709,29 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
             const sigs = it.rxCui ? (sigMap[it.rxCui] || []) : [];
             return (
               <div key={it.id} className="border rounded p-3 bg-gray-50">
-                <div className="flex gap-2 items-start">
-                  <div className="flex-1">
-                    <label className="text-xs text-gray-600">Drug</label>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_10rem_10rem]">
+                  <div>
+                    <label className="text-xs text-gray-600">Medicine</label>
                     <DrugCombobox row={it} />
-                    {it.rxCui && <div className="text-[11px] text-gray-600 mt-1">RxCUI: <span className="font-mono">{it.rxCui}</span></div>}
+                    <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-gray-600">
+                      <span>{it.conceptKind === 'ingredient' ? 'Ingredient concept' : it.conceptKind === 'clinical_drug' ? 'Clinical drug concept' : it.conceptKind === 'product' ? 'Product concept' : 'Free-text medicine'}</span>
+                      {it.genericName && it.genericName !== it.drugName ? <span>Generic: {it.genericName}</span> : null}
+                      {it.rxCui ? <span>RxCUI: <span className="font-mono">{it.rxCui}</span></span> : null}
+                    </div>
                   </div>
-
-                  <div className="w-36">
-                    <label className="text-xs text-gray-600">Dose</label>
-                    <input className="w-full border rounded px-2 py-1" value={it.dose || ''} onChange={(e) => updateItem(it.id, { dose: e.target.value })} placeholder="e.g. 500 mg" />
+                  <div>
+                    <label className="text-xs text-gray-600">Strength</label>
+                    <input className="w-full border rounded px-2 py-1" value={it.strength || ''} onChange={(e) => updateItem(it.id, { strength: e.target.value })} placeholder="e.g. 500 mg" />
                   </div>
-
-                  <div className="w-36">
-                    <label className="text-xs text-gray-600">Route</label>
-                    <input className="w-full border rounded px-2 py-1" value={it.route || ''} onChange={(e) => updateItem(it.id, { route: e.target.value })} placeholder="PO / IM / Topical" />
+                  <div>
+                    <label className="text-xs text-gray-600">Dosage form</label>
+                    <input className="w-full border rounded px-2 py-1" value={it.form || ''} onChange={(e) => updateItem(it.id, { form: e.target.value })} placeholder="e.g. tablet" />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mt-3">
+                  <input className="border rounded px-2 py-1" placeholder="Dose (e.g. 1 tablet)" value={it.dose || ''} onChange={(e) => updateItem(it.id, { dose: e.target.value })} />
+                  <input className="border rounded px-2 py-1" placeholder="Route (e.g. oral)" value={it.route || ''} onChange={(e) => updateItem(it.id, { route: e.target.value })} />
                   <input className="border rounded px-2 py-1" placeholder="Frequency (e.g. BD)" value={it.frequency || ''} onChange={(e) => updateItem(it.id, { frequency: e.target.value })} />
                   <input className="border rounded px-2 py-1" placeholder="Duration (e.g. x5d)" value={it.duration || ''} onChange={(e) => updateItem(it.id, { duration: e.target.value })} />
                   <input className="border rounded px-2 py-1" placeholder="Quantity" value={it.quantity || ''} onChange={(e) => updateItem(it.id, { quantity: e.target.value })} />
@@ -631,9 +742,10 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
                   <label className="text-xs text-gray-600">Sig / Notes</label>
                   <input className="w-full border rounded px-2 py-1" value={it.notes || ''} onChange={(e) => updateItem(it.id, { notes: e.target.value })} placeholder="e.g. 1 tab nocte" />
                   <div className="flex gap-2 flex-wrap mt-2">
-                    {(sigs.length ? sigMap[it.rxCui as string] : ['1 tab nocte', '1 tab bd', '5 ml bd x5d']).map((s) => (
+                    {sigs.map((s) => (
                       <SigPill key={s} text={s} onClick={() => updateItem(it.id, { notes: s })} />
                     ))}
+                    {!sigs.length ? <span className="text-[11px] text-gray-500">No coded SIG suggestion available — enter directions explicitly.</span> : null}
                   </div>
                 </div>
 
@@ -654,8 +766,12 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
         </section>
       ) : (
         <section className="space-y-2 border rounded p-3 bg-white mt-3">
+          <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+            This workspace is for laboratory investigations only. Laboratory orders carry a structured discipline (for example Haematology or Clinical Chemistry). Imaging/Radiology, ECG, EEG and spirometry use separate diagnostic workflows and are not routed through MedReach.
+          </div>
           {labItems.map((li, idx) => {
             const meta = LAB_TESTS.find(t => t.code === li.testCode) || LAB_TESTS.find(t => t.title === li.title);
+            const discipline = canonicalLaboratoryDiscipline(li.disciplineText || meta?.category);
             const fastingSuggested = !!meta?.fastingRecommended;
             return (
               <div key={li.id} className="border rounded p-3 bg-gray-50">
@@ -667,6 +783,7 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
                       <div className="text-[11px] text-gray-600">{li.details || meta?.details || ''}</div>
                       <div title={meta?.details || ''} className="text-[11px] text-gray-500 ml-1 px-1 rounded">{meta ? <SpecimenBadge text={meta.specimen} /> : <SpecimenBadge text={li.specimen} />}</div>
                     </div>
+                    <div className="mt-1 text-[11px] text-gray-500">Discipline: <span className="font-medium text-gray-700">{li.disciplineText || discipline.text}</span> · class: Laboratory</div>
 
                     {(fastingSuggested || li.fasting) && (
                       <div className="mt-1 text-[12px] italic text-amber-700">
@@ -699,11 +816,11 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mt-3">
                   <div>
                     <label className="text-xs text-gray-600">Test code</label>
-                    <input className="w-full border rounded px-2 py-1" value={li.testCode || ''} onChange={(e) => updateLabItem(li.id, { testCode: e.target.value })} />
+                    <input className="w-full border rounded px-2 py-1" value={li.testCode || ''} onChange={(e) => updateLabItem(li.id, { testCode: e.target.value, disciplineCode: 'GENERAL_LABORATORY', disciplineText: 'General laboratory', investigationClass: 'laboratory' })} />
                   </div>
                   <div>
                     <label className="text-xs text-gray-600">Title</label>
-                    <input className="w-full border rounded px-2 py-1" value={li.title || ''} onChange={(e) => updateLabItem(li.id, { title: e.target.value })} />
+                    <input className="w-full border rounded px-2 py-1" value={li.title || ''} onChange={(e) => updateLabItem(li.id, { title: e.target.value, disciplineCode: 'GENERAL_LABORATORY', disciplineText: 'General laboratory', investigationClass: 'laboratory' })} />
                   </div>
                   <div>
                     <label className="text-xs text-gray-600">Fasting</label>
@@ -736,7 +853,7 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
               {COMMON_PANELS.map((p) => (
                 <div key={p.id} className="flex gap-2">
                   <button key={p.id} type="button" onClick={() => {
-                    setLabItems([{ id: makeId('lab'), testCode: p.id, title: p.title, details: p.details, specimen: p.specimen || 'Blood', priority: 'Routine', fasting: p.id === 'LIPID', notes: '' }]);
+                    setLabItems([{ id: makeId('lab'), testCode: p.id, title: p.title, details: p.details, specimen: p.specimen || 'Blood', priority: 'Routine', fasting: p.id === 'LIPID', notes: '', catalogSystem: 'local_sa_lab_catalog', investigationClass: 'laboratory', ...(() => { const discipline = canonicalLaboratoryDiscipline(LAB_TESTS.find((t) => t.code === p.id)?.category); return { disciplineCode: discipline.code, disciplineText: discipline.text }; })() }]);
                   }} className="flex-1 text-left border rounded p-2 hover:bg-gray-50">
                     <div className="font-medium">{p.title}</div>
                     <div className="text-xs text-gray-600">{p.details}</div>
@@ -748,7 +865,7 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
 
             <div className="mt-3">
               <label className="text-xs text-gray-600">Panel code / custom</label>
-              <input className="w-full border rounded px-2 py-1" value={labItems[0]?.testCode || ''} onChange={(e) => updateLabItem(labItems[0].id, { testCode: e.target.value })} />
+              <input className="w-full border rounded px-2 py-1" value={labItems[0]?.testCode || ''} onChange={(e) => updateLabItem(labItems[0].id, { testCode: e.target.value, disciplineCode: 'GENERAL_LABORATORY', disciplineText: 'General laboratory', investigationClass: 'laboratory' })} />
             </div>
 
             <div className="flex gap-2 mt-3">
@@ -885,14 +1002,14 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
           <div className="p-4 overflow-auto flex-1">
             <div className="mb-3">
               <div className="text-sm font-medium">Clinician</div>
-              <div className="text-sm">{previewPayload?.clinician ?? clinicianName}</div>
-              <div className="text-xs text-gray-500 mt-1">Ambulant+ Clinician ID: CLIN-001</div>
+              <div className="text-sm">{previewPayload?.clinician || clinicianName || 'Authenticated clinician'}</div>
+              <div className="text-xs text-gray-500 mt-1">Identity and registration details are resolved from the authenticated clinician record when the order is issued.</div>
             </div>
 
             <div className="mb-3">
               <div className="text-sm font-medium">Patient</div>
-              <div className="text-sm">{previewPayload?.patient?.name ?? 'Demo Patient'}</div>
-              <div className="text-xs text-gray-500">Patient ID: {previewPayload?.patient?.id ?? 'PT-0001'}</div>
+              <div className="text-sm">{previewPayload?.patient?.name || 'Patient identity resolved from encounter'}</div>
+              <div className="text-xs text-gray-500">Patient ID: {previewPayload?.patient?.id || encounterId || 'Encounter-bound'}</div>
             </div>
 
             <table className="w-full border-collapse">
@@ -919,7 +1036,7 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
             </table>
 
             <div className="mt-6 text-xs text-gray-500">
-              Order created from MedReach by Ambulant+. This preview is for review/print only.
+              Laboratory requisition authored in Ambulant+. MedReach routing, if chosen by the patient, occurs only after issue and is not triggered by this preview.
             </div>
           </div>
 

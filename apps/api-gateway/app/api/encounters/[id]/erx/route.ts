@@ -17,6 +17,8 @@ type Coding = {
 
 type MedicationDto = {
   coding: Coding[];
+  conceptKind?: string;
+  ingredientText?: string;
   formText?: string;
   strengthText?: string;
   doseText?: string;
@@ -30,6 +32,9 @@ type MedicationDto = {
 
 type LabDto = {
   testText: string;
+  investigationClass?: string;
+  disciplineCode?: string;
+  disciplineText?: string;
   testCoding?: Coding;
   priority?: 'Routine' | 'Urgent' | 'Stat';
   specimenText?: string;
@@ -124,6 +129,20 @@ function highestRequestedSchedule(meds: MedicationDto[]) {
   return maxFound;
 }
 
+function normalizedMedicationConceptKind(med: MedicationDto) {
+  const raw = clean(med.conceptKind, 40).toLowerCase();
+  if (['ingredient', 'clinical_drug', 'product', 'free_text'].includes(raw)) return raw;
+  const primary = firstCoding(med.coding, ['nappi', 'rxnorm']);
+  if (primary && clean(primary.system, 80).toLowerCase().includes('text')) return 'free_text';
+  if (optionalString(med.strengthText, 200) || optionalString(med.formText, 120)) return 'clinical_drug';
+  return primary ? 'ingredient' : 'free_text';
+}
+
+function looksLikeNonLaboratoryInvestigation(value: unknown) {
+  const text = String(value || '').toLowerCase();
+  return /\b(x[- ]?ray|radiograph(?:y|ic)?|ultra[- ]?sound|sonograph(?:y|ic)?|ct scan|computed tomography|mri|magnetic resonance|mammograph(?:y|ic)?|nuclear medicine|pet(?:[- ]?ct)?|fluoroscop(?:y|ic)?|angiograph(?:y|ic)|echocardiograph(?:y|ic)?|ecg|electrocardiogra(?:m|phy)|eeg|electroencephalogra(?:m|phy)|spirometr(?:y|ic))\b/i.test(text);
+}
+
 function medicationSnapshot(med: MedicationDto, authoredAt: string) {
   const primary = firstCoding(med.coding, ['nappi', 'rxnorm']);
   const quantityText =
@@ -137,6 +156,8 @@ function medicationSnapshot(med: MedicationDto, authoredAt: string) {
     primaryCoding: primary
       ? { system: primary.system, code: primary.code, display: primary.display }
       : null,
+    conceptKind: normalizedMedicationConceptKind(med),
+    ingredientText: optionalString(med.ingredientText, 300),
     formText: optionalString(med.formText, 200),
     strengthText: optionalString(med.strengthText, 200),
     doseText: optionalString(med.doseText, 200),
@@ -171,6 +192,9 @@ function medicationSigDisplay(med: MedicationDto) {
 function labSnapshot(lab: LabDto, authoredAt: string) {
   return {
     testText: optionalString(lab.testText, 500) || 'Lab order',
+    investigationClass: 'laboratory',
+    disciplineCode: optionalString(lab.disciplineCode, 80) || 'GENERAL_LABORATORY',
+    disciplineText: optionalString(lab.disciplineText, 160) || 'General laboratory',
     testCoding: lab.testCoding
       ? {
           system: optionalString(lab.testCoding.system, 120),
@@ -796,6 +820,8 @@ function medDraftFromOrder(order: any) {
   const nappi = coding.find((item: any) => clean(item?.system, 80).toLowerCase().includes('nappi'));
   return {
     drug: clean(order?.drug || snapshot?.primaryCoding?.display, 500),
+    genericName: clean(snapshot?.ingredientText, 300) || undefined,
+    conceptKind: clean(snapshot?.conceptKind, 40) || undefined,
     strength: clean(snapshot?.strengthText, 200),
     form: clean(snapshot?.formText, 200),
     dose: clean(snapshot?.doseText, 200),
@@ -820,6 +846,9 @@ function labDraftFromOrder(order: any) {
     instructions: clean(snapshot?.note, 2000),
     catalogCode: clean(snapshot?.testCoding?.code, 120) || undefined,
     catalogSystem: clean(snapshot?.testCoding?.system, 120) || undefined,
+    investigationClass: 'laboratory',
+    disciplineCode: clean(snapshot?.disciplineCode, 80) || 'GENERAL_LABORATORY',
+    disciplineText: clean(snapshot?.disciplineText, 160) || 'General laboratory',
   };
 }
 
@@ -853,6 +882,31 @@ export async function POST(
     }
     if (action === 'clear-draft' && scope === 'all') {
       return NextResponse.json({ ok: false, error: 'clear_draft_scope_required' }, { status: 400 });
+    }
+
+    if (action === 'finalize') {
+      const incompleteMedication = meds.find((med) =>
+        !optionalString(med.strengthText, 200) || !optionalString(med.formText, 120),
+      );
+      if (incompleteMedication) {
+        return NextResponse.json({
+          ok: false,
+          error: 'medication_strength_and_form_required',
+          message: 'Strength and dosage form are required before a medication can be issued.',
+        }, { status: 422, headers: { 'Cache-Control': 'no-store' } });
+      }
+    }
+
+    const misroutedInvestigation = labs.find((lab) => {
+      const investigationClass = clean(lab.investigationClass, 40).toLowerCase() || 'laboratory';
+      return investigationClass !== 'laboratory' || looksLikeNonLaboratoryInvestigation(lab.testText);
+    });
+    if (misroutedInvestigation) {
+      return NextResponse.json({
+        ok: false,
+        error: 'investigation_route_not_supported',
+        message: 'The laboratory order path accepts laboratory investigations only. Imaging/Radiology and other diagnostics require a separate workflow.',
+      }, { status: 422, headers: { 'Cache-Control': 'no-store' } });
     }
 
     const encounter = await prisma.encounter.findUnique({
@@ -1165,6 +1219,9 @@ export async function POST(
               marketplaceRouting: action === 'finalize' ? 'patient_action_required' : 'not_available_until_issued',
               carePortDispatched: false,
               medReachDispatched: false,
+              investigationClass: 'laboratory',
+              disciplineCode: snapshot.disciplineCode,
+              disciplineText: snapshot.disciplineText,
               documentBrandingSnapshot: documentBranding,
               patientSnapshot: documentPatientSnapshot,
               prescriberSnapshot: documentPrescriberSnapshot,

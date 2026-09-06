@@ -18,6 +18,16 @@ import type { PatientAllergyBrief, PatientProfile } from './patientContext';
 type ToastKind = 'info' | 'success' | 'warning' | 'error';
 type OrderState = 'empty' | 'draft' | 'issued';
 type OrderScope = 'medications' | 'labs';
+type MedicationConceptKind = 'ingredient' | 'clinical_drug' | 'product' | 'free_text';
+export type LaboratoryDisciplineCode =
+  | 'CLINICAL_CHEMISTRY'
+  | 'HAEMATOLOGY'
+  | 'MICROBIOLOGY'
+  | 'IMMUNOLOGY_SEROLOGY'
+  | 'ENDOCRINOLOGY'
+  | 'MOLECULAR_GENETICS'
+  | 'HISTOPATHOLOGY_CYTOLOGY'
+  | 'GENERAL_LABORATORY';
 
 export type SoapState = {
   // Canonical Clinical Note fields. The legacy s/o/a/p keys remain for bounded
@@ -40,6 +50,8 @@ export type SoapState = {
 
 type RxRow = {
   drug: string;
+  genericName?: string;
+  conceptKind: MedicationConceptKind;
   strength: string;
   form: string;
   dose: string;
@@ -62,10 +74,15 @@ type LabRow = {
   instructions?: string;
   catalogCode?: string;
   catalogSystem?: string;
+  investigationClass: 'laboratory';
+  disciplineCode: LaboratoryDisciplineCode;
+  disciplineText: string;
 };
 
 export type ErxSummaryMed = {
   drug: string;
+  genericName?: string;
+  conceptKind?: MedicationConceptKind;
   strength?: string;
   form?: string;
   dose?: string;
@@ -80,6 +97,9 @@ export type ErxSummaryLab = {
   icd?: string;
   code?: string;
   codeSystem?: string;
+  investigationClass?: 'laboratory';
+  disciplineCode?: LaboratoryDisciplineCode;
+  disciplineText?: string;
 };
 export type ErxSummary = {
   meds: ErxSummaryMed[];
@@ -150,9 +170,12 @@ type RecoveryDraft = {
 };
 
 const EMPTY_RX: RxRow = {
-  drug: '', strength: '', form: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0,
+  drug: '', conceptKind: 'free_text', strength: '', form: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0,
 };
-const EMPTY_LAB: LabRow = { test: '', priority: '', specimen: '', icd: '', instructions: '' };
+const EMPTY_LAB: LabRow = {
+  test: '', priority: '', specimen: '', icd: '', instructions: '',
+  investigationClass: 'laboratory', disciplineCode: 'GENERAL_LABORATORY', disciplineText: 'General laboratory',
+};
 
 function parseRecoveryDraft(raw: string | null): RecoveryDraft | null {
   if (!raw) return null;
@@ -162,8 +185,8 @@ function parseRecoveryDraft(raw: string | null): RecoveryDraft | null {
     return {
       version: 1,
       savedAt: String(parsed.savedAt || ''),
-      rxRows: Array.isArray(parsed.rxRows) ? parsed.rxRows : [],
-      labRows: Array.isArray(parsed.labRows) ? parsed.labRows : [],
+      rxRows: Array.isArray(parsed.rxRows) ? parsed.rxRows.map((row: any) => ({ ...EMPTY_RX, ...row, conceptKind: ['ingredient', 'clinical_drug', 'product', 'free_text'].includes(row?.conceptKind) ? row.conceptKind : (row?.rxcui ? 'ingredient' : 'free_text') })) : [],
+      labRows: Array.isArray(parsed.labRows) ? parsed.labRows.map((row: any) => { const discipline = canonicalLaboratoryDiscipline(row?.disciplineText || row?.disciplineCode); return { ...EMPTY_LAB, ...row, investigationClass: 'laboratory', disciplineCode: row?.disciplineCode || discipline.code, disciplineText: row?.disciplineText || discipline.text }; }) : [],
       medicationState: ['empty', 'draft', 'issued'].includes(parsed.medicationState) ? parsed.medicationState : 'empty',
       labState: ['empty', 'draft', 'issued'].includes(parsed.labState) ? parsed.labState : 'empty',
       erxResult: parsed.erxResult && typeof parsed.erxResult === 'object' ? parsed.erxResult : null,
@@ -198,6 +221,33 @@ function inferStrengthAndForm(label: string) {
   const lower = text.toLowerCase();
   const form = formPatterns.find((candidate) => lower.includes(candidate.toLowerCase())) || '';
   return { strength, form };
+}
+
+function medicationConceptKind(hit: RxNormHit): MedicationConceptKind {
+  const raw = hit as any;
+  const termType = String(raw.tty || raw.termType || raw.term_type || raw.kind || '').trim().toUpperCase();
+  if (['IN', 'PIN', 'MIN'].includes(termType) || termType.includes('INGREDIENT')) return 'ingredient';
+  if (['SCD', 'SBD', 'SCDG', 'SBDG'].includes(termType) || termType.includes('CLINICAL')) return 'clinical_drug';
+  if (['GPCK', 'BPCK'].includes(termType) || termType.includes('PRODUCT') || String(raw.source || '').includes('careport')) return 'product';
+  if (String(raw.strength || '').trim() || String(raw.doseForm || raw.form || '').trim()) return 'clinical_drug';
+  return hit.rxcui ? 'ingredient' : 'free_text';
+}
+
+function canonicalLaboratoryDiscipline(value: unknown): { code: LaboratoryDisciplineCode; text: string } {
+  const normalized = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if (/haemat|hemat|coagulat|blood count|blood film/.test(normalized)) return { code: 'HAEMATOLOGY', text: 'Haematology' };
+  if (/chem|biochem|metabolic|renal|liver|electrolyte/.test(normalized)) return { code: 'CLINICAL_CHEMISTRY', text: 'Clinical Chemistry / Biochemistry' };
+  if (/micro|culture|bacter|virolog|parasit|mycolog/.test(normalized)) return { code: 'MICROBIOLOGY', text: 'Microbiology' };
+  if (/immun|serolog/.test(normalized)) return { code: 'IMMUNOLOGY_SEROLOGY', text: 'Immunology / Serology' };
+  if (/endocr|hormon/.test(normalized)) return { code: 'ENDOCRINOLOGY', text: 'Endocrinology' };
+  if (/molecular|genetic|genomic|pcr/.test(normalized)) return { code: 'MOLECULAR_GENETICS', text: 'Molecular / Genetics' };
+  if (/histopath|cytolog|pathology|biopsy/.test(normalized)) return { code: 'HISTOPATHOLOGY_CYTOLOGY', text: 'Histopathology / Cytology' };
+  return { code: 'GENERAL_LABORATORY', text: 'General laboratory' };
+}
+
+function looksLikeNonLaboratoryInvestigation(value: unknown) {
+  const text = String(value || '').toLowerCase();
+  return /\b(x[- ]?ray|radiograph(?:y|ic)?|ultra[- ]?sound|sonograph(?:y|ic)?|ct scan|computed tomography|mri|magnetic resonance|mammograph(?:y|ic)?|nuclear medicine|pet(?:[- ]?ct)?|fluoroscop(?:y|ic)?|angiograph(?:y|ic)|echocardiograph(?:y|ic)?|ecg|electrocardiogra(?:m|phy)|eeg|electroencephalogra(?:m|phy)|spirometr(?:y|ic))\b/i.test(text);
 }
 
 function normalizeForMatch(value: unknown) {
@@ -559,6 +609,8 @@ export default function ErxComposer({
     onSummaryChange({
       meds: medsToAuthor.map((r) => ({
         drug: r.drug,
+        genericName: r.genericName || undefined,
+        conceptKind: r.conceptKind,
         strength: r.strength || undefined,
         form: r.form || undefined,
         dose: r.dose || undefined,
@@ -573,6 +625,9 @@ export default function ErxComposer({
         icd: l.icd || undefined,
         code: l.catalogCode || undefined,
         codeSystem: l.catalogSystem || undefined,
+        investigationClass: 'laboratory',
+        disciplineCode: l.disciplineCode,
+        disciplineText: l.disciplineText,
       })),
       medicationState,
       labState,
@@ -593,8 +648,17 @@ export default function ErxComposer({
       clinicianId,
       clinicianName: appt.clinicianName,
       reason: appt.reason,
-      medications: scope === 'medications' ? medsToAuthor : [],
-      labs: scope === 'labs' ? labsToAuthor : [],
+      medications: scope === 'medications' ? medsToAuthor.map((row) => ({
+        ...row,
+        genericName: row.genericName || undefined,
+        conceptKind: row.conceptKind,
+      })) : [],
+      labs: scope === 'labs' ? labsToAuthor.map((row) => ({
+        ...row,
+        investigationClass: 'laboratory',
+        disciplineCode: row.disciplineCode,
+        disciplineText: row.disciplineText,
+      })) : [],
       allergies: (patientAllergies || []).map((a) => ({
         substance: a.substance, severity: a.severity, reaction: a.reaction, status: a.status,
       })),
@@ -611,6 +675,21 @@ export default function ErxComposer({
     if (action !== 'clear-draft' && !rows.length) {
       if (!opts.quiet) onToast(`Add at least one ${scope === 'medications' ? 'medication' : 'lab test'} first.`, 'warning', 'Nothing to save');
       return false;
+    }
+
+    if (scope === 'labs') {
+      const misrouted = labsToAuthor.find((row) => looksLikeNonLaboratoryInvestigation(row.test));
+      if (misrouted) {
+        if (!opts.quiet) {
+          onToast(
+            `“${misrouted.test}” is not a laboratory investigation. Imaging/Radiology and other diagnostics use a separate workflow and are never routed through MedReach laboratory ordering.`,
+            'error',
+            'Wrong investigation pathway',
+          );
+        }
+        onAudit('investigation.route.blocked', { reason: 'NON_LABORATORY_INVESTIGATION', test: misrouted.test, requestedPath: 'laboratory' });
+        return false;
+      }
     }
 
     if (action === 'finalize' && scope === 'medications') {
@@ -948,6 +1027,9 @@ export default function ErxComposer({
               specimen: row.specimen,
               priority: row.priority || 'Routine',
               note: row.instructions || row.icd || '',
+              investigationClass: 'laboratory',
+              disciplineCode: row.disciplineCode,
+              disciplineText: row.disciplineText,
             })),
           };
 
@@ -1021,6 +1103,11 @@ export default function ErxComposer({
             return (
               <div key={index} className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
                 <RxDrugInput row={row} onChange={(next) => setRxRows((rows) => rows.map((value, i) => i === index ? next : value))} />
+                <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
+                  <span>{row.conceptKind === 'ingredient' ? 'Ingredient concept' : row.conceptKind === 'clinical_drug' ? 'Clinical drug concept' : row.conceptKind === 'product' ? 'Product concept' : 'Free-text medicine'}</span>
+                  {row.genericName && row.genericName !== row.drug ? <span>Generic: {row.genericName}</span> : null}
+                  {row.rxcui ? <span>RxCUI: <span className="font-mono">{row.rxcui}</span></span> : null}
+                </div>
                 {currentMatch ? <div className="text-[11px] text-amber-700">Matches a current medication. Review whether this is an intended continuation or duplicate.</div> : null}
                 <div className="grid gap-2 md:grid-cols-4">
                   <input className="border rounded px-2 py-1" placeholder="Strength (e.g. 500 mg)" value={row.strength} onChange={(e) => setRxRows((rows) => rows.map((value, i) => i === index ? { ...value, strength: e.target.value } : value))} />
@@ -1060,9 +1147,13 @@ export default function ErxComposer({
         </div>
       ) : (
         <div className="space-y-3">
+          <div className="rounded border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
+            Laboratory disciplines are structured independently. Imaging/Radiology and other diagnostics use a separate workflow and are not sent to MedReach laboratory ordering.
+          </div>
           {labRows.map((row, index) => (
             <div key={index} className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
               <LabTestInput row={row} onChange={(next) => setLabRows((rows) => rows.map((value, i) => i === index ? next : value))} />
+              <div className="text-[11px] text-slate-500">Discipline: <span className="font-medium text-slate-700">{row.disciplineText}</span> · class: Laboratory</div>
               <div className="grid gap-2 md:grid-cols-3">
                 <select className="border rounded px-2 py-1" value={row.priority} onChange={(e) => setLabRows((rows) => rows.map((value, i) => i === index ? { ...value, priority: e.target.value as LabRow['priority'] } : value))}>
                   <option value="">Priority</option><option value="Routine">Routine</option><option value="Urgent">Urgent</option><option value="Stat">Stat</option>
@@ -1143,6 +1234,7 @@ export default function ErxComposer({
               )) : labsToAuthor.map((row, index) => (
                 <div key={index} className="rounded-xl border p-3 text-sm">
                   <div className="font-semibold">{row.test}</div>
+                  <div className="mt-1 text-[11px] text-slate-500">Laboratory · {row.disciplineText}</div>
                   <div className="mt-1 text-slate-700">Priority: {row.priority || 'Routine'} · Specimen: {row.specimen || '—'}</div>
                   {row.icd ? <div className="mt-1 text-slate-700">Clinical indication / ICD-10: {row.icd}</div> : null}
                   {row.instructions ? <div className="mt-1 text-slate-600">Instructions: {row.instructions}</div> : null}
@@ -1186,17 +1278,20 @@ function RxDrugInput({ row, onChange }: RxDrugInputProps) {
   const activeHit = active >= 0 && active < flat.length ? flat[active] : null;
 
   const select = (hit: RxNormHit) => {
+    const raw = hit as any;
     const label = hit.name || hit.title || '';
     const inferred = inferStrengthAndForm(label);
     const base: RxRow = {
       ...row,
       drug: label,
-      rxcui: hit.rxcui || (hit as any).rxnorm,
-      nappi: (hit as any).nappi || row.nappi,
-      strength: row.strength || (hit as any).strength || inferred.strength || '',
-      form: row.form || (hit as any).doseForm || (hit as any).dosageForm || inferred.form || '',
+      genericName: String(raw.genericName || raw.ingredientName || '').trim() || undefined,
+      conceptKind: medicationConceptKind(hit),
+      rxcui: hit.rxcui || raw.rxnorm,
+      nappi: raw.nappi || row.nappi,
+      strength: String(raw.strength || '').trim() || inferred.strength || '',
+      form: String(raw.doseForm || raw.dosageForm || raw.form || '').trim() || inferred.form || '',
       dose: row.dose,
-      route: row.route || (hit as any).route || row.route,
+      route: row.route || String(raw.route || '').trim(),
       notes:
         row.notes ||
         [
@@ -1226,7 +1321,7 @@ function RxDrugInput({ row, onChange }: RxDrugInputProps) {
     auto.setQ(v);
     setOpen(true);
     setActive(-1);
-    onChange({ ...row, drug: v, rxcui: undefined, nappi: undefined, strength: '', form: '', sigSuggestions: [] });
+    onChange({ ...row, drug: v, genericName: undefined, conceptKind: 'free_text', rxcui: undefined, nappi: undefined, strength: '', form: '', sigSuggestions: [] });
   };
 
   return (
@@ -1293,6 +1388,9 @@ function RxDrugInput({ row, onChange }: RxDrugInputProps) {
               hit.tty === 'IN' || hit.tty === 'MIN'
                 ? 'Generic / Ingredient'
                 : 'Clinical drug';
+            const inferred = inferStrengthAndForm(hit.name || hit.title || '');
+            const visibleStrength = String((hit as any).strength || '').trim() || inferred.strength;
+            const visibleForm = String((hit as any).doseForm || (hit as any).dosageForm || (hit as any).form || '').trim() || inferred.form;
 
             const prev = idx > 0 ? flat[idx - 1] : null;
             const prevGroup =
@@ -1320,18 +1418,12 @@ function RxDrugInput({ row, onChange }: RxDrugInputProps) {
                 >
                   <div className="flex justify-between">
                     <span>{hit.name}</span>
-                    {(hit as any).strength && (
-                      <span className="ml-2 text-xs text-gray-500">
-                        {(hit as any).strength}
-                      </span>
-                    )}
+                    {visibleStrength ? <span className="ml-2 text-xs text-gray-500">{visibleStrength}</span> : null}
                   </div>
-                  {((hit as any).doseForm || (hit as any).route) && (
-                    <div className="text-[11px] text-gray-500">
-                      {[(hit as any).doseForm, (hit as any).route]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </div>
+                  {(visibleForm || (hit as any).route) ? (
+                    <div className="text-[11px] text-gray-500">{[visibleForm, (hit as any).route].filter(Boolean).join(' · ')}</div>
+                  ) : (
+                    <div className="text-[11px] text-amber-700">Strength/formulation must be supplied before issuing.</div>
                   )}
                   {(hit as any).genericName &&
                     (hit as any).genericName !== hit.name && (
@@ -1363,14 +1455,19 @@ function LabTestInput({ row, onChange }: LabTestInputProps) {
   const options = auto.opts as LabTestHit[];
 
   const select = (hit: LabTestHit) => {
+    const raw = hit as any;
     const name = String(hit.name || hit.label || '').trim();
     const specimen = String(hit.specimen || '').trim();
+    const discipline = canonicalLaboratoryDiscipline(raw.discipline || raw.department || raw.category);
     onChange({
       ...row,
       test: name,
       specimen: row.specimen || specimen,
       catalogCode: String(hit.code || hit.id || '').trim() || undefined,
       catalogSystem: String(hit.codeSystem || 'local_sa_lab_catalog').trim(),
+      investigationClass: 'laboratory',
+      disciplineCode: discipline.code,
+      disciplineText: discipline.text,
     });
     auto.setQ(name);
     setOpen(false);
@@ -1395,6 +1492,9 @@ function LabTestInput({ row, onChange }: LabTestInputProps) {
             test: value,
             catalogCode: undefined,
             catalogSystem: undefined,
+            investigationClass: 'laboratory',
+            disciplineCode: 'GENERAL_LABORATORY',
+            disciplineText: 'General laboratory',
           });
           setOpen(true);
           setActive(-1);
@@ -1447,7 +1547,7 @@ function LabTestInput({ row, onChange }: LabTestInputProps) {
               >
                 <div className="font-medium text-slate-900">{hit.name || hit.label}</div>
                 <div className="text-[11px] text-slate-500">
-                  {[hit.codeSystem && hit.code ? `${hit.codeSystem}:${hit.code}` : null, hit.category, hit.specimen]
+                  {[hit.codeSystem && hit.code ? `${hit.codeSystem}:${hit.code}` : null, canonicalLaboratoryDiscipline((hit as any).discipline || (hit as any).department || hit.category).text, hit.specimen]
                     .filter(Boolean)
                     .join(' · ')}
                 </div>

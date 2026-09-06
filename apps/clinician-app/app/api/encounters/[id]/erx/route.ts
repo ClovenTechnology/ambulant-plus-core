@@ -148,7 +148,9 @@ function normalizeMedication(raw: AnyRecord) {
 
   return {
     coding,
-    formText: optionalString(raw?.formText || raw?.form || raw?.doseForm, 120),
+    conceptKind: optionalString(raw?.conceptKind || raw?.conceptType || raw?.kind, 40),
+    ingredientText: optionalString(raw?.ingredientText || raw?.genericName || raw?.ingredient, 300),
+    formText: optionalString(raw?.formText || raw?.form || raw?.doseForm || raw?.dosageForm, 120),
     strengthText: optionalString(raw?.strengthText || raw?.strength, 200),
     doseText: optionalString(raw?.doseText || raw?.dose, 200),
     routeText: optionalString(raw?.routeText || raw?.route, 120),
@@ -188,6 +190,9 @@ function normalizeLab(raw: AnyRecord) {
 
   return {
     testText,
+    investigationClass: optionalString(raw?.investigationClass || raw?.class, 40) || 'laboratory',
+    disciplineCode: optionalString(raw?.disciplineCode || raw?.discipline, 80) || 'GENERAL_LABORATORY',
+    disciplineText: optionalString(raw?.disciplineText || raw?.department || raw?.category, 160) || 'General laboratory',
     testCoding: testCode
       ? { system: testSystem || 'local_sa_lab_catalog', code: testCode, display: testText }
       : undefined,
@@ -196,6 +201,11 @@ function normalizeLab(raw: AnyRecord) {
     icd10,
     note: optionalString(raw?.note || raw?.instructions, 2000),
   };
+}
+
+function looksLikeNonLaboratoryInvestigation(value: unknown) {
+  const text = String(value || '').toLowerCase();
+  return /\b(x[- ]?ray|radiograph(?:y|ic)?|ultra[- ]?sound|sonograph(?:y|ic)?|ct scan|computed tomography|mri|magnetic resonance|mammograph(?:y|ic)?|nuclear medicine|pet(?:[- ]?ct)?|fluoroscop(?:y|ic)?|angiograph(?:y|ic)|echocardiograph(?:y|ic)?|ecg|electrocardiogra(?:m|phy)|eeg|electroencephalogra(?:m|phy)|spirometr(?:y|ic))\b/i.test(text);
 }
 
 function normalizePayload(body: AnyRecord, encounterId: string) {
@@ -265,6 +275,27 @@ export async function POST(
     return NextResponse.json(
       { ok: false, error: 'at_least_one_medication_or_lab_required' },
       { status: 400 },
+    );
+  }
+
+  const action = clean(body?.action, 40).toLowerCase() || 'finalize';
+  if (action === 'finalize') {
+    const incompleteMedication = payload.medications.find((med: AnyRecord) => !optionalString(med?.strengthText, 200) || !optionalString(med?.formText, 120));
+    if (incompleteMedication) {
+      return NextResponse.json(
+        { ok: false, error: 'medication_strength_and_form_required', message: 'Strength and dosage form are required before a medication can be issued.' },
+        { status: 422, headers: { 'cache-control': 'no-store' } },
+      );
+    }
+  }
+
+  const misroutedInvestigation = payload.labs.find((lab: AnyRecord) =>
+    clean(lab?.investigationClass, 40).toLowerCase() !== 'laboratory' || looksLikeNonLaboratoryInvestigation(lab?.testText),
+  );
+  if (misroutedInvestigation) {
+    return NextResponse.json(
+      { ok: false, error: 'investigation_route_not_supported', message: 'This endpoint accepts laboratory investigations only. Imaging/Radiology and other diagnostics require a separate workflow.' },
+      { status: 422, headers: { 'cache-control': 'no-store' } },
     );
   }
 
