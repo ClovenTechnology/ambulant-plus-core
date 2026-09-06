@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyAdminToken } from '@/src/lib/auth';
 import {
   PrismaClient,
   PresenceActorType,
@@ -1270,6 +1271,28 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
 /* ---------------- Route handler ---------------- */
 
 export async function GET(req: NextRequest) {
+  const authHeader =
+    req.headers.get('authorization') ||
+    req.headers.get('Authorization') ||
+    undefined;
+  const verified = await verifyAdminToken(authHeader);
+
+  if (!verified.ok) {
+    const status =
+      verified.error === 'insufficient_role' ? 403 : 401;
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          status === 403
+            ? 'forbidden'
+            : 'unauthorized',
+      },
+      { status },
+    );
+  }
+
   const url = new URL(req.url);
   const rangeKey = parseRange(url.searchParams.get('range'));
 
