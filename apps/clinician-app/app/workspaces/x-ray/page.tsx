@@ -36,7 +36,7 @@ type XRayImage = {
 
   // Server-truth hooks
   evidenceId?: string | null;
-  evidenceUrl?: string | null; // stored url in /api/evidence (dataURL)
+  evidenceUrl?: string | null; // durable evidence locator
   contentType?: string | null;
 
   markers: Marker[];
@@ -66,14 +66,6 @@ function fmtDate(iso: string) {
   }
 }
 
-async function readAsDataURL(file: File): Promise<string> {
-  return await new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onerror = () => reject(new Error('Failed to read file'));
-    r.onload = () => resolve(String(r.result ?? ''));
-    r.readAsDataURL(file);
-  });
-}
 
 async function postJSON<T = any>(url: string, body: any): Promise<T> {
   const r = await fetch(url, {
@@ -112,16 +104,12 @@ function XRayWorkspacePageContent() {
     [sp]
   );
 
-  const patientId = qs.get('patientId') || 'patient-demo-001';
+  const patientId = (qs.get('patientId') || '').trim();
   const encounterId = qs.get('encounterId') || '';
   const roomId = qs.get('roomId') || qs.get('room') || undefined;
 
   const createdBy = qs.get('clinicianId') || '';
 
-  const STORAGE_KEY = useMemo(
-    () => `ambulant-xray-ws-v2::${patientId}::${encounterId}`,
-    [patientId, encounterId]
-  );
 
   const [tab, setTab] = useState<XRayTab>('viewer');
 
@@ -157,41 +145,7 @@ function XRayWorkspacePageContent() {
     sy: 0,
   });
 
-  // Load persisted state
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
 
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed?.studies)) setStudies(parsed.studies);
-
-      if (typeof parsed?.activeStudyId === 'string') setActiveStudyId(parsed.activeStudyId);
-      if (typeof parsed?.activeImageId === 'string') setActiveImageId(parsed.activeImageId);
-
-      if (typeof parsed?.viewer?.zoom === 'number') setZoom(parsed.viewer.zoom);
-      if (typeof parsed?.viewer?.rotate === 'number') setRotate(parsed.viewer.rotate);
-      if (typeof parsed?.viewer?.brightness === 'number') setBrightness(parsed.viewer.brightness);
-      if (typeof parsed?.viewer?.contrast === 'number') setContrast(parsed.viewer.contrast);
-      if (typeof parsed?.viewer?.invert === 'boolean') setInvert(parsed.viewer.invert);
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [STORAGE_KEY]);
-
-  // Persist (best-effort)
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          studies,
-          activeStudyId,
-          activeImageId,
-          viewer: { zoom, rotate, brightness, contrast, invert },
-        })
-      );
-    } catch {}
-  }, [STORAGE_KEY, studies, activeStudyId, activeImageId, zoom, rotate, brightness, contrast, invert]);
 
   // Ensure at least one default study exists
   useEffect(() => {
@@ -289,6 +243,10 @@ function XRayWorkspacePageContent() {
   const onUploadImages = async (files: FileList | null) => {
     if (!files || !files.length) return;
     if (!activeStudy) return;
+    if (!patientId || !encounterId) {
+      toast?.('Patient and encounter context are required before imaging evidence can be uploaded.', 'error');
+      return;
+    }
 
     const picked = Array.from(files).filter((f) => f.type.startsWith('image/'));
     if (!picked.length) return;
@@ -314,7 +272,8 @@ function XRayWorkspacePageContent() {
     setActiveImageId(staged[0].id);
     setTab('viewer');
 
-    // 2) Push to /api/evidence (server-truth) and stamp evidenceId back onto the image
+    // 2) Persist each physical image through the governed encounter-document route,
+    // then create an evidence record that references the durable document identity.
     const createdEvidenceIds: string[] = [];
 
     try {
@@ -322,9 +281,31 @@ function XRayWorkspacePageContent() {
         const f = picked[i];
         const localImageId = staged[i]?.id;
 
-        // For demo reliability: store as dataURL so the evidence record is self-contained
-        const dataUrl = await readAsDataURL(f);
+        const documentForm = new FormData();
+        documentForm.set('file', f);
+        documentForm.set('patientId', patientId);
+        documentForm.set('docType', 'xray-image');
+        documentForm.set('title', `${activeStudy.title} • ${f.name}`);
+        documentForm.set('source', 'clinician-app:xray');
 
+        const documentResponse = await fetch(
+          `/api/encounters/${encodeURIComponent(encounterId)}/docs`,
+          { method: 'POST', body: documentForm, cache: 'no-store' },
+        );
+        const documentBody = await documentResponse.json().catch(() => null);
+        if (!documentResponse.ok || !documentBody?.ok || !documentBody?.item?.id) {
+          throw new Error(
+            String(
+              documentBody?.error ||
+                documentBody?.message ||
+                `Encounter document upload failed (${documentResponse.status})`,
+            ),
+          );
+        }
+
+        const document = documentBody.item;
+        const documentId = String(document.id);
+        const durableLocator = `encounter-document:${documentId}`;
         const location = {
           kind: 'imaging',
           modality: 'xray',
@@ -339,13 +320,16 @@ function XRayWorkspacePageContent() {
           kind: 'image',
           device: 'upload',
           status: 'ready',
-          url: dataUrl,
-          thumbnailUrl: dataUrl,
+          url: durableLocator,
+          thumbnailUrl: null,
           contentType: f.type || 'image/*',
           capturedAt: new Date().toISOString(),
           location,
           meta: {
-            source: 'upload',
+            source: 'encounter-document',
+            documentId,
+            documentKind: document.documentKind || document.docType || 'xray-image',
+            fileKey: document.fileKey || documentBody?.storage?.key || null,
             roomId: roomId ?? null,
             studyTitle: activeStudy.title,
             originalName: f.name,
@@ -354,34 +338,54 @@ function XRayWorkspacePageContent() {
           },
         });
 
-        const evId = res.item?.id as string;
-        if (evId) createdEvidenceIds.push(evId);
+        const evId = String(res.item?.id || '');
+        if (!evId) throw new Error('Evidence registry did not return an evidence id.');
+        createdEvidenceIds.push(evId);
 
-        // stamp evidenceId into the right image
         setStudies((prev) =>
-          prev.map((s) => {
-            if (s.id !== activeStudy.id) return s;
+          prev.map((study) => {
+            if (study.id !== activeStudy.id) return study;
             return {
-              ...s,
-              images: s.images.map((im) =>
-                im.id === localImageId
-                  ? { ...im, evidenceId: evId ?? im.evidenceId, evidenceUrl: dataUrl, contentType: f.type || im.contentType }
-                  : im
+              ...study,
+              images: study.images.map((image) =>
+                image.id === localImageId
+                  ? {
+                      ...image,
+                      evidenceId: evId,
+                      evidenceUrl: durableLocator,
+                      contentType: f.type || image.contentType,
+                    }
+                  : image,
               ),
             };
-          })
+          }),
         );
       }
 
       await createRevision(
-        `Uploaded ${picked.length} X-Ray image(s) to evidence`,
+        `Uploaded ${picked.length} X-Ray image(s) to governed encounter evidence`,
         createdEvidenceIds,
         0,
-        { studyId: activeStudy.id, studyTitle: activeStudy.title }
+        { studyId: activeStudy.id, studyTitle: activeStudy.title },
       );
 
-      toast?.(`Uploaded ${picked.length} image(s) → evidence`, 'success');
+      toast?.(`Uploaded ${picked.length} image(s) to encounter evidence`, 'success');
     } catch (e: any) {
+      // Never keep a UI-only image as if it were durable clinical evidence.
+      const failedIds = new Set(staged.map((image) => image.id));
+      staged.forEach((image) => {
+        if (image.url.startsWith('blob:')) {
+          try { URL.revokeObjectURL(image.url); } catch {}
+        }
+      });
+      setStudies((prev) =>
+        prev.map((study) =>
+          study.id === activeStudy.id
+            ? { ...study, images: study.images.filter((image) => !failedIds.has(image.id)) }
+            : study,
+        ),
+      );
+      setActiveImageId('');
       toast?.(String(e?.message || 'Upload failed'), 'error');
     }
   };
@@ -1035,7 +1039,7 @@ function XRayWorkspacePageContent() {
                     <b>Fast flow:</b> Upload → evidence created → double-click to mark findings (annotation) → Report → Export.
                   </p>
                   <p className="text-xs text-gray-500">
-                    Evidence + revisions are now server-truth via /api/evidence and /api/revisions. Markers also post as /api/annotations when evidenceId exists.
+                    Image bytes are persisted through the governed encounter-document route; evidence, revisions and annotations reference that durable clinical record.
                   </p>
                 </div>
               </Card>

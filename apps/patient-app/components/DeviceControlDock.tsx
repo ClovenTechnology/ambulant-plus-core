@@ -365,7 +365,6 @@ function NexRingCard({ roomId }: { roomId: string }) {
   const consent = useIomtConsent('nexring');
 
   const [conn, setConn] = useState<{ disconnect: () => Promise<void> } | null>(null);
-  const [sending, setSending] = useState(false);
 
   const connect = async () => {
     if (!consent.accepted) return;
@@ -382,29 +381,11 @@ function NexRingCard({ roomId }: { roomId: string }) {
     setConn(null);
   };
 
-  const sendSummary = async () => {
-    if (!consent.accepted) return;
-    setSending(true);
-    try {
-      const metrics = {
-        hr: 74, spo2: 98, rr: 15, hrv: 48, rhr: 62,
-        steps: 6234, calories: 420,
-        readiness: 76, sleepScore: 82, stress: 31,
-        sleepStages: { rem: 78, deep: 54, light: 258 },
-      };
-      await fetch(`${API}/api/insight/frame`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ roomId, kind: 'nexring_metrics', ts: Date.now(), metrics, meta: { vendor: 'nexring' } }),
-      });
-    } catch {}
-    setSending(false);
-  };
 
   return (
     <section className="border rounded p-3">
       <div className="font-medium">NexRing</div>
-      <div className="text-xs text-gray-600">PPG + summaries</div>
+      <div className="text-xs text-gray-600">Live PPG</div>
 
       <ConsentInline
         title="NexRing"
@@ -424,29 +405,18 @@ function NexRingCard({ roomId }: { roomId: string }) {
             Stop PPG
           </button>
         )}
-
-        <button onClick={sendSummary} disabled={sending || !consent.accepted} className="px-2 py-1 border rounded text-xs disabled:opacity-50">
-          {sending ? 'Sending…' : 'Send Summary'}
-        </button>
       </div>
 
       <div className="text-xs text-gray-500 mt-1">
-        Summary includes HR/SpO₂/RR/HRV/RHR, steps, calories, readiness & sleep.
+        Only measurements emitted by the connected NexRing runtime are forwarded.
       </div>
     </section>
   );
 }
 
-/* --------- Basic Health Monitor (demo buttons) --------- */
-function MonitorCard({ roomId }: { roomId: string }) {
+/* --------- Health Monitor --------- */
+function MonitorCard({ roomId: _roomId }: { roomId: string }) {
   const consent = useIomtConsent('monitor');
-
-  const send = (type: string, value: any) =>
-    fetch(`${API}/api/insight/frame`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ roomId, kind: type, ts: Date.now(), value }),
-    }).catch(() => {});
 
   return (
     <section className="border rounded p-3">
@@ -460,22 +430,9 @@ function MonitorCard({ roomId }: { roomId: string }) {
         onAccept={consent.accept}
       />
 
-      <div className="grid grid-cols-2 gap-2 mt-2">
-        <button disabled={!consent.accepted} className="px-2 py-1 border rounded text-xs disabled:opacity-50" onClick={() => send('bp', { sys: 120, dia: 78 })}>
-          Take BP
-        </button>
-        <button disabled={!consent.accepted} className="px-2 py-1 border rounded text-xs disabled:opacity-50" onClick={() => send('spo2', 98)}>
-          SpO₂
-        </button>
-        <button disabled={!consent.accepted} className="px-2 py-1 border rounded text-xs disabled:opacity-50" onClick={() => send('temp', 36.8)}>
-          Temp
-        </button>
-        <button disabled={!consent.accepted} className="px-2 py-1 border rounded text-xs disabled:opacity-50" onClick={() => send('ecg_event', { hr: 72 })}>
-          ECG Spot
-        </button>
+      <div className="mt-2 rounded-lg border bg-gray-50 p-2 text-xs text-gray-600">
+        Blood pressure, SpO₂, temperature and ECG values appear only when emitted by a connected Health Monitor measurement session. Synthetic measurement controls are disabled.
       </div>
-
-      <div className="text-xs text-gray-500 mt-1">These demo buttons push frames into the room stream.</div>
     </section>
   );
 }

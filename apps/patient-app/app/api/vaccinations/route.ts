@@ -1,195 +1,120 @@
 // apps/patient-app/app/api/vaccinations/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  patientGatewayHeaders,
+  readPatientGatewayIdentity,
+} from '@/src/lib/gateway-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type ProfileResponse = {
-  ok?: boolean;
-  patientId?: string | null;
-  userId?: string | null;
-  name?: string | null;
-  patientRaw?: any;
-};
+const CANONICAL_API_GATEWAY = 'https://api-gateway.ambulantplus.co.za';
 
 type GatewayPresignResponse = {
   ok?: boolean;
   uploadUrl?: string;
   key?: string;
-  expiresIn?: number;
-  patientId?: string;
-  encounterId?: string | null;
-  documentKind?: string;
-  mode?: string;
-  relationshipId?: string | null;
 };
 
 type GatewayDocumentCreateResponse = {
   ok?: boolean;
   item?: {
     id: string;
-    patientId: string;
-    encounterId?: string | null;
-    title: string;
-    documentKind: string;
-    sourceApp?: string;
-    sourceType?: string;
-    fileKey: string;
     fileName?: string;
-    mimeType?: string;
-    sizeBytes?: number;
-    status?: string;
-    linkedRecordType?: string;
-    linkedRecordId?: string;
-    notes?: string;
-    createdByUserId?: string;
-    createdByRole?: string;
-    relationshipId?: string;
-    createdAt: string;
-    updatedAt: string;
     downloadUrl?: string;
   };
 };
 
-function trimSlash(s: string) {
-  return String(s || '').replace(/\/+$/, '');
+function trimSlash(value: string) {
+  return String(value || '').replace(/\/+$/, '');
 }
 
-function appBase(req: NextRequest) {
-  const base =
-    process.env.NEXT_PUBLIC_BASE_URL ||
-    process.env.APP_BASE_URL ||
-    req.nextUrl.origin;
-  return trimSlash(base);
-}
-
-function apigwBaseSoft() {
+function gatewayBase() {
   return trimSlash(
     process.env.APIGW_BASE ||
-      process.env.NEXT_PUBLIC_APIGW_BASE ||
+      process.env.APIGW_BASE_URL ||
       process.env.APIGW_ORIGIN ||
       process.env.API_GATEWAY_ORIGIN ||
-      '',
+      process.env.API_GATEWAY_URL ||
+      process.env.NEXT_PUBLIC_APIGW_BASE ||
+      CANONICAL_API_GATEWAY,
   );
 }
 
-function forwardHeaders(req: NextRequest) {
-  const headers = new Headers();
-
-  [
-    'cookie',
-    'authorization',
-    'x-ambulant-identity',
-    'x-uid',
-    'x-role',
-    'x-org-id',
-    'x-user-id',
-    'x-current-patient-id',
-    'x-patient-id',
-    'user-agent',
-  ].forEach((k) => {
-    const v = req.headers.get(k);
-    if (v) headers.set(k, v);
-  });
-
-  headers.set('accept', 'application/json');
-  if (!headers.get('x-role')) headers.set('x-role', 'patient');
-
-  return headers;
+function pickString(form: FormData, key: string): string | null {
+  const value = form.get(key);
+  if (typeof value !== 'string') return null;
+  const clean = value.trim();
+  return clean || null;
 }
 
-async function fetchJson<T>(
-  url: string,
-  init?: RequestInit,
-): Promise<T | null> {
+async function readBody(response: Response) {
+  const text = await response.text();
+  if (!text) return null;
   try {
-    const res = await fetch(url, {
-      ...init,
-      cache: 'no-store',
-    });
-    if (!res.ok) return null;
-    return (await res.json().catch(() => null)) as T | null;
+    return JSON.parse(text);
   } catch {
-    return null;
+    return { ok: false, error: text.slice(0, 500) };
   }
 }
 
-async function readSelfProfile(req: NextRequest): Promise<ProfileResponse | null> {
-  const url = new URL('/api/profile', appBase(req));
-  return fetchJson<ProfileResponse>(url.toString(), {
-    headers: forwardHeaders(req),
-  });
-}
-
-async function resolvePatientId(req: NextRequest): Promise<string> {
-  const profile = await readSelfProfile(req);
-  return String(profile?.patientId || '').trim();
-}
-
-function pickString(form: FormData, key: string): string | null {
-  const v = form.get(key);
-  if (typeof v !== 'string') return null;
-  const s = v.trim();
-  return s ? s : null;
+async function requireIdentity(req: NextRequest) {
+  const identity = await readPatientGatewayIdentity(req);
+  if (!identity?.uid || !identity.patientId) {
+    return {
+      ok: false as const,
+      response: NextResponse.json(
+        { ok: false, error: 'patient_session_required' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } },
+      ),
+    };
+  }
+  return { ok: true as const, identity };
 }
 
 async function uploadViaGatewayRegistry(args: {
   req: NextRequest;
-  patientId: string;
+  identity: NonNullable<Awaited<ReturnType<typeof readPatientGatewayIdentity>>>;
   title: string;
   notes?: string | null;
-  linkedRecordType: string;
   linkedRecordId: string;
   file: File;
 }) {
-  const { req, patientId, title, notes, linkedRecordType, linkedRecordId, file } = args;
+  const { req, identity, title, notes, linkedRecordId, file } = args;
+  const base = gatewayBase();
+  const authHeaders = patientGatewayHeaders({ req, identity, includeJson: true });
 
-  const gatewayBase = apigwBaseSoft();
-  if (!gatewayBase) {
-    throw new Error('apigw_base_missing');
-  }
-
-  const presignUrl = new URL('/api/records/documents/presign', gatewayBase);
-  const presign = await fetchJson<GatewayPresignResponse>(presignUrl.toString(), {
+  const presignResponse = await fetch(new URL('/api/records/documents/presign', base), {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...Object.fromEntries(forwardHeaders(req).entries()),
-    },
+    headers: authHeaders,
     body: JSON.stringify({
-      patientId,
+      patientId: identity.patientId,
       fileName: file.name,
       contentType: file.type || 'application/octet-stream',
       documentKind: 'vaccination-proof',
       encounterId: null,
     }),
+    cache: 'no-store',
   });
-
-  if (!presign?.ok || !presign.uploadUrl || !presign.key) {
-    throw new Error('document_presign_failed');
+  const presign = (await readBody(presignResponse)) as GatewayPresignResponse | null;
+  if (!presignResponse.ok || !presign?.ok || !presign.uploadUrl || !presign.key) {
+    throw new Error(String((presign as any)?.error || 'document_presign_failed'));
   }
 
-  const uploadRes = await fetch(presign.uploadUrl, {
+  const uploadResponse = await fetch(presign.uploadUrl, {
     method: 'PUT',
-    headers: {
-      'content-type': file.type || 'application/octet-stream',
-    },
+    headers: { 'content-type': file.type || 'application/octet-stream' },
     body: file,
   });
-
-  if (!uploadRes.ok) {
-    throw new Error(`document_upload_failed:${uploadRes.status}`);
+  if (!uploadResponse.ok) {
+    throw new Error(`document_upload_failed:${uploadResponse.status}`);
   }
 
-  const createUrl = new URL('/api/records/documents', gatewayBase);
-  const created = await fetchJson<GatewayDocumentCreateResponse>(createUrl.toString(), {
+  const createResponse = await fetch(new URL('/api/records/documents', base), {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...Object.fromEntries(forwardHeaders(req).entries()),
-    },
+    headers: authHeaders,
     body: JSON.stringify({
-      patientId,
+      patientId: identity.patientId,
       encounterId: null,
       title,
       documentKind: 'vaccination-proof',
@@ -199,146 +124,93 @@ async function uploadViaGatewayRegistry(args: {
       fileName: file.name,
       mimeType: file.type || 'application/octet-stream',
       sizeBytes: Number.isFinite(file.size) ? file.size : null,
-      linkedRecordType,
+      linkedRecordType: 'vaccination',
       linkedRecordId,
       notes: notes || null,
     }),
+    cache: 'no-store',
   });
-
-  if (!created?.ok || !created.item?.id) {
-    throw new Error('document_create_failed');
+  const created = (await readBody(createResponse)) as GatewayDocumentCreateResponse | null;
+  if (!createResponse.ok || !created?.ok || !created.item?.id) {
+    throw new Error(String((created as any)?.error || 'document_create_failed'));
   }
-
   return created.item;
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const patientId = await resolvePatientId(req);
+    const context = await requireIdentity(req);
+    if (!context.ok) return context.response;
 
-    if (!patientId) {
+    const response = await fetch(new URL('/api/patients/vaccinations', gatewayBase()), {
+      method: 'GET',
+      headers: patientGatewayHeaders({ req, identity: context.identity }),
+      cache: 'no-store',
+    });
+    const body = await readBody(response);
+    if (!response.ok || !body?.ok) {
       return NextResponse.json(
-        { ok: false, error: 'patient_id_required' },
-        { status: 400, headers: { 'Cache-Control': 'no-store' } },
+        { ok: false, error: body?.error || 'vaccinations_get_failed', data: [] },
+        { status: response.status || 502, headers: { 'Cache-Control': 'no-store' } },
       );
     }
 
-    const url = new URL('/api/history/vaccinations', appBase(req));
-    url.searchParams.set('patientId', patientId);
-    url.searchParams.set('limit', '100');
-
-    const json = await fetchJson<any>(url.toString(), {
-      headers: forwardHeaders(req),
-    });
-
-    const items = Array.isArray(json?.items)
-      ? json.items
-      : Array.isArray(json?.data)
-        ? json.data
-        : [];
-
     return NextResponse.json(
-      { ok: true, data: items },
+      { ok: true, data: Array.isArray(body.items) ? body.items : [] },
       { headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (err: any) {
+    const message = String(err?.message || 'vaccinations_get_failed');
     return NextResponse.json(
-      {
-        ok: false,
-        error: String(err?.message || 'vaccinations_get_failed'),
-      },
-      { status: 500, headers: { 'Cache-Control': 'no-store' } },
+      { ok: false, error: message, data: [] },
+      { status: message === 'internal_identity_secret_unavailable' ? 503 : 502, headers: { 'Cache-Control': 'no-store' } },
     );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const patientId = await resolvePatientId(req);
-
-    if (!patientId) {
-      return NextResponse.json(
-        { ok: false, error: 'patient_id_required' },
-        { status: 400 },
-      );
-    }
+    const context = await requireIdentity(req);
+    if (!context.ok) return context.response;
 
     const form = await req.formData();
-
     const vaccine = pickString(form, 'vaccine');
     const date = pickString(form, 'date');
     const batch = pickString(form, 'batch');
     const notes = pickString(form, 'notes');
     const facility = pickString(form, 'facility');
     const clinician = pickString(form, 'clinician');
+    const continuityKind = pickString(form, 'continuityKind');
+    const source = continuityKind === 'booster' ? 'patient-followup' : 'patient';
 
     if (!vaccine) {
-      return NextResponse.json(
-        { ok: false, error: 'vaccine_required' },
-        { status: 400 },
-      );
+      return NextResponse.json({ ok: false, error: 'vaccine_required' }, { status: 400 });
     }
 
-    const createUrl = new URL('/api/history/vaccinations', appBase(req));
-    const createRes = await fetch(createUrl.toString(), {
+    const createResponse = await fetch(new URL('/api/patients/vaccinations', gatewayBase()), {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...Object.fromEntries(forwardHeaders(req).entries()),
-      },
-      body: JSON.stringify({
-        patientId,
-        vaccine,
-        date,
-        batch,
-        notes,
-        facility,
-        clinician,
-        source: 'patient',
-      }),
+      headers: patientGatewayHeaders({ req, identity: context.identity, includeJson: true }),
+      body: JSON.stringify({ vaccine, date, batch, notes, facility, clinician, source }),
       cache: 'no-store',
     });
-
-    const createJson = await createRes.json().catch(() => null);
-
-    if (!createRes.ok || !createJson) {
+    const createBody = await readBody(createResponse);
+    if (!createResponse.ok || !createBody?.ok || !createBody?.item?.id) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            createJson?.error ||
-            createJson?.message ||
-            'vaccination_create_failed',
-        },
-        { status: createRes.status || 500 },
+        { ok: false, error: createBody?.error || 'vaccination_create_failed' },
+        { status: createResponse.status || 502 },
       );
     }
 
-    const created =
-      createJson?.item ||
-      createJson?.record ||
-      createJson?.data ||
-      createJson;
-
-    const createdId = String(created?.id || '').trim();
-    if (!createdId) {
-      return NextResponse.json(
-        { ok: false, error: 'vaccination_create_missing_id' },
-        { status: 500 },
-      );
-    }
-
+    const created = createBody.item;
     const maybeFile = form.get('file');
     let document: GatewayDocumentCreateResponse['item'] | null = null;
-
     if (maybeFile instanceof File && maybeFile.size > 0) {
       document = await uploadViaGatewayRegistry({
         req,
-        patientId,
+        identity: context.identity,
         title: `Vaccination Proof • ${vaccine}`,
         notes,
-        linkedRecordType: 'vaccination',
-        linkedRecordId: createdId,
+        linkedRecordId: String(created.id),
         file: maybeFile,
       });
     }
@@ -348,21 +220,26 @@ export async function POST(req: NextRequest) {
         ok: true,
         record: {
           ...created,
-          patientId,
+          patientId: context.identity.patientId,
           documentId: document?.id || null,
-          fileName: document?.fileName || null,
+          fileName: document?.fileName || created?.fileName || null,
           fileUrl: document?.downloadUrl || null,
         },
       },
-      { status: 201 },
+      { status: 201, headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (err: any) {
+    const message = String(err?.message || 'vaccinations_post_failed');
     return NextResponse.json(
-      {
-        ok: false,
-        error: String(err?.message || 'vaccinations_post_failed'),
-      },
-      { status: 500 },
+      { ok: false, error: message },
+      { status: message === 'internal_identity_secret_unavailable' ? 503 : 500, headers: { 'Cache-Control': 'no-store' } },
     );
   }
+}
+
+export async function PATCH(_req: NextRequest) {
+  return NextResponse.json(
+    { ok: false, error: 'vaccination_patch_not_supported_use_followup_record' },
+    { status: 405, headers: { 'Cache-Control': 'no-store' } },
+  );
 }

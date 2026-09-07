@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { format, isAfter, isBefore, startOfToday } from 'date-fns';
+import { format, isBefore, startOfToday } from 'date-fns';
 import { FiPlus, FiClock, FiCalendar } from 'react-icons/fi';
 
-const GATEWAY = process.env.NEXT_PUBLIC_APIGW_BASE ?? '';
 
 type Vaccination = {
   id: string;
@@ -16,8 +15,7 @@ type Vaccination = {
   facility?: string | null;
   fileKey?: string | null;
   fileName?: string | null;
-  followupAt?: string | null;
-  followupLabel?: string | null;
+  source?: string | null;
   ehrTxId?: string | null;
   createdAt?: string;
 };
@@ -31,6 +29,10 @@ function toLocal(iso?: string | null) {
   } catch {
     return iso ?? '';
   }
+}
+
+function isScheduledFollowup(v: Vaccination) {
+  return String(v.source || '').trim().toLowerCase() === 'patient-followup';
 }
 
 export default function PatientVaccinationsPage() {
@@ -61,19 +63,14 @@ export default function PatientVaccinationsPage() {
   useEffect(() => {
     let mounted = true;
     async function load() {
-      if (!GATEWAY) {
-        setError('Gateway origin not configured');
-        setLoading(false);
-        return;
-      }
       try {
-        const res = await fetch(`${GATEWAY}/patient/vaccinations`, {
+        const res = await fetch('/api/vaccinations', {
           method: 'GET',
           cache: 'no-store',
         });
         const payload = await res.json().catch(() => ({ items: [] }));
         if (!mounted) return;
-        setItems(Array.isArray(payload.items) ? payload.items : []);
+        setItems(Array.isArray(payload.data) ? payload.data : []);
       } catch (err: any) {
         console.error('vaccinations load failed', err);
         if (mounted) setError(err.message || 'Failed to load vaccinations');
@@ -100,10 +97,6 @@ export default function PatientVaccinationsPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!GATEWAY) {
-      setError('Gateway origin not configured');
-      return;
-    }
     if (!form.vaccine.trim()) {
       alert('Please enter vaccine name');
       return;
@@ -112,24 +105,23 @@ export default function PatientVaccinationsPage() {
     setError(null);
 
     try {
-      const body: any = {
-        vaccine: form.vaccine.trim(),
-        date: form.date || undefined,
-        batch: form.batch || undefined,
-        clinician: form.clinician || undefined,
-        facility: form.facility || undefined,
-        notes: form.notes || undefined,
-      };
-      const res = await fetch(`${GATEWAY}/patient/vaccinations`, {
+      const body = new FormData();
+      body.set('vaccine', form.vaccine.trim());
+      if (form.date) body.set('date', form.date);
+      if (form.batch) body.set('batch', form.batch);
+      if (form.clinician) body.set('clinician', form.clinician);
+      if (form.facility) body.set('facility', form.facility);
+      if (form.notes) body.set('notes', form.notes);
+
+      const res = await fetch('/api/vaccinations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body,
       });
       const payload = await res.json().catch(() => ({} as any));
       if (!res.ok || !payload.ok) {
         throw new Error(payload.error || `Save failed (${res.status})`);
       }
-      setItems((prev) => [payload.item, ...prev]);
+      setItems((prev) => [payload.record, ...prev]);
       resetForm();
       setShowForm(false);
     } catch (err: any) {
@@ -148,14 +140,7 @@ export default function PatientVaccinationsPage() {
     const all = [...items];
 
     for (const v of items) {
-      if (v.followupAt) {
-        const d = new Date(v.followupAt);
-        if (isAfter(d, today)) {
-          upcoming.push(v);
-        } else {
-          past.push(v);
-        }
-      } else if (v.date) {
+      if (v.date) {
         const d = new Date(v.date);
         if (isBefore(d, today)) {
           past.push(v);
@@ -178,45 +163,39 @@ export default function PatientVaccinationsPage() {
 
   function openSchedule(v: Vaccination) {
     setScheduleTarget(v);
-    setScheduleDate(v.followupAt ? toLocal(v.followupAt) : '');
-    setScheduleNotes(v.followupLabel || '');
+    setScheduleDate('');
+    setScheduleNotes('');
   }
 
   async function handleScheduleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!scheduleTarget || !GATEWAY) return;
+    if (!scheduleTarget) return;
     if (!scheduleDate.trim()) {
       alert('Select a follow-up / booster date');
       return;
     }
     setScheduleSaving(true);
     try {
-      const body = {
-        followupAt: scheduleDate,
-        followupLabel: scheduleNotes || undefined,
-      };
-      const res = await fetch(
-        `${GATEWAY}/patient/vaccinations/${encodeURIComponent(
-          scheduleTarget.id
-        )}/schedule`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        }
-      );
+      const body = new FormData();
+      body.set('vaccine', scheduleTarget.vaccine);
+      body.set('date', scheduleDate);
+      body.set('continuityKind', 'booster');
+      if (scheduleNotes.trim()) body.set('notes', scheduleNotes.trim());
+
+      const res = await fetch('/api/vaccinations', {
+        method: 'POST',
+        body,
+      });
       const payload = await res.json().catch(() => ({} as any));
-      if (!res.ok || !payload.ok) {
+      if (!res.ok || !payload.ok || !payload.record?.id) {
         throw new Error(payload.error || `Schedule failed (${res.status})`);
       }
-      setItems((prev) =>
-        prev.map((v) =>
-          v.id === scheduleTarget.id ? { ...v, ...payload.item } : v
-        )
-      );
+
+      setItems((prev) => [payload.record, ...prev]);
       setScheduleTarget(null);
       setScheduleDate('');
       setScheduleNotes('');
+      setActiveTab('upcoming');
     } catch (err: any) {
       console.error('schedule followup failed', err);
       alert(err.message || 'Failed to schedule follow-up');
@@ -421,7 +400,7 @@ export default function PatientVaccinationsPage() {
                         {v.batch && <> • Batch {v.batch}</>}
                       </p>
                     </div>
-                    {v.followupAt && (
+                    {isScheduledFollowup(v) && (
                       <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
                         <FiClock className="mr-1 h-3 w-3" />
                         Follow-up
@@ -437,15 +416,15 @@ export default function PatientVaccinationsPage() {
                     </p>
                   )}
 
-                  {v.notes && (
+                  {v.notes && !isScheduledFollowup(v) && (
                     <p className="text-xs text-gray-700 line-clamp-3">{v.notes}</p>
                   )}
 
-                  {v.followupAt && (
+                  {isScheduledFollowup(v) && v.date && (
                     <p className="text-xs text-indigo-700 flex items-center gap-1 mt-1">
                       <FiCalendar className="h-3 w-3" />
-                      Booster scheduled for {toLocal(v.followupAt)}
-                      {v.followupLabel && <> — {v.followupLabel}</>}
+                      Booster scheduled for {toLocal(v.date)}
+                      {v.notes && <> — {v.notes}</>}
                     </p>
                   )}
 
@@ -472,13 +451,15 @@ export default function PatientVaccinationsPage() {
                       >
                         Edit
                       </button>
-                      <button
-                        type="button"
-                        className="text-[11px] text-indigo-600 hover:text-indigo-700"
-                        onClick={() => openSchedule(v)}
-                      >
-                        Schedule follow-up
-                      </button>
+                      {!isScheduledFollowup(v) && (
+                        <button
+                          type="button"
+                          className="text-[11px] text-indigo-600 hover:text-indigo-700"
+                          onClick={() => openSchedule(v)}
+                        >
+                          Schedule follow-up
+                        </button>
+                      )}
                     </div>
                   </div>
                 </article>

@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { FiPlus, FiFilter } from 'react-icons/fi';
 
-const GATEWAY = process.env.NEXT_PUBLIC_APIGW_BASE ?? '';
 
 type ConditionStatus =
   | 'Active'
@@ -92,19 +91,14 @@ export default function PatientConditionsPage() {
     let mounted = true;
 
     async function loadConditions() {
-      if (!GATEWAY) {
-        setError('Gateway origin not configured');
-        setLoading(false);
-        return;
-      }
       try {
-        const res = await fetch(`${GATEWAY}/patient/conditions`, {
+        const res = await fetch('/api/conditions', {
           method: 'GET',
           cache: 'no-store',
         });
         const payload = await res.json().catch(() => ({ items: [] }));
         if (!mounted) return;
-        setItems(Array.isArray(payload.items) ? payload.items : []);
+        setItems(Array.isArray(payload.data) ? payload.data : []);
       } catch (err: any) {
         console.error('conditions load failed', err);
         if (mounted) setError(err.message || 'Failed to load conditions');
@@ -172,10 +166,6 @@ export default function PatientConditionsPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!GATEWAY) {
-      setError('Gateway origin not configured');
-      return;
-    }
     if (!form.name.trim()) {
       alert('Please enter condition name');
       return;
@@ -184,34 +174,30 @@ export default function PatientConditionsPage() {
     setError(null);
 
     try {
-      const body: any = {
-        name: form.name.trim(),
-        status: form.status,
-        diagnosedAt: form.diagnosedAt || undefined,
-        onAmbulant: diagnosisOrigin === 'ambulant',
-        notes: form.notes || undefined,
-      };
+      const body = new FormData();
+      body.set('name', form.name.trim());
+      body.set('status', form.status);
+      if (form.diagnosedAt) body.set('diagnosedAt', form.diagnosedAt);
+      if (form.notes) body.set('notes', form.notes);
 
       if (diagnosisOrigin === 'ambulant') {
-        if (form.taggedClinicianId) {
-          body.taggedClinicianId = form.taggedClinicianId;
-          body.taggedClinicianName = form.taggedClinicianName || undefined;
-        }
+        if (form.taggedClinicianName) body.set('clinician', form.taggedClinicianName);
+        body.set('location', 'Ambulant+');
       } else {
-        body.facility = form.facility || undefined;
-        body.clinician = form.clinicianText || undefined;
+        if (form.facility) body.set('facility', form.facility);
+        if (form.clinicianText) body.set('clinician', form.clinicianText);
+        if (form.facility) body.set('location', form.facility);
       }
 
-      const res = await fetch(`${GATEWAY}/patient/conditions`, {
+      const res = await fetch('/api/conditions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body,
       });
       const payload = await res.json().catch(() => ({} as any));
       if (!res.ok || !payload.ok) {
         throw new Error(payload.error || `Save failed (${res.status})`);
       }
-      setItems((prev) => [payload.item, ...prev]);
+      setItems((prev) => [payload.record, ...prev]);
       resetForm();
       setShowForm(false);
     } catch (err: any) {
