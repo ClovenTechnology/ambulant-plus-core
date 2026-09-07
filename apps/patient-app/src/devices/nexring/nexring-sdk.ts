@@ -3,6 +3,14 @@
 
 export type NexRingSdkAny = Record<string, any>;
 
+export const NEXRING_VENDOR_SDK_AUTHORITY = Object.freeze({
+  packageLabel: 'Smart Ring RN SDK_V1.3.7',
+  archiveSha256: '739551a0d60844f11276e3732089651eebc2168a9896c529ac9fbba49955341b',
+  runtimeSha256: '53994043842cf17ed97ab25dc729857607006d9420aa11c1beb253d770585749',
+  runtimePath:
+    'vendor/smart-ring-js-sdk/Smart Ring RN SDK_V1.3.7/lib/ringSDK.js',
+});
+
 declare const require: (moduleName: string) => any;
 
 let cachedSdk: NexRingSdkAny | null = null;
@@ -34,6 +42,19 @@ export async function loadNexRingSdk(): Promise<NexRingSdkAny> {
   );
 
   cachedSdk = resolveSdkExport(mod);
+
+  if (
+    typeof cachedSdk.startDetect !== 'function' ||
+    typeof cachedSdk.pushRawData !== 'function' ||
+    !cachedSdk.SendCmd ||
+    typeof cachedSdk.SendCmd !== 'object'
+  ) {
+    cachedSdk = null;
+    throw new Error(
+      'NexRing vendor SDK authority is incomplete: startDetect, pushRawData and SendCmd are required',
+    );
+  }
+
   return cachedSdk;
 }
 

@@ -12,7 +12,7 @@ Upgrades in this version:
 - LocalStorage persistence (so it feels real even before GET endpoints)
 
 Notes:
-- Still not integrated with SFU; live_capture fields stay placeholders.
+- Evidence must originate from a real capture or an existing evidence item; synthetic media is not created.
 - Still POST-only: edits/hide are local until PATCH/DELETE/GET exist.
 */
 
@@ -29,7 +29,7 @@ import {
 } from '@/src/components/workspaces/ui';
 
 import type { Evidence, Finding, Location } from '@/src/lib/workspaces/types';
-import { postAnnotation, postEvidence, postFinding } from '@/src/lib/workspaces/api';
+import { patchEvidence, postAnnotation, postFinding } from '@/src/lib/workspaces/api';
 
 const FINDING_TYPES = [
   { key: 'cerumen', label: 'Cerumen / wax' },
@@ -457,12 +457,12 @@ function ENTWorkspacePageContent() {
     const title = FINDING_TYPES.find((x) => x.key === type)?.label ?? 'Finding';
     const location = locationForEar(ear);
     const zoneTag = quadrant !== 'UNKNOWN' ? `zone:${quadrant}` : undefined;
+    const evidenceToLink = selectedEvidence;
 
     setBanner(null);
     setBusy(true);
 
     try {
-      // 1) Create finding
       const createdFinding = await postFinding({
         patientId,
         encounterId,
@@ -479,59 +479,27 @@ function ENTWorkspacePageContent() {
       setFindings((prev) => [createdFinding, ...prev]);
       setSelectedFindingId(createdFinding.id);
 
-      // 2) Create snapshot evidence (ready)
-      const snapshot = await postEvidence({
-        patientId,
-        encounterId,
-        specialty: 'ent',
-        findingId: createdFinding.id,
-        location,
-        source: {
-          type: 'live_capture',
-          device: 'otoscope',
-          // SFU fields later
-          roomId: undefined,
-          trackId: undefined,
-        },
-        media: {
-          kind: 'image',
-          url: `https://placehold.co/1200x800?text=Otoscope+Snapshot+(${ear})`,
-          thumbnailUrl: `https://placehold.co/320x200?text=Snapshot+(${ear})`,
-          contentType: 'image/jpeg',
-        },
-        status: 'ready',
-      });
+      if (evidenceToLink?.id) {
+        const linkedEvidence = await patchEvidence(evidenceToLink.id, {
+          findingId: createdFinding.id,
+        });
 
-      // 3) Create clip evidence (processing)
-      const t = Date.now();
-      const clip = await postEvidence({
-        patientId,
-        encounterId,
-        specialty: 'ent',
-        findingId: createdFinding.id,
-        location,
-        source: {
-          type: 'live_capture',
-          device: 'otoscope',
-          roomId: undefined,
-          trackId: undefined,
-          startTs: t - 4000,
-          endTs: t + 6000,
-        },
-        media: {
-          kind: 'video_clip',
-          url: 'https://example.invalid/clip.mp4',
-          thumbnailUrl: `https://placehold.co/320x200?text=Clip+(${ear})`,
-          contentType: 'video/mp4',
-          startTs: t - 4000,
-          endTs: t + 6000,
-        },
-        status: 'processing',
-      });
-
-      setEvidence((prev) => [snapshot, clip, ...prev]);
-      setSelectedEvidenceId(snapshot.id);
-      setBanner({ kind: 'success', text: 'Bookmark saved (finding + evidence created).' });
+        setEvidence((prev) =>
+          prev.map((item) =>
+            item.id === evidenceToLink.id ? linkedEvidence : item
+          )
+        );
+        setSelectedEvidenceId(linkedEvidence.id);
+        setBanner({
+          kind: 'success',
+          text: 'Bookmark saved and linked to the selected real evidence.',
+        });
+      } else {
+        setBanner({
+          kind: 'success',
+          text: 'Finding saved. Capture or select real otoscope evidence before linking evidence.',
+        });
+      }
     } catch (e) {
       setBanner({ kind: 'error', text: `Failed to save bookmark: ${errMsg(e)}` });
       throw e;
@@ -1029,7 +997,7 @@ function ENTWorkspacePageContent() {
                   ) : (
                     <div className="h-full grid place-items-center text-gray-600">
                       <div className="text-center px-6">
-                        <div className="text-sm font-medium">Live Otoscope View (placeholder)</div>
+                        <div className="text-sm font-medium">Live Otoscope evidence</div>
                         <div className="text-xs text-gray-500 mt-1">Select evidence below to preview · Click image to pin</div>
                       </div>
                     </div>
@@ -1184,7 +1152,7 @@ function ENTWorkspacePageContent() {
         open={bookmarkOpen}
         onClose={() => setBookmarkOpen(false)}
         title={`Bookmark (${ear === 'L' ? 'Left' : 'Right'} ear)`}
-        description="Creates a finding + captures snapshot + clip as evidence"
+        description="Creates a finding and links the selected real evidence when available"
         findingTypes={FINDING_TYPES.map((x) => ({ key: x.key, label: x.label }))}
         defaultTypeKey="erythema"
         onSave={handleBookmark}

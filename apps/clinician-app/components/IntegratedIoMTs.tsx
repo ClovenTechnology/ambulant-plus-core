@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Card, Tabs, Collapse, Skeleton } from '@/components/ui';
+import { Card, Tabs, Collapse } from '@/components/ui';
 import HealthMonitorPanel from '@/components/HealthMonitorPanel';
 import StethoscopePanel from '@/components/StethoscopePanel';
 import OtoscopePanel from '@/components/OtoscopePanel';
@@ -13,22 +13,28 @@ type IoTab = 'health' | 'steth' | 'oto';
 export default function IntegratedIoMTs({
   roomId,
   patientId,
+  encounterId,
   dense,
   defaultOpen = true,
 }: {
   roomId: string;
   patientId: string;
+  encounterId?: string | null;
   dense?: boolean;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState<boolean>(defaultOpen);
   const [tab, setTab] = useState<IoTab>('health');
 
-  // simple status pill from DeviceDock (reuses its connection context)
-  const status = useMemo(() => {
-    // Placeholder text — real status can be hoisted from your dock context if available
-    return 'Checking devices…';
-  }, []);
+  const status = useMemo(
+    () =>
+      encounterId
+        ? 'Clinical evidence linked to encounter'
+        : 'Encounter context required to save captures',
+    [encounterId],
+  );
+
+  const canPersistEvidence = Boolean(encounterId && patientId);
 
   return (
     <Card
@@ -37,13 +43,17 @@ export default function IntegratedIoMTs({
       gradient
       toolbar={
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-600 hidden md:inline">{status}</span>
-          <CollapseBtn open={open} onClick={() => setOpen((v) => !v)} />
+          <span className="text-xs text-gray-600 hidden md:inline">
+            {status}
+          </span>
+          <CollapseBtn
+            open={open}
+            onClick={() => setOpen((value) => !value)}
+          />
         </div>
       }
     >
       <Collapse open={open}>
-        {/* Tabs (moved ABOVE dock) */}
         <div className="mb-2">
           <Tabs<IoTab>
             active={tab}
@@ -56,28 +66,40 @@ export default function IntegratedIoMTs({
           />
         </div>
 
-        {/* Panels */}
         <div className="min-h-[96px] mb-3">
-          {tab === 'health' && (
+          {tab === 'health' ? (
             <div className="space-y-2">
               <HealthMonitorPanel roomId={roomId} />
             </div>
-          )}
-          {tab === 'steth' && (
+          ) : null}
+
+          {tab === 'steth' ? (
             <div className="space-y-2">
-              <StethoscopePanel roomId={roomId} />
+              <StethoscopePanel
+                roomId={roomId}
+                patientId={patientId}
+                encounterId={encounterId}
+                canSaveToSummary={canPersistEvidence}
+              />
             </div>
-          )}
-          {tab === 'oto' && (
+          ) : null}
+
+          {tab === 'oto' ? (
             <div className="space-y-2">
-              <OtoscopePanel roomId={roomId} />
+              <OtoscopePanel
+                roomId={roomId}
+                patientId={patientId}
+                encounterId={encounterId}
+                canSaveToSummary={canPersistEvidence}
+              />
             </div>
-          )}
+          ) : null}
         </div>
 
-        {/* Device Dock (moved BELOW tabs/panels) */}
         <div className="rounded border bg-white p-2">
-          <div className="text-xs text-gray-600 mb-1">Device Dock</div>
+          <div className="text-xs text-gray-600 mb-1">
+            Device Dock
+          </div>
           <DeviceDock patientId={patientId} roomId={roomId} />
         </div>
       </Collapse>

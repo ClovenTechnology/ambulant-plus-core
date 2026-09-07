@@ -2819,7 +2819,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                   )}
 
                   <Card title="Integrated IoMTs" dense={dense} gradient>
-                    <IntegratedIoMTs roomId={roomId} patientId={profile.id} dense={dense} defaultOpen />
+                    <IntegratedIoMTs roomId={roomId} patientId={profile.id} encounterId={encounterId || undefined} dense={dense} defaultOpen />
                   </Card>
 
                   <SmartWearablesPanel roomId={roomId} dense={dense} defaultOpen patientId={profile.id} />

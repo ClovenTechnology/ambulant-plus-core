@@ -44,7 +44,7 @@ import {
 } from '@/src/components/workspaces/ui';
 
 import type { Evidence, Finding, Location } from '@/src/lib/workspaces/types';
-import { postAnnotation, postEvidence, postFinding } from '@/src/lib/workspaces/api';
+import { patchEvidence, postAnnotation, postFinding } from '@/src/lib/workspaces/api';
 
 const TRACKS = [
   { key: 'ob', label: 'Obstetrics (OB)' },
@@ -748,6 +748,7 @@ function OBGYNWorkspacePageContent() {
     const type = payload.findingTypeKey as FindingTypeKey;
     const title = FINDING_TYPES.find((x) => x.key === type)?.label ?? 'Finding';
     const location = locationForTrack(track);
+    const evidenceToLink = selectedEvidence;
 
     const icd10 =
       payload.icd10Code && payload.icd10Label
@@ -776,58 +777,30 @@ function OBGYNWorkspacePageContent() {
           triage: triageMeta,
         },
       } as any);
+
       setFindings((prev) => [createdFinding, ...prev]);
 
-      const snapshot = await postEvidence({
-        patientId,
-        encounterId,
-        specialty: 'obgyn',
-        findingId: createdFinding.id,
-        location,
-        source: {
-          type: 'live_capture',
-          device: 'camera',
-          roomId: undefined,
-          trackId: undefined,
-        },
-        media: {
-          kind: 'image',
-          url: `https://placehold.co/1200x800?text=OBGYN+Snapshot+(${track.toUpperCase()})`,
-          thumbnailUrl: `https://placehold.co/320x200?text=Snapshot+(${track.toUpperCase()})`,
-          contentType: 'image/jpeg',
-        },
-        status: 'ready',
-      });
+      if (evidenceToLink?.id) {
+        const linkedEvidence = await patchEvidence(evidenceToLink.id, {
+          findingId: createdFinding.id,
+        });
 
-      const t = Date.now();
-      const clip = await postEvidence({
-        patientId,
-        encounterId,
-        specialty: 'obgyn',
-        findingId: createdFinding.id,
-        location,
-        source: {
-          type: 'live_capture',
-          device: 'camera',
-          roomId: undefined,
-          trackId: undefined,
-          startTs: t - 4000,
-          endTs: t + 7000,
-        },
-        media: {
-          kind: 'video_clip',
-          url: 'https://example.invalid/clip.mp4',
-          thumbnailUrl: `https://placehold.co/320x200?text=Clip+(${track.toUpperCase()})`,
-          contentType: 'video/mp4',
-          startTs: t - 4000,
-          endTs: t + 7000,
-        },
-        status: 'processing',
-      });
-
-      setEvidence((prev) => [snapshot, clip, ...prev]);
-      setSelectedEvidenceId(snapshot.id);
-      setBanner({ kind: 'success', text: 'Bookmark saved (finding + evidence created).' });
+        setEvidence((prev) =>
+          prev.map((item) =>
+            item.id === evidenceToLink.id ? linkedEvidence : item
+          )
+        );
+        setSelectedEvidenceId(linkedEvidence.id);
+        setBanner({
+          kind: 'success',
+          text: 'Bookmark saved and linked to the selected real evidence.',
+        });
+      } else {
+        setBanner({
+          kind: 'success',
+          text: 'Finding saved. Capture or select real evidence before linking evidence.',
+        });
+      }
     } catch (e) {
       setBanner({ kind: 'error', text: `Failed to save bookmark: ${errMsg(e)}` });
       throw e;
@@ -866,7 +839,7 @@ function OBGYNWorkspacePageContent() {
         createdBy: clinicianId,
       });
 
-      setBanner({ kind: 'success', text: 'Annotation created (demo pin).' });
+      setBanner({ kind: 'success', text: 'Annotation created.' });
     } catch (e) {
       setBanner({ kind: 'error', text: `Failed to create annotation: ${errMsg(e)}` });
     } finally {
@@ -1472,7 +1445,7 @@ function OBGYNWorkspacePageContent() {
             <SectionHeader
               icon={<Stethoscope className="w-4 h-4 text-gray-700" />}
               title="Evidence & annotations"
-              subtitle="Select evidence to preview · Add pin annotations · Bookmark creates finding + snapshot + clip"
+              subtitle="Select evidence to preview · Add pin annotations · Bookmark links selected real evidence"
               right={
                 <div className="flex items-center gap-2">
                   <button
@@ -1627,7 +1600,7 @@ function OBGYNWorkspacePageContent() {
                 <ul className="mt-2 space-y-1 text-sm text-gray-700 list-disc pl-5">
                   <li>Every finding saves triageMeta (visit mode, vitals, red flags, quick history) into Finding.meta.</li>
                   <li>Context panel gracefully falls back when the GET endpoint is not present.</li>
-                  <li>Evidence preview supports images + “processing clips” until SFU capture returns real URLs.</li>
+                  <li>Evidence preview accepts real images and processing clips produced by the capture workflow; synthetic media is not created.</li>
                 </ul>
                 <div className="mt-2 text-[11px] text-gray-500">
                   Next: GET endpoints for findings/evidence + PUT “workspace form data” so intake is server-truth per encounter.
@@ -1642,7 +1615,7 @@ function OBGYNWorkspacePageContent() {
         open={bookmarkOpen}
         onClose={() => setBookmarkOpen(false)}
         title={`Bookmark (${track === 'ob' ? 'Obstetrics' : 'Gynaecology'})`}
-        description="Creates a finding + captures snapshot + clip as evidence"
+        description="Creates a finding and links the selected real evidence when available"
         findingTypes={FINDING_TYPES.map((x) => ({ key: x.key, label: x.label }))}
         defaultTypeKey={track === 'ob' ? 'fetal_wellbeing' : 'routine_check'}
         onSave={handleBookmark as any}
@@ -1969,7 +1942,7 @@ function QuickFindingComposer(props: {
         <div className="flex items-start gap-2 text-[11px] text-gray-500">
           <Sparkles className="w-4 h-4 mt-0.5" />
           <div>
-            Tip: use <b>Bookmark</b> to attach snapshot + clip evidence to a finding in one step.
+            Tip: use <b>Bookmark</b> to link selected real evidence to a finding. If no evidence is selected, the finding is saved without synthetic media.
           </div>
         </div>
       </div>

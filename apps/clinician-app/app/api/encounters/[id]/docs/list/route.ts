@@ -1,107 +1,122 @@
 // apps/clinician-app/app/api/encounters/[id]/docs/list/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { readDb } from '../../../../erx/_lib_db_compat';
+import {
+  authErrorResponse,
+  requireClinicianAuth,
+} from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const GW = process.env.APIGW_BASE?.replace(/\/+$/, '');
+const CANONICAL_API_GATEWAY = 'https://api-gateway.ambulantplus.co.za';
 
-type EncounterDoc = {
-  id: string;
-  encounterId: string;
-  patientId: string | null;
-  docType: string;
-  title: string;
-  fileName: string;
-  contentType: string;
-  size: number;
-  createdAt: string;
-  source: string;
-};
+function clean(value: unknown, max = 4000) {
+  return String(value ?? '').trim().slice(0, max);
+}
+
+function gatewayBase() {
+  const raw =
+    process.env.APIGW_BASE ||
+    process.env.APIGW_BASE_URL ||
+    process.env.GATEWAY_URL ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    CANONICAL_API_GATEWAY;
+
+  return clean(raw, 1000).replace(/\/+$/, '');
+}
 
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const encounterId = params.id;
+  const auth = await requireClinicianAuth(req, {
+    allowAdmin: false,
+    allowAdminStaff: false,
+  });
+
+  if (!auth.ok) {
+    return authErrorResponse(auth);
+  }
+
+  if (auth.role !== 'clinician') {
+    return NextResponse.json(
+      { ok: false, error: 'clinician_required' },
+      { status: 403 },
+    );
+  }
+
+  const encounterId = clean(params.id, 120);
+
   if (!encounterId) {
     return NextResponse.json(
-      { error: 'encounterId is required in the URL' },
+      { ok: false, error: 'encounter_id_required' },
       { status: 400 },
     );
   }
 
-  const { searchParams } = new URL(req.url);
-  const patientIdFilter = searchParams.get('patientId');
-  const docTypeFilter = searchParams.get('docType');
+  let trustedIdentity: string;
 
-  // If there is an API gateway, try that first
-  if (GW) {
-    try {
-      const gwUrl = new URL(
-        `${GW}/api/encounters/${encodeURIComponent(encounterId)}/docs`,
-      );
-      if (patientIdFilter) gwUrl.searchParams.set('patientId', patientIdFilter);
-      if (docTypeFilter) gwUrl.searchParams.set('docType', docTypeFilter);
+  try {
+    trustedIdentity = createTrustedClinicianIdentityHeader(req);
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: clean(error?.message, 240) || 'identity_bridge_failed',
+      },
+      {
+        status: Number(error?.status || 500),
+        headers: { 'cache-control': 'no-store' },
+      },
+    );
+  }
 
-      const r = await fetch(gwUrl.toString(), {
-        method: 'GET',
-        headers: { accept: 'application/json' },
-      });
+  const target = new URL(
+    `/api/encounters/${encodeURIComponent(encounterId)}/docs`,
+    gatewayBase(),
+  );
 
-      if (r.ok) {
-        const json = await r.json().catch(() => ({}));
-        // pass-through whatever the gateway returns (ideally { items: [...] })
-        return NextResponse.json(json, { status: r.status });
-      }
+  const requestUrl = new URL(req.url);
 
-      console.warn(
-        '[encounters/docs/list] GW upstream non-OK, falling back to local store',
-        r.status,
-      );
-    } catch (err) {
-      console.error(
-        '[encounters/docs/list] GW upstream error, falling back to local store',
-        err,
-      );
+  for (const name of ['patientId', 'docType']) {
+    const value = clean(requestUrl.searchParams.get(name), 240);
+    if (value) {
+      target.searchParams.set(name, value);
     }
   }
 
-  // ---- local fallback: read from db.docs ----
   try {
-    const db = await readDb();
-    const docs: EncounterDoc[] = Array.isArray(db.docs) ? db.docs : [];
+    const upstream = await fetch(target, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        'x-ambulant-identity': trustedIdentity,
+      },
+      cache: 'no-store',
+    });
 
-    let filtered = docs.filter((d) => d.encounterId === encounterId);
+    const text = await upstream.text();
 
-    if (patientIdFilter) {
-      filtered = filtered.filter((d) => d.patientId === patientIdFilter);
-    }
-    if (docTypeFilter) {
-      const wanted = docTypeFilter.toLowerCase();
-      filtered = filtered.filter(
-        (d) => d.docType && d.docType.toLowerCase() === wanted,
-      );
-    }
-
-    // Sort newest first
-    filtered.sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    );
+    return new NextResponse(text, {
+      status: upstream.status,
+      headers: {
+        'content-type':
+          upstream.headers.get('content-type') || 'application/json',
+        'cache-control': 'no-store',
+      },
+    });
+  } catch (error: any) {
+    console.error('[encounters/docs/list] gateway request failed', error);
 
     return NextResponse.json(
       {
-        items: filtered,
+        ok: false,
+        error: 'encounter_documents_gateway_failed',
+        message: clean(error?.message, 300),
       },
-      { status: 200 },
-    );
-  } catch (err) {
-    console.error('[encounters/docs/list] local readDb failed', err);
-    return NextResponse.json(
-      { items: [], error: 'Failed to load docs from local store' },
-      { status: 500 },
+      { status: 502 },
     );
   }
 }
