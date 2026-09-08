@@ -927,6 +927,16 @@ export class NexRingSession {
       await NexRing.addListener('ready', async () => {
         this.readyAtTs = Date.now();
         this.patchState({ phase: 'ready' });
+
+        if (this.transport) {
+          this.webCommands = new NexRingWebCommands(
+            this.sdk,
+            async (packet) => {
+              await this.transport!.write({ bytes: u8ToNumArray(packet) });
+            },
+          );
+        }
+
         await this.bootstrapAfterReady();
       }),
       await NexRing.addListener('mtu', (e) => {
@@ -1052,7 +1062,7 @@ export class NexRingSession {
       });
 
       try {
-        await this.transport?.requestMtu?.({ mtu: 247 });
+        await this.transport?.requestMtu?.({ mtu: 203 });
       } catch {}
 
       try {
@@ -1076,7 +1086,7 @@ export class NexRingSession {
     this.clearLiveModeAllowed();
 
     try {
-      if (this.isWebTransport && this.webCommands) {
+      if (this.webCommands) {
         const results = await this.webCommands.sendPassiveModeStop();
         this.recordSentPackets(results, 'disconnect');
       }
@@ -1092,7 +1102,7 @@ export class NexRingSession {
 
   async syncTime() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       const result = await this.webCommands.sendTimeSync();
       this.recordSentPackets([result]);
       this.emitCommandResult({
@@ -1106,7 +1116,7 @@ export class NexRingSession {
 
   async requestBattery() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       const result = await this.webCommands.sendBatteryRequest();
       this.recordSentPackets([result]);
       this.emitCommandResult({
@@ -1120,7 +1130,7 @@ export class NexRingSession {
 
   async requestDeviceInfo() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       const results = await this.webCommands.sendDeviceInfoRequests();
       this.recordSentPackets(results);
       this.emitCommandResult({
@@ -1136,7 +1146,7 @@ export class NexRingSession {
     await this.init();
 
     try {
-      if (this.isWebTransport && this.webCommands) {
+      if (this.webCommands) {
         this.markLiveModeAllowed('live_health');
         const results = await this.webCommands.sendLiveHealthStart();
         this.recordSentPackets(results);
@@ -1145,7 +1155,7 @@ export class NexRingSession {
           ts: Date.now(),
           ok: true,
           code: 'start_health_sent',
-          message: 'Live health mode command dispatched on web.',
+          message: 'Live health mode command dispatched through the vendor protocol transport.',
         });
 
         return;
@@ -1163,7 +1173,7 @@ export class NexRingSession {
     await this.init();
 
     try {
-      if (this.isWebTransport && this.webCommands) {
+      if (this.webCommands) {
         this.markLiveModeAllowed('single_health');
         const results = await this.webCommands.sendSingleMeasurementStart();
         this.recordSentPackets(results);
@@ -1172,7 +1182,7 @@ export class NexRingSession {
           ts: Date.now(),
           ok: true,
           code: 'start_single_health_sent',
-          message: 'Single health mode command dispatched on web.',
+          message: 'Single health mode command dispatched through the vendor protocol transport.',
         });
 
         return;
@@ -1188,7 +1198,7 @@ export class NexRingSession {
     await this.init();
 
     try {
-      if (this.isWebTransport && this.webCommands) {
+      if (this.webCommands) {
         const results = await this.webCommands.sendPassiveModeStop();
         this.recordSentPackets(results);
         this.clearLiveModeAllowed();
@@ -1197,7 +1207,7 @@ export class NexRingSession {
           ts: Date.now(),
           ok: true,
           code: 'stop_health_sent',
-          message: 'Live health stop command dispatched on web.',
+          message: 'Live health stop command dispatched through the vendor protocol transport.',
         });
 
         return;
@@ -1213,7 +1223,7 @@ export class NexRingSession {
 
   async requestHistoricalCount() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       this.clearLiveModeAllowed();
       this.history.markRequestedCount();
       this.reportStore.markRequestedCount();
@@ -1231,7 +1241,7 @@ export class NexRingSession {
 
   async requestHistoricalData() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       this.clearLiveModeAllowed();
       this.history.markRequestedData();
       this.reportStore.markRequestedData();
@@ -1249,7 +1259,7 @@ export class NexRingSession {
 
   async requestStep() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       this.clearLiveModeAllowed();
       const result = await this.webCommands.sendStepRequest();
       this.recordSentPackets([result]);
@@ -1264,7 +1274,7 @@ export class NexRingSession {
 
   async requestTemperature() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       this.clearLiveModeAllowed();
       const result = await this.webCommands.sendTemperatureRequest();
       this.recordSentPackets([result]);
@@ -1279,7 +1289,7 @@ export class NexRingSession {
 
   async requestActiveData() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       this.clearLiveModeAllowed();
       const result = await this.webCommands.sendActiveData();
       this.recordSentPackets([result]);
@@ -1294,7 +1304,7 @@ export class NexRingSession {
 
   async requestActiveData2() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       this.clearLiveModeAllowed();
       const result = await this.webCommands.sendActiveData2();
       this.recordSentPackets([result]);
@@ -1309,7 +1319,7 @@ export class NexRingSession {
 
   async requestNewAlgorithmHistoryCount() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       this.clearLiveModeAllowed();
       const result = await this.webCommands.sendNewAlgorithmHistoryNum();
       this.recordSentPackets([result]);
@@ -1324,7 +1334,7 @@ export class NexRingSession {
 
   async requestNewAlgorithmHistoryData() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       this.clearLiveModeAllowed();
       const result = await this.webCommands.sendNewAlgorithmHistoryData();
       this.recordSentPackets([result]);
@@ -1339,7 +1349,7 @@ export class NexRingSession {
 
   async runHydrationBootstrap() {
     await this.init();
-    if (this.isWebTransport && this.webCommands) {
+    if (this.webCommands) {
       this.clearLiveModeAllowed();
       this.history.markRequestedCount();
       this.history.markRequestedData();
@@ -1364,7 +1374,7 @@ export class NexRingSession {
     this.bootstrapping = true;
 
     try {
-      if (this.isWebTransport && this.webCommands) {
+      if (this.webCommands) {
         this.clearLiveModeAllowed();
 
         try {
@@ -1607,27 +1617,6 @@ export class NexRingSession {
         ['registerExerciseActivityHistoryListener', 'registerExerciseActivityHistoryListeners'],
         (raw: any) => {
           emitMetrics(bestMetricsFromListener('activity', raw), 'history', 'registerExerciseActivityHistoryListener', raw, 'activity_intensity_history');
-        },
-      ),
-    );
-
-    add(
-      maybeRegisterListener(
-        this.sdk,
-        ['registerExerciseVitalSignsHistoryListener', 'registerExerciseVitalSignsHistoryListeners'],
-        (raw: any) => {
-          emitMetrics(bestMetricsFromListener('health', raw), 'history', 'registerExerciseVitalSignsHistoryListener', raw, 'algorithm_history');
-        },
-      ),
-    );
-
-    add(
-      maybeRegisterListener(
-        this.sdk,
-        ['registerReportingExerciseListener', 'registerReportingExerciseListeners'],
-        (raw: any) => {
-          emitMetrics(bestMetricsFromListener('activity', raw), 'history', 'registerReportingExerciseListener', raw, 'daily_activity_history');
-          emitMetrics(bestMetricsFromListener('health', raw), 'history', 'registerReportingExerciseListener.health', raw, 'algorithm_history');
         },
       ),
     );
