@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
-import { readIdentity, type Identity } from '@/src/lib/auth';
+import { readIdentity, requireTrustedIdentityInProduction } from '@/src/lib/identity';
 import { sha256Hex, writeEhrIndex } from '@/src/lib/chain';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-async function resolvePatientProfileId(identity: Identity): Promise<string | null> {
+async function resolvePatientProfileId(identity: ReturnType<typeof readIdentity>): Promise<string | null> {
   if (!identity.uid) return null;
   const profile = await prisma.patientProfile.findUnique({
     where: { userId: identity.uid },
@@ -17,6 +17,14 @@ async function resolvePatientProfileId(identity: Identity): Promise<string | nul
 
 async function requirePatientProfile(req: NextRequest) {
   const identity = readIdentity(req.headers);
+  try {
+    requireTrustedIdentityInProduction(req.headers, identity);
+  } catch {
+    return {
+      ok: false as const,
+      response: NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 }),
+    };
+  }
   if (identity.role !== 'patient' || !identity.uid) {
     return {
       ok: false as const,
