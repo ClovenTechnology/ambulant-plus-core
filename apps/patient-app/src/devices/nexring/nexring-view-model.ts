@@ -47,6 +47,8 @@ export type SleepSession = {
   startTs: number;
   endTs: number;
   totalMinutes: number;
+  asleepMinutes?: number;
+  timeInBedMinutes?: number;
   score?: number;
   stages: {
     awake?: number;
@@ -123,12 +125,16 @@ export function pushBounded<T>(arr: T[], item: T, max: number) {
 }
 
 export function sleepTotalFromStages(stages?: Metrics['sleepStages']) {
+  // True asleep time. Awake staging is deliberately excluded.
   return (
     (stages?.rem ?? 0) +
     (stages?.deep ?? 0) +
-    (stages?.light ?? 0) +
-    (stages?.awake ?? 0)
+    (stages?.light ?? 0)
   );
+}
+
+export function sleepTimeInBedFromStages(stages?: Metrics['sleepStages']) {
+  return sleepTotalFromStages(stages) + (stages?.awake ?? 0);
 }
 
 export function shouldPersistMetric(metric: RingMetric, stamps: PersistStampMap) {
@@ -320,16 +326,18 @@ export function upsertSleepSession(
   prev: SleepSession[],
   metric: Extract<RingMetric, { kind: 'sleep' }>,
 ): SleepSession[] {
-  const stageTotal =
-    (metric.awakeMinutes ?? 0) +
+  const stagedAsleep =
     (metric.remMinutes ?? 0) +
     (metric.lightMinutes ?? 0) +
     (metric.deepMinutes ?? 0);
+  const stagedTimeInBed = stagedAsleep + (metric.awakeMinutes ?? 0);
 
   const total =
-    typeof metric.totalMinutes === 'number' && Number.isFinite(metric.totalMinutes)
-      ? metric.totalMinutes
-      : stageTotal;
+    typeof metric.asleepMinutes === 'number' && Number.isFinite(metric.asleepMinutes)
+      ? metric.asleepMinutes
+      : typeof metric.totalMinutes === 'number' && Number.isFinite(metric.totalMinutes)
+        ? metric.totalMinutes
+        : stagedAsleep;
 
   const endTs = metric.endTs ?? metric.ts ?? Date.now();
   const startTs =
@@ -343,6 +351,8 @@ export function upsertSleepSession(
     startTs,
     endTs,
     totalMinutes: total,
+    asleepMinutes: metric.asleepMinutes ?? total,
+    timeInBedMinutes: metric.timeInBedMinutes ?? (stagedTimeInBed || undefined),
     score: metric.score,
     stages: {
       awake: metric.awakeMinutes,

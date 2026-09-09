@@ -153,6 +153,8 @@ function hasSleep(metric: RingSleepMetric) {
     metric.startTs,
     metric.endTs,
     metric.totalMinutes,
+    metric.asleepMinutes,
+    metric.timeInBedMinutes,
   ].some((v) => typeof v === 'number');
 }
 
@@ -404,11 +406,12 @@ export function normalizeSleepMetric(raw: any): RingSleepMetric {
       raw?.minutes,
   );
 
-  const stagedTotal =
+  const stagedAsleepMinutes =
     (remMinutes ?? 0) +
     (deepMinutes ?? 0) +
-    (lightMinutes ?? 0) +
-    (awakeMinutes ?? 0);
+    (lightMinutes ?? 0);
+
+  const stagedTimeInBedMinutes = stagedAsleepMinutes + (awakeMinutes ?? 0);
 
   const durationFromBounds =
     typeof startTs === 'number' && typeof endTs === 'number' && endTs >= startTs
@@ -424,10 +427,19 @@ export function normalizeSleepMetric(raw: any): RingSleepMetric {
     awakeMinutes,
     startTs,
     endTs,
+    // `totalMinutes` is intentionally true asleep time for recovery UX.
+    // Time in bed is retained separately so awake staging is never counted as sleep.
     totalMinutes:
-      explicitTotal ??
+      stagedAsleepMinutes > 0
+        ? stagedAsleepMinutes
+        : explicitTotal ?? durationFromBounds,
+    asleepMinutes:
+      stagedAsleepMinutes > 0
+        ? stagedAsleepMinutes
+        : explicitTotal,
+    timeInBedMinutes:
       durationFromBounds ??
-      (stagedTotal > 0 ? stagedTotal : undefined),
+      (stagedTimeInBedMinutes > 0 ? stagedTimeInBedMinutes : explicitTotal),
     sourceMode:
       raw?.sourceMode === 'history' || raw?.sourceMode === 'sdk_calculated'
         ? raw.sourceMode

@@ -371,7 +371,7 @@ function decodeHistoryHealthMetric(packet: NexRingPacket): RingMetric | null {
 export function buildNexRingCommandPacket(
   sdk: NexRingSdkAny,
   cmd: string | number,
-  payload: number[] = [],
+  payload: unknown = [],
 ): Uint8Array {
   const startDetect = sdk?.startDetect ?? sdk?.StartDetect;
 

@@ -14,6 +14,8 @@ import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import com.getcapacitor.JSObject
@@ -42,6 +44,7 @@ class NexRingPlugin : Plugin() {
     private const val MIN_MTU = 23
     private const val MAX_MTU = 517
     private const val MAX_WRITE_BYTES = 512
+    private const val SCAN_TIMEOUT_MS = 12_000L
 
     // Smart Ring RN SDK V1.3.7 / Constant.js authority.
     private val RING_SERVICE_UUID: UUID = UUID.fromString("00001822-0000-1000-8000-00805f9b34fb")
@@ -64,6 +67,69 @@ class NexRingPlugin : Plugin() {
   private var ready = false
   private var pendingNotificationEnable = false
   private var pendingConnectCall: PluginCall? = null
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private var scanResultCount = 0
+
+  private val scanTimeoutRunnable = Runnable {
+    if (!scannerActive) return@Runnable
+
+    try {
+      bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
+    } catch (t: Throwable) {
+      Log.w(TAG, "scan timeout stop failed", t)
+    }
+
+    scannerActive = false
+    val detail = if (scanResultCount == 0) {
+      "timeout:no_results"
+    } else {
+      "timeout:results=$scanResultCount"
+    }
+
+    emitDiagnostic(
+      stage = "scan_timeout",
+      status = "complete",
+      detail = detail,
+      count = scanResultCount,
+    )
+    emitConnectionState("scan_stopped", message = detail)
+  }
+
+  private fun emitDiagnostic(
+    stage: String,
+    status: String,
+    id: String? = connectedId,
+    name: String? = connectedName,
+    rssi: Int? = null,
+    detail: String? = null,
+    count: Int? = null,
+    length: Int? = null,
+    mtu: Int? = null,
+  ) {
+    val payload = JSObject()
+      .put("stage", stage)
+      .put("status", status)
+      .put("ts", System.currentTimeMillis())
+      .put("id", id)
+      .put("name", name)
+      .put("rssi", rssi)
+      .put("detail", detail)
+      .put("count", count)
+      .put("length", length)
+      .put("mtu", mtu)
+
+    Log.i(TAG, "diag stage=$stage status=$status id=${id ?: ""} detail=${detail ?: ""}")
+    notifyListeners("diagnostic", payload, true)
+  }
+
+  private fun cancelScanTimeout() {
+    mainHandler.removeCallbacks(scanTimeoutRunnable)
+  }
+
+  private fun armScanTimeout() {
+    cancelScanTimeout()
+    mainHandler.postDelayed(scanTimeoutRunnable, SCAN_TIMEOUT_MS)
+  }
 
   private fun hasNexRingPermissions(): Boolean {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -76,11 +142,15 @@ class NexRingPlugin : Plugin() {
 
   @PluginMethod
   fun askPermissions(call: PluginCall) {
+    emitDiagnostic("permissions", "check")
+
     if (hasNexRingPermissions()) {
+      emitDiagnostic("permissions", "granted")
       call.resolve(JSObject().put("ok", true))
       return
     }
 
+    emitDiagnostic("permissions", "request")
     bridge.saveCall(call)
     requestAllPermissions(call, "permissionsCallback")
   }
@@ -88,27 +158,34 @@ class NexRingPlugin : Plugin() {
   @PermissionCallback
   private fun permissionsCallback(call: PluginCall) {
     if (hasNexRingPermissions()) {
+      emitDiagnostic("permissions", "granted")
       call.resolve(JSObject().put("ok", true))
     } else {
+      emitDiagnostic("permissions", "denied")
       call.reject("Required Bluetooth permissions not granted")
     }
   }
 
   private fun requireBleReady(call: PluginCall): BluetoothAdapter? {
     if (!hasNexRingPermissions()) {
+      emitDiagnostic("ble_ready", "blocked", detail = "permissions_missing")
       call.reject("Required Bluetooth permissions not granted")
       return null
     }
 
     val adapter = bluetoothAdapter
     if (adapter == null) {
+      emitDiagnostic("ble_ready", "blocked", detail = "adapter_unavailable")
       call.reject("Bluetooth adapter unavailable")
       return null
     }
     if (!adapter.isEnabled) {
+      emitDiagnostic("ble_ready", "blocked", detail = "bluetooth_disabled")
       call.reject("Bluetooth is disabled")
       return null
     }
+
+    emitDiagnostic("ble_ready", "ok")
     return adapter
   }
 
@@ -123,15 +200,23 @@ class NexRingPlugin : Plugin() {
     }
 
     try {
+      cancelScanTimeout()
       if (scannerActive) {
         scanner.stopScan(scanCallback)
       }
+
+      scanResultCount = 0
+      emitDiagnostic("scan", "starting")
       scanner.startScan(scanCallback)
       scannerActive = true
+      armScanTimeout()
+      emitDiagnostic("scan", "started")
       emitConnectionState("scanning")
       call.resolve(JSObject().put("ok", true))
     } catch (t: Throwable) {
+      cancelScanTimeout()
       scannerActive = false
+      emitDiagnostic("scan", "failed", detail = t.message ?: t.javaClass.simpleName)
       emitError("scan_start_failed", t.message ?: t.javaClass.simpleName)
       call.reject("Unable to start NexRing scan", t as? Exception ?: Exception(t))
     }
@@ -145,8 +230,10 @@ class NexRingPlugin : Plugin() {
     } catch (t: Throwable) {
       Log.w(TAG, "stopScan failed", t)
     } finally {
+      cancelScanTimeout()
       scannerActive = false
-      emitConnectionState("scan_stopped")
+      emitDiagnostic("scan", "stopped", count = scanResultCount)
+      emitConnectionState("scan_stopped", message = "manual:results=$scanResultCount")
     }
     call.resolve(JSObject().put("ok", true))
   }
@@ -163,7 +250,9 @@ class NexRingPlugin : Plugin() {
     }
 
     override fun onScanFailed(errorCode: Int) {
+      cancelScanTimeout()
       scannerActive = false
+      emitDiagnostic("scan", "failed", detail = "android_code=$errorCode", count = scanResultCount)
       emitError("scan_failed", "Android BLE scan failed with code=$errorCode")
       emitConnectionState("error", message = "scan_failed:$errorCode")
     }
@@ -191,6 +280,15 @@ class NexRingPlugin : Plugin() {
       payload.put("isConnectable", result.isConnectable)
     }
 
+    scanResultCount += 1
+    emitDiagnostic(
+      stage = "scan_result",
+      status = "observed",
+      id = address,
+      name = name,
+      rssi = result.rssi,
+      count = scanResultCount,
+    )
     notifyListeners("scanResult", payload, true)
   }
 
@@ -212,11 +310,14 @@ class NexRingPlugin : Plugin() {
 
     try {
       if (scannerActive) {
+        cancelScanTimeout()
         bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
         scannerActive = false
-        emitConnectionState("scan_stopped")
+        emitDiagnostic("scan", "stopped_for_connect", count = scanResultCount)
+        emitConnectionState("scan_stopped", message = "connect:results=$scanResultCount")
       }
 
+      emitDiagnostic("connect", "starting", id = id, name = requestedName)
       closeGattSilently()
       ready = false
       negotiatedMtu = null
@@ -226,6 +327,7 @@ class NexRingPlugin : Plugin() {
       emitConnectionState("connecting", id, requestedName)
 
       val device = adapter.getRemoteDevice(id)
+      emitDiagnostic("gatt", "connect_requested", id = id, name = requestedName)
       gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
       } else {
@@ -257,12 +359,15 @@ class NexRingPlugin : Plugin() {
 
       when (newState) {
         BluetoothProfile.STATE_CONNECTED -> {
+          emitDiagnostic("gatt", "connected")
           emitConnectionState("connected", connectedId, connectedName)
+          emitDiagnostic("service_discovery", "starting")
           if (!g.discoverServices()) {
             failConnection("service_discovery_start_failed", "discoverServices returned false")
           }
         }
         BluetoothProfile.STATE_DISCONNECTED -> {
+          emitDiagnostic("gatt", "disconnected", detail = "status=$status")
           val wasPending = pendingConnectCall
           pendingConnectCall = null
           ready = false
@@ -284,6 +389,7 @@ class NexRingPlugin : Plugin() {
         return
       }
 
+      emitDiagnostic("service_discovery", "complete", detail = "status=$status")
       val service = g.getService(RING_SERVICE_UUID)
       val characteristic = service?.getCharacteristic(RING_IO_UUID)
       if (service == null || characteristic == null) {
@@ -309,6 +415,11 @@ class NexRingPlugin : Plugin() {
       }
 
       ioCharacteristic = characteristic
+      emitDiagnostic(
+        "characteristic",
+        "ready",
+        detail = "service=$RING_SERVICE_UUID characteristic=$RING_IO_UUID properties=$props",
+      )
       if (!enableNotifications(g, characteristic)) {
         failConnection("notification_enable_failed", "Unable to enable 66FE notifications")
       }
@@ -317,6 +428,7 @@ class NexRingPlugin : Plugin() {
     override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
       if (gatt !== g || descriptor.uuid != CCC_UUID || !pendingNotificationEnable) return
       pendingNotificationEnable = false
+      emitDiagnostic("ccc", if (status == BluetoothGatt.GATT_SUCCESS) "written" else "failed", detail = "status=$status")
       if (status != BluetoothGatt.GATT_SUCCESS) {
         failConnection("notification_descriptor_failed", "status=$status")
         return
@@ -340,6 +452,7 @@ class NexRingPlugin : Plugin() {
       if (gatt !== g) return
       if (status == BluetoothGatt.GATT_SUCCESS) {
         negotiatedMtu = mtu
+        emitDiagnostic("mtu", "changed", mtu = mtu)
         notifyListeners("mtu", JSObject().put("mtu", mtu), true)
       } else {
         emitError("mtu_change_failed", "status=$status requested/actual=$mtu")
@@ -372,6 +485,7 @@ class NexRingPlugin : Plugin() {
     val canIndicate = props and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
     if (!canNotify && !canIndicate) return false
 
+    emitDiagnostic("notifications", "enabling")
     if (!targetGatt.setCharacteristicNotification(characteristic, true)) return false
     val descriptor = characteristic.getDescriptor(CCC_UUID) ?: return false
     val value = if (canNotify) {
@@ -381,6 +495,7 @@ class NexRingPlugin : Plugin() {
     }
 
     pendingNotificationEnable = true
+    emitDiagnostic("ccc", "write_requested")
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       targetGatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
     } else {
@@ -425,6 +540,7 @@ class NexRingPlugin : Plugin() {
     }
 
     val requested = (call.getInt("mtu") ?: DEFAULT_MTU).coerceIn(MIN_MTU, MAX_MTU)
+    emitDiagnostic("mtu", "requesting", mtu = requested)
     try {
       if (!targetGatt.requestMtu(requested)) {
         call.reject("NexRing MTU request was rejected")
@@ -518,6 +634,13 @@ class NexRingPlugin : Plugin() {
         return
       }
 
+      emitDiagnostic(
+        stage = "write",
+        status = "accepted",
+        detail = "writeType=$writeType",
+        length = payload.size,
+        mtu = negotiatedMtu,
+      )
       call.resolve(
         JSObject()
           .put("ok", true)
@@ -548,6 +671,8 @@ class NexRingPlugin : Plugin() {
   @SuppressLint("MissingPermission")
   @PluginMethod
   fun disconnect(call: PluginCall) {
+    cancelScanTimeout()
+    emitDiagnostic("disconnect", "requested")
     val targetGatt = gatt
     if (targetGatt == null) {
       clearConnectionState()
@@ -569,6 +694,7 @@ class NexRingPlugin : Plugin() {
 
   private fun emitNotify(characteristic: BluetoothGattCharacteristic, bytes: ByteArray) {
     if (characteristic.uuid != RING_IO_UUID || bytes.isEmpty()) return
+    emitDiagnostic("notify", "received", length = bytes.size)
     val payload = JSObject()
       .put("base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
       .put("hex", bytes.joinToString("") { "%02x".format(Locale.US, it.toInt() and 0xff) })
@@ -579,6 +705,7 @@ class NexRingPlugin : Plugin() {
   }
 
   private fun emitReady() {
+    emitDiagnostic("ready", "complete", mtu = negotiatedMtu)
     notifyListeners(
       "ready",
       JSObject()
@@ -608,6 +735,7 @@ class NexRingPlugin : Plugin() {
   }
 
   private fun emitError(code: String, message: String) {
+    emitDiagnostic("error", "failed", detail = "$code:$message")
     Log.e(TAG, "$code: $message")
     notifyListeners("error", JSObject().put("code", code).put("message", message), true)
   }
@@ -639,3 +767,4 @@ class NexRingPlugin : Plugin() {
     connectedName = null
   }
 }
+

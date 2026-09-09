@@ -17,7 +17,7 @@ export function Card({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+    <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
       <div className="mb-3">
         <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
         {subtitle ? <p className="mt-1 text-xs text-slate-500">{subtitle}</p> : null}
@@ -41,7 +41,7 @@ export function ActionButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      className="inline-flex min-h-[44px] w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-center text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
     >
       {children}
     </button>
@@ -70,9 +70,9 @@ export function StatusPill({
 
 export function InfoTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+    <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-3">
       <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">{label}</div>
-      <div className="mt-1 break-all text-sm font-semibold text-slate-900">{value || '—'}</div>
+      <div className="mt-1 break-words text-sm font-semibold text-slate-900">{value || '—'}</div>
     </div>
   );
 }
@@ -168,7 +168,7 @@ export function MiniStatGrid({
   stats: Array<{ label: string; value: string; unit: string }>;
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid grid-cols-2 gap-2 sm:gap-3">
       {stats.map((s) => (
         <MiniStat
           key={s.label}
@@ -255,7 +255,7 @@ export function LineHealthChart({
   function handleMove(clientX: number) {
     if (!svgRef.current || normalized.length === 0) return;
     const rect = svgRef.current.getBoundingClientRect();
-    const x = clientX - rect.left;
+    const x = rect.width > 0 ? ((clientX - rect.left) / rect.width) * width : 0;
     let nearest = 0;
     let best = Infinity;
     for (let i = 0; i < normalized.length; i += 1) {
@@ -273,7 +273,7 @@ export function LineHealthChart({
       <svg
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
-        className="h-52 w-full"
+        className="h-40 w-full touch-pan-y sm:h-52"
         onMouseLeave={() => onHoverIndexChange(null)}
         onMouseMove={(e) => handleMove(e.clientX)}
         onTouchMove={(e) => {
@@ -342,3 +342,4 @@ export function LineHealthChart({
     </div>
   );
 }
+

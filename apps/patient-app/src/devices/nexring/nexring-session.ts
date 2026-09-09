@@ -37,6 +37,12 @@ import {
   isHistoryPacket,
 } from './nexring-history';
 import { NexRingReportStore } from './nexring-report-store';
+import { resolveNexRingTransport } from './nexring-transport-policy';
+import {
+  detectNexRingCapabilities,
+  type NexRingCapabilities,
+  type Sr09SportMode,
+} from './nexring-capabilities';
 import { NexRingWebTransport } from './nexring-web';
 import {
   NexRingWebCommands,
@@ -150,6 +156,11 @@ export class NexRingSession {
 
   private historyCalcInFlight = false;
   private lastHistoryCalcTs: number | null = null;
+  private legacyHistoryRows: any[] = [];
+  private legacySleepPeriods: any[] = [];
+  private historyPipelineTimer: ReturnType<typeof setTimeout> | null = null;
+  private deviceInfo: RingDeviceInfo | null = null;
+  private scanResultCount = 0;
 
   constructor(callbacks: RingSessionCallbacks = {}) {
     this.callbacks = callbacks;
@@ -399,7 +410,7 @@ export class NexRingSession {
     this.pushHydrationSnapshot();
   }
 
-  private invokeSdkNoArgs(methodNames: string[]): unknown {
+  private invokeSdk(methodNames: string[], args: unknown[] = []): unknown {
     if (!this.sdk) return undefined;
 
     for (const name of methodNames) {
@@ -407,7 +418,7 @@ export class NexRingSession {
       if (typeof fn !== 'function') continue;
 
       try {
-        return Reflect.apply(fn, this.sdk, []);
+        return Reflect.apply(fn, this.sdk, args);
       } catch (err) {
         this.emitTrace({
           direction: 'sdk',
@@ -416,6 +427,7 @@ export class NexRingSession {
           ok: false,
           parser: 'sdk_calculation',
           message: err instanceof Error ? err.message : String(err),
+          raw: { argumentCount: args.length },
         });
       }
     }
@@ -423,249 +435,344 @@ export class NexRingSession {
     return undefined;
   }
 
-  private maybeEmitScalarHistoryHealth(
+  private collectLegacyHistoryRows(raw: unknown): any[] {
+    const out: any[] = [];
+    const seen = new Set<unknown>();
+
+    const visit = (value: any, depth = 0) => {
+      if (value == null || depth > 6) return;
+      if (typeof value !== 'object') return;
+      if (seen.has(value)) return;
+      seen.add(value);
+
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item, depth + 1);
+        return;
+      }
+
+      const rowLike = [
+        'ts', 'timestamp', 'timeStamp', 'time', 'heartRate', 'hr', 'ox',
+        'spo2', 'step', 'steps', 'temperature', 'temp', 'sportMode',
+      ].some((key) => key in value);
+
+      if (rowLike) out.push(value);
+
+      for (const key of [
+        'data', 'list', 'rows', 'records', 'record', 'payload', 'history',
+        'historyData', 'historyList', 'result', 'results',
+      ]) {
+        if (key in value) visit(value[key], depth + 1);
+      }
+    };
+
+    visit(raw);
+    return out;
+  }
+
+  private collectSleepPeriods(raw: unknown): any[] {
+    const out: any[] = [];
+    const seen = new Set<unknown>();
+
+    const visit = (value: any, depth = 0) => {
+      if (value == null || depth > 6 || typeof value !== 'object') return;
+      if (seen.has(value)) return;
+      seen.add(value);
+
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item, depth + 1);
+        return;
+      }
+
+      const hasPeriod =
+        value.sleepTimePeriod ||
+        Array.isArray(value.stagingList) ||
+        ((value.startTime ?? value.startTimeStamp ?? value.startTs) != null &&
+          (value.endTime ?? value.endTimeStamp ?? value.endTs) != null);
+
+      if (hasPeriod) out.push(value);
+
+      for (const key of [
+        'data', 'list', 'result', 'results', 'sleep', 'sleepData',
+        'sleepList', 'sessions', 'sleepSessions',
+      ]) {
+        if (key in value) visit(value[key], depth + 1);
+      }
+    };
+
+    visit(raw);
+    return out;
+  }
+
+  private appendLegacyHistoryRows(raw: unknown) {
+    const incoming = this.collectLegacyHistoryRows(raw);
+    if (incoming.length === 0) return;
+
+    const keyed = new Map<string, any>();
+    for (const row of [...this.legacyHistoryRows, ...incoming]) {
+      const key = String(
+        row?.ts ?? row?.timestamp ?? row?.timeStamp ?? row?.time ?? JSON.stringify(row),
+      );
+      keyed.set(key, row);
+    }
+    this.legacyHistoryRows = Array.from(keyed.values()).slice(-12000);
+  }
+
+  private numbersForKeys(raw: unknown, keys: string[], depth = 0): number[] {
+    if (raw == null || depth > 6) return [];
+    if (Array.isArray(raw)) {
+      return raw.flatMap((item) => this.numbersForKeys(item, keys, depth + 1));
+    }
+    if (typeof raw !== 'object') return [];
+
+    const obj = raw as Record<string, unknown>;
+    const direct: number[] = [];
+    for (const key of keys) {
+      const n = Number(obj[key]);
+      if (Number.isFinite(n)) direct.push(n);
+    }
+    for (const value of Object.values(obj)) {
+      if (value && typeof value === 'object') {
+        direct.push(...this.numbersForKeys(value, keys, depth + 1));
+      }
+    }
+    return direct;
+  }
+
+  private retainSdkHealthValue(
     label: string,
-    value: unknown,
-    field: keyof RingHealthMetric,
+    raw: unknown,
+    keys: string[],
+    field: 'sleepAvgHr' | 'nightSpo2' | 'rr',
+    range: [number, number],
   ) {
-    const n = scalarNumber(value);
-    if (typeof n !== 'number') return;
+    const values = this.numbersForKeys(raw, keys).filter(
+      (n) => n >= range[0] && n <= range[1],
+    );
+    if (values.length === 0) return;
+    const value = values[values.length - 1];
 
     const metric: RingMetric = {
       kind: 'health',
       ts: Date.now(),
-      [field]: n,
       sourceMode: 'sdk_calculated',
-      ...(field === 'spo2' ? { nightSpo2: n } : {}),
-      ...(field === 'rr' ? { rr: n } : {}),
-      ...(field === 'rhr' ? { rhr: n } : {}),
-    } as RingMetric;
-
+      ...(field === 'sleepAvgHr' ? { sleepAvgHr: value } : {}),
+      ...(field === 'nightSpo2' ? { nightSpo2: value, spo2: value } : {}),
+      ...(field === 'rr' ? { rr: value } : {}),
+    };
     this.retainMetric(metric, 'history_data', 'history');
-
     this.emitTrace({
       direction: 'sdk',
       label,
       family: 'history_data',
       ok: true,
       parser: 'sdk_calculation',
-      message: `${field} derived from SDK calculator`,
-      raw: { value: n },
+      message: `${field} derived from vendor calculator using retained legacy history`,
+      raw: { value },
     });
   }
 
-  private retainSleepMetricsFromAny(
-    label: string,
-    raw: unknown,
-    family: string = 'sleep_history',
-  ) {
-    if (raw == null) return 0;
-
-    const sleepMetrics = bestMetricsFromListener('sleep', raw).filter(
-      (metric): metric is Extract<RingMetric, { kind: 'sleep' }> => metric.kind === 'sleep',
-    );
-
-    for (const metric of sleepMetrics) {
-      this.retainMetric(metric, family, 'history');
-    }
-
-    this.emitTrace({
-      direction: 'sdk',
-      label,
-      family,
-      ok: true,
-      parser: 'sdk_calculation',
-      message: `${sleepMetrics.length} sleep metrics retained`,
-      raw: {
-        metricCount: sleepMetrics.length,
-        valuePreview:
-          typeof raw === 'object' && raw
-            ? Array.isArray(raw)
-              ? { type: 'array', length: raw.length }
-              : {
-                  type: 'object',
-                  keys: Object.keys(raw as Record<string, unknown>).slice(0, 30),
-                  hasStagingList: Array.isArray((raw as any)?.stagingList),
-                  hasSleepList: Array.isArray((raw as any)?.sleepList),
-                  hasSessions: Array.isArray((raw as any)?.sessions),
-                  startTimeStamp: (raw as any)?.startTimeStamp,
-                  endTimeStamp: (raw as any)?.endTimeStamp,
-                  duration: (raw as any)?.duration,
-                }
-            : raw,
-      },
-    });
-
-    return sleepMetrics.length;
+  private scheduleLegacyHistoryPipeline(reason: string) {
+    if (this.historyPipelineTimer) clearTimeout(this.historyPipelineTimer);
+    this.historyPipelineTimer = setTimeout(() => {
+      this.historyPipelineTimer = null;
+      this.runLegacyHistoryPipeline(reason);
+    }, 900);
   }
 
-  private maybeRunHistoryCalculators(reason: string) {
-    if (!this.sdk) return;
-    if (this.historyCalcInFlight) return;
+  private runLegacyHistoryPipeline(reason: string) {
+    if (!this.sdk || this.historyCalcInFlight) return;
+    if (this.legacyHistoryRows.length === 0) return;
 
     const now = Date.now();
-    if (this.lastHistoryCalcTs && now - this.lastHistoryCalcTs < 4000) return;
-
-    const historyState = this.history.getState();
-    if ((historyState.receivedMetrics ?? 0) < 50) return;
+    if (this.lastHistoryCalcTs && now - this.lastHistoryCalcTs < 1200) return;
 
     this.historyCalcInFlight = true;
     this.lastHistoryCalcTs = now;
 
     try {
-      const validHistory = this.invokeSdkNoArgs(['ObtainValidHistoricalData']);
-      if (validHistory != null) {
-        const metrics = bestMetricsFromListener('history_row', validHistory);
-        for (const metric of metrics) {
-          this.retainMetric(metric, 'history_data', 'history');
-        }
-
-        this.emitTrace({
-          direction: 'sdk',
-          label: 'ObtainValidHistoricalData',
-          family: 'history_data',
-          ok: true,
-          parser: 'sdk_calculation',
-          message: `history calculators invoked (${reason})`,
-          raw: {
-            metricCount: metrics.length,
-          },
-        });
-      }
-
-      const processed = this.invokeSdkNoArgs(['processHistoryData']);
-      if (processed != null) {
-        const metrics = bestMetricsFromListener('history_row', processed);
-        for (const metric of metrics) {
-          this.retainMetric(metric, 'history_data', 'history');
-        }
-
-        const summary = normalizeDailySummary(processed);
-        this.reportStore.ingestDailySummary(summary);
-        this.pushHydrationSnapshot();
-
-        this.emitTrace({
-          direction: 'sdk',
-          label: 'processHistoryData',
-          family: 'history_data',
-          ok: true,
-          parser: 'sdk_calculation',
-          message: `processHistoryData returned`,
-          raw: {
-            metricCount: metrics.length,
-            summary,
-          },
-        });
-      }
-
-      let retainedSleepMetrics = 0;
+      const historyRows = [...this.legacyHistoryRows];
+      const processed = this.invokeSdk(['processHistoryData'], [historyRows]);
+      let sleepPeriods = this.collectSleepPeriods(processed);
 
       if (processed != null) {
-        retainedSleepMetrics += this.retainSleepMetricsFromAny(
-          'processHistoryData.sleep',
-          processed,
-          'sleep_history',
-        );
+        for (const metric of bestMetricsFromListener('sleep', processed)) {
+          this.retainMetric(metric, 'sleep_history', 'history');
+        }
       }
 
-      if (retainedSleepMetrics === 0) {
-        const sleepTime = this.invokeSdkNoArgs(['calcSleepTime']);
+      if (sleepPeriods.length === 0) {
+        const sleepTime = this.invokeSdk(['calcSleepTime'], [historyRows]);
+        sleepPeriods = this.collectSleepPeriods(sleepTime);
         if (sleepTime != null) {
-          retainedSleepMetrics += this.retainSleepMetricsFromAny(
-            'calcSleepTime',
-            sleepTime,
-            'sleep_history',
-          );
-
-          this.emitTrace({
-            direction: 'sdk',
-            label: 'calcSleepTime',
-            family: 'sleep_history',
-            ok: true,
-            parser: 'sdk_calculation',
-            message: 'sleep calculator returned',
-            raw: {
-              retainedSleepMetrics,
-              sleepTime,
-            },
-          });
+          for (const metric of bestMetricsFromListener('sleep', sleepTime)) {
+            this.retainMetric(metric, 'sleep_history', 'history');
+          }
         }
       }
 
-      this.maybeEmitScalarHistoryHealth(
-        'calcRestingHeartRate',
-        this.invokeSdkNoArgs(['calcRestingHeartRate']),
-        'rhr',
-      );
+      this.legacySleepPeriods = sleepPeriods;
 
-      this.maybeEmitScalarHistoryHealth(
-        'calcOxygenSaturation',
-        this.invokeSdkNoArgs(['calcOxygenSaturation']),
-        'spo2',
-      );
+      let validHistory: unknown = historyRows;
+      if (sleepPeriods.length > 0) {
+        const filtered = this.invokeSdk(
+          ['ObtainValidHistoricalData'],
+          [sleepPeriods, historyRows],
+        );
+        if (filtered != null) validHistory = filtered;
+      }
 
-      this.maybeEmitScalarHistoryHealth(
-        'calcRespiratoryRate',
-        this.invokeSdkNoArgs(['calcRespiratoryRate']),
-        'rr',
-      );
+      const validMetrics = bestMetricsFromListener('history_row', validHistory);
+      for (const metric of validMetrics) {
+        this.retainMetric(metric, 'history_data', 'history');
+      }
 
-      const sleepAvgHr = this.invokeSdkNoArgs(['calcSleepAverageHeartRate']);
-      const avgHr = scalarNumber(sleepAvgHr);
-      if (typeof avgHr === 'number') {
-        this.retainMetric(
-          {
-            kind: 'health',
-            ts: Date.now(),
-            sleepAvgHr: avgHr,
-            sourceMode: 'sdk_calculated',
-          } as RingMetric,
-          'history_data',
-          'history',
+      if (sleepPeriods.length > 0) {
+        const oxygen = this.invokeSdk(
+          ['calcOxygenSaturation'],
+          [sleepPeriods, historyRows],
+        );
+        this.retainSdkHealthValue(
+          'calcOxygenSaturation',
+          oxygen,
+          ['oxygen', 'spo2', 'bloodOxygen'],
+          'nightSpo2',
+          [50, 100],
         );
 
-        this.emitTrace({
-          direction: 'sdk',
-          label: 'calcSleepAverageHeartRate',
-          family: 'history_data',
-          ok: true,
-          parser: 'sdk_calculation',
-          message: 'sleep average heart rate calculated',
-          raw: { value: avgHr },
-        });
+        const sleepAverageHr = this.invokeSdk(
+          ['calcSleepAverageHeartRate'],
+          [sleepPeriods, historyRows],
+        );
+        this.retainSdkHealthValue(
+          'calcSleepAverageHeartRate',
+          sleepAverageHr,
+          ['sleepAverageHeartRate', 'averageHeartRate', 'avgHr', 'data'],
+          'sleepAvgHr',
+          [20, 250],
+        );
+
+        const respiratory = this.invokeSdk(
+          ['calcRespiratoryRate'],
+          [sleepPeriods, historyRows, -1],
+        );
+        this.retainSdkHealthValue(
+          'calcRespiratoryRate',
+          respiratory,
+          ['respiratoryRate', 'rr'],
+          'rr',
+          [4, 60],
+        );
       }
 
-      if (processed != null) {
-        const sleepPreviewCount = bestMetricsFromListener('sleep', processed).length;
-        if (sleepPreviewCount === 0) {
-          this.emitTrace({
-            direction: 'sdk',
-            label: 'sleep_stage_gap',
-            family: 'sleep_history',
-            ok: true,
-            parser: 'sdk_calculation',
-            message: 'processed history did not yield sleep stage metrics',
-            raw: {
-              processedType: Array.isArray(processed) ? 'array' : typeof processed,
-            },
-          });
-        }
-      }
+      this.emitTrace({
+        direction: 'sdk',
+        label: 'legacy_history_pipeline',
+        family: 'history_data',
+        ok: true,
+        parser: 'sdk_calculation',
+        message: `legacy history pipeline completed (${reason})`,
+        raw: {
+          historyRows: historyRows.length,
+          sleepPeriods: sleepPeriods.length,
+          retainedMetrics: validMetrics.length,
+          restingHeartRate: 'not_calculated_without_vendor_interval_authority',
+        },
+      });
+      this.pushHydrationSnapshot();
     } finally {
       this.historyCalcInFlight = false;
     }
   }
 
+  getCapabilities(): NexRingCapabilities {
+    return detectNexRingCapabilities(this.state.connectedDevice, this.deviceInfo);
+  }
+
+  async startSr09Sport(options: {
+    mode: Sr09SportMode;
+    timeInterval: number;
+    duration: number;
+  }) {
+    await this.init();
+    const capabilities = this.getCapabilities();
+    if (!capabilities.legacySport) {
+      throw new Error(`SR09/SR23 legacy Sport Mode is unavailable for ${capabilities.model}`);
+    }
+    if (!this.webCommands) throw new Error('NexRing command transport is not ready');
+
+    const result = await this.webCommands.sendSr09SportStart(options);
+    this.recordSentPackets([result]);
+    this.emitCommandResult({
+      ts: Date.now(),
+      ok: true,
+      code: 'sr09_sport_start_sent',
+      message: 'Vendor Sport Mode start command sent. Recording is not yet confirmed by history.',
+      raw: { ...options, model: capabilities.model },
+    });
+  }
+
+  async stopSr09Sport() {
+    await this.init();
+    const capabilities = this.getCapabilities();
+    if (!capabilities.legacySport) {
+      throw new Error(`SR09/SR23 legacy Sport Mode is unavailable for ${capabilities.model}`);
+    }
+    if (!this.webCommands) throw new Error('NexRing command transport is not ready');
+
+    const result = await this.webCommands.sendSr09SportStop();
+    this.recordSentPackets([result]);
+    this.emitCommandResult({
+      ts: Date.now(),
+      ok: true,
+      code: 'sr09_sport_stop_sent',
+      message: 'Vendor Sport Mode stop command sent. Refreshing real legacy history for confirmation.',
+      raw: { model: capabilities.model },
+    });
+
+    await this.delay(350);
+    await this.requestHistoricalCount();
+    await this.delay(350);
+    await this.requestHistoricalData();
+  }
+
   async init() {
-    if (this.sdk) return;
+    if (this.transport) return;
 
-    this.sdk = await loadNexRingSdk();
-    console.log('[NexRing SDK summary]', getSdkDebugSummary(this.sdk));
-    console.log('[NexRing SendCmd map]', getSendCmdMap(this.sdk));
+    if (!this.sdk) {
+      this.sdk = await loadNexRingSdk();
+      console.log('[NexRing SDK summary]', getSdkDebugSummary(this.sdk));
+      console.log('[NexRing SendCmd map]', getSendCmdMap(this.sdk));
+      this.bindSdkListeners();
+    }
 
-    this.bindSdkListeners();
+    let transportKind: ReturnType<typeof resolveNexRingTransport>;
+    try {
+      transportKind = resolveNexRingTransport({
+        platform: Capacitor.getPlatform(),
+        isNativePlatform: Capacitor.isNativePlatform(),
+        nativePluginAvailable: Capacitor.isPluginAvailable('NexRing'),
+      });
+    } catch (err: any) {
+      const message = err?.message || String(err);
+      this.emitError(message);
+      throw err;
+    }
 
-    if (Capacitor.getPlatform() === 'web') {
+    this.emitTrace({
+      direction: 'sdk',
+      label: 'transport_selected',
+      family: 'transport',
+      ok: true,
+      parser: 'session',
+      message: transportKind,
+      raw: {
+        platform: Capacitor.getPlatform(),
+        native: Capacitor.isNativePlatform(),
+        nativePluginAvailable: Capacitor.isPluginAvailable('NexRing'),
+      },
+    });
+
+    if (transportKind === 'web') {
       this.isWebTransport = true;
       this.transport = new NexRingWebTransport({
         onScanResult: (e) => this.onScanResult(e as NexRingScanResult),
@@ -675,10 +782,17 @@ export class NexRingSession {
             e.state === 'scan_stopped' ||
             e.state === 'connecting' ||
             e.state === 'connected' ||
+            e.state === 'ready' ||
             e.state === 'disconnecting' ||
-            e.state === 'disconnected'
+            e.state === 'disconnected' ||
+            e.state === 'error'
               ? e.state
               : 'idle';
+
+          const noResults =
+            phase === 'scan_stopped' &&
+            this.scanResultCount === 0 &&
+            /no_results/i.test(String((e as any).message || ''));
 
           this.patchState({
             phase: phase === 'scan_stopped' ? 'idle' : phase,
@@ -686,7 +800,11 @@ export class NexRingSession {
               e.id && this.devices.has(e.id)
                 ? this.devices.get(e.id)!
                 : this.state.connectedDevice,
-            lastError: null,
+            lastError: noResults
+              ? 'No NexRing found. Keep the ring nearby and awake, then try again.'
+              : phase === 'error'
+                ? String((e as any).message || 'NexRing transport error')
+                : null,
           });
 
           this.emitTrace({
@@ -820,7 +938,7 @@ export class NexRingSession {
                 packet.family === 'sleep_history' ||
                 packet.family === 'algorithm_history'
               ) {
-                this.maybeRunHistoryCalculators(`packet:${packet.family}`);
+                this.scheduleLegacyHistoryPipeline(`packet:${packet.family}`);
               }
             }
 
@@ -910,10 +1028,17 @@ export class NexRingSession {
           e.state === 'scan_stopped' ||
           e.state === 'connecting' ||
           e.state === 'connected' ||
+          e.state === 'ready' ||
           e.state === 'disconnecting' ||
-          e.state === 'disconnected'
+          e.state === 'disconnected' ||
+          e.state === 'error'
             ? e.state
             : 'idle';
+
+        const noResults =
+          phase === 'scan_stopped' &&
+          this.scanResultCount === 0 &&
+          /no_results/i.test(String(e.message || ''));
 
         this.patchState({
           phase: phase === 'scan_stopped' ? 'idle' : phase,
@@ -921,7 +1046,11 @@ export class NexRingSession {
             e.id && this.devices.has(e.id)
               ? this.devices.get(e.id)!
               : this.state.connectedDevice,
-          lastError: null,
+          lastError: noResults
+            ? 'No NexRing found. Keep the ring nearby and awake, then try again.'
+            : phase === 'error'
+              ? String(e.message || 'NexRing transport error')
+              : null,
         });
       }),
       await NexRing.addListener('ready', async () => {
@@ -992,6 +1121,14 @@ export class NexRingSession {
   }
 
   async destroy() {
+    try {
+      await this.transport?.stopScan();
+    } catch {}
+
+    try {
+      await this.transport?.disconnect();
+    } catch {}
+
     for (const h of this.listenerHandles) {
       try {
         await h.remove();
@@ -1005,6 +1142,12 @@ export class NexRingSession {
       } catch {}
     }
     this.sdkUnsubscribers = [];
+    if (this.historyPipelineTimer) clearTimeout(this.historyPipelineTimer);
+    this.historyPipelineTimer = null;
+    this.legacyHistoryRows = [];
+    this.legacySleepPeriods = [];
+    this.deviceInfo = null;
+    this.transport = null;
   }
 
   async askPermissions() {
@@ -1014,7 +1157,9 @@ export class NexRingSession {
 
   async startScan() {
     await this.init();
-    this.patchState({ phase: 'scanning', lastError: null });
+    this.scanResultCount = 0;
+    this.devices.clear();
+    this.patchState({ lastError: null });
 
     try {
       const result = await this.transport?.startScan();
@@ -1022,13 +1167,13 @@ export class NexRingSession {
       if (result && result.ok === false) {
         const message = result.message || 'Scan failed';
         this.patchState({ phase: 'idle', lastError: message });
-        this.emitError(message);
+        this.callbacks.onError?.(message);
         return;
       }
     } catch (err: any) {
       const message = err?.message || String(err);
       this.patchState({ phase: 'idle', lastError: message });
-      this.emitError(message);
+      this.callbacks.onError?.(message);
     }
   }
 
@@ -1052,6 +1197,11 @@ export class NexRingSession {
       this.ledgerSeq = 1;
       this.lastHistoryCalcTs = null;
       this.historyCalcInFlight = false;
+      this.legacyHistoryRows = [];
+      this.legacySleepPeriods = [];
+      this.deviceInfo = null;
+      if (this.historyPipelineTimer) clearTimeout(this.historyPipelineTimer);
+      this.historyPipelineTimer = null;
       this.resetPassiveModeGuards();
       this.pushHydrationSnapshot();
 
@@ -1530,7 +1680,7 @@ export class NexRingSession {
       }
 
       if (source === 'history') {
-        this.maybeRunHistoryCalculators(`listener:${sdkLabel}`);
+        this.scheduleLegacyHistoryPipeline(`listener:${sdkLabel}`);
       }
     };
 
@@ -1585,7 +1735,9 @@ export class NexRingSession {
 
     add(
       maybeRegisterListener(this.sdk, ['registerHistoricalDataListener'], (raw: any) => {
+        this.appendLegacyHistoryRows(raw);
         emitMetrics(bestMetricsFromListener('history_row', raw), 'history', 'registerHistoricalDataListener', raw, 'history_data');
+        this.scheduleLegacyHistoryPipeline('listener:registerHistoricalDataListener');
       }),
     );
 
@@ -1751,6 +1903,7 @@ export class NexRingSession {
         ['registerDeviceInfo1Listener', 'registerDeviceInfo2Listener', 'registerDeviceInfo5Listener'],
         (raw: any) => {
           const info: RingDeviceInfo = normalizeDeviceInfo(raw);
+          this.deviceInfo = info;
           this.callbacks.onDeviceInfo?.(info);
         },
       ),
@@ -1758,6 +1911,8 @@ export class NexRingSession {
   }
 
   private onScanResult(e: NexRingScanResult | any) {
+    this.scanResultCount += 1;
+
     const device: RingScanDevice = {
       id: e.id || e.mac || '',
       mac: e.mac || e.id,
@@ -1810,3 +1965,4 @@ export class NexRingSession {
     this.callbacks.onState?.(this.state);
   }
 }
+

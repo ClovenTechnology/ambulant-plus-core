@@ -5,6 +5,7 @@ import {
   getExactCommandValue,
 } from './nexring-sdk';
 import { buildNexRingCommandPacket } from './nexring-protocol';
+import { buildSr09SportParameters, type Sr09SportMode } from './nexring-capabilities';
 
 type Writer = (bytes: Uint8Array) => Promise<void>;
 
@@ -44,7 +45,7 @@ export class NexRingWebCommands {
   private async send(
     label: string,
     candidates: string[],
-    payload: number[] = [],
+    payload: unknown = [],
   ): Promise<SentPacketResult> {
     const cmd = requireCommand(this.sdk, candidates, label);
     const packet = buildNexRingCommandPacket(this.sdk, cmd, payload);
@@ -142,6 +143,28 @@ export class NexRingWebCommands {
 
   async sendExercise(payload: number[] = []) {
     return this.send('SET_EXERCISE', ['SET_EXERCISE'], payload);
+  }
+
+  async sendSr09SportStart(options: {
+    mode: Sr09SportMode;
+    timeInterval: number;
+    duration: number;
+  }) {
+    const payload = buildSr09SportParameters({ switch: 1, ...options });
+    return this.send(
+      'SetSportModeParameters',
+      ['SetSportModeParameters'],
+      payload,
+    );
+  }
+
+  async sendSr09SportStop() {
+    const payload = buildSr09SportParameters({ switch: 0 });
+    return this.send(
+      'SetSportModeParameters',
+      ['SetSportModeParameters'],
+      payload,
+    );
   }
 
   async sendMeasurementTiming(payload: number[] = []) {

@@ -56,6 +56,8 @@ export type RingSleepMetric = {
   startTs?: number;
   endTs?: number;
   totalMinutes?: number;
+  asleepMinutes?: number;
+  timeInBedMinutes?: number;
   sourceMode?: 'history' | 'sdk_calculated';
 };
 
@@ -153,6 +155,8 @@ export type RingReportSnapshot = {
     startTs: number;
     endTs: number;
     totalMinutes: number;
+    asleepMinutes?: number;
+    timeInBedMinutes?: number;
     score?: number;
     stages: {
       awake?: number;

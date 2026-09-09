@@ -46,6 +46,19 @@ export type NexRingErrorEvent = {
   message: string;
 };
 
+export type NexRingDiagnosticEvent = {
+  stage: string;
+  status: string;
+  ts: number;
+  id?: string | null;
+  name?: string | null;
+  rssi?: number | null;
+  detail?: string | null;
+  count?: number | null;
+  length?: number | null;
+  mtu?: number | null;
+};
+
 export type NexRingLegacyEvent =
   | { type: 'hr'; hr: number }
   | { type: 'spo2'; spo2: number }
@@ -116,9 +129,15 @@ export type NexRingPlugin = {
   ): Promise<NexRingPluginListenerHandle>;
 
   addListener(
+    event: 'diagnostic',
+    cb: (event: NexRingDiagnosticEvent) => void
+  ): Promise<NexRingPluginListenerHandle>;
+
+  addListener(
     event: 'hr' | 'spo2' | 'temp' | 'hrv' | 'battery' | 'telemetry',
     cb: (event: NexRingLegacyEvent) => void
   ): Promise<NexRingPluginListenerHandle>;
 };
 
 export const NexRing = registerPlugin<NexRingPlugin>('NexRing');
+

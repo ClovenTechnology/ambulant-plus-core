@@ -11,6 +11,7 @@ import {
   readinessNarrative,
   sleepNarrative,
   sleepTotalFromStages,
+  sleepTimeInBedFromStages,
   formatClock,
   formatSigned,
 } from '@/src/devices/nexring/nexring-view-model';
@@ -27,14 +28,77 @@ export function NexRingInsights({
   stressHistory,
   tempHistory,
   sleepSessions,
+  compact = false,
 }: {
   metrics: Metrics;
   stressHistory: StressPoint[];
   tempHistory: TempPoint[];
   sleepSessions: SleepSession[];
+  compact?: boolean;
 }) {
+  const dailyOverview = (
+    <Card title="Daily overview">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3">
+        <MetricCard label="Steps" value={num(metrics.steps)} unit="" tone="emerald" />
+        <MetricCard label="Night SpO₂" value={num(metrics.nightSpo2 ?? metrics.spo2)} unit="%" tone="cyan" />
+        <MetricCard label="Sleep avg HR" value={num(metrics.sleepAvgHr)} unit="bpm" tone="orange" />
+        <MetricCard label="Sleep respiratory" value={num(metrics.historyRr ?? metrics.rr)} unit="/min" tone="violet" />
+      </div>
+    </Card>
+  );
+
+  if (compact) {
+    return (
+      <div className="min-w-0 space-y-4">
+        {dailyOverview}
+
+        <details className="group min-w-0 rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <summary className="flex min-h-[48px] cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-900">
+            Recovery, trends and sleep
+            <span className="text-xs font-medium text-slate-500 group-open:hidden">Show</span>
+            <span className="hidden text-xs font-medium text-slate-500 group-open:inline">Hide</span>
+          </summary>
+
+          <div className="space-y-4 border-t border-slate-100 p-3 sm:p-4">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card title="Recovery summary">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <SummaryPanel
+                    title="Recovery readiness"
+                    value={num(metrics.readiness)}
+                    suffix="/100"
+                    blurb={readinessNarrative(metrics.readiness)}
+                  />
+                  <SummaryPanel
+                    title="Sleep quality"
+                    value={num(metrics.sleepScore)}
+                    suffix="/100"
+                    blurb={sleepNarrative(metrics.sleepScore, metrics.readiness)}
+                  />
+                </div>
+              </Card>
+
+              <Card title="Sleep sessions">
+                <SleepSessionsPanel sessions={sleepSessions} fallbackMetrics={metrics} />
+              </Card>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card title="Daytime stress trend">
+                <StressTrendChart points={stressHistory} current={metrics.stress} />
+              </Card>
+              <Card title="Temperature deviation">
+                <TemperatureDeviationChart points={tempHistory} current={metrics.tempC} />
+              </Card>
+            </div>
+          </div>
+        </details>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Daytime stress trend" subtitle="Trend surface — this should not be represented as only a static tile.">
           <StressTrendChart points={stressHistory} current={metrics.stress} />
@@ -46,14 +110,7 @@ export function NexRingInsights({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Daily overview">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <MetricCard label="Steps" value={num(metrics.steps)} unit="" tone="emerald" />
-            <MetricCard label="Calories" value={num(metrics.calories)} unit="kcal" tone="orange" />
-            <MetricCard label="Night SpO₂" value={num(metrics.spo2)} unit="%" tone="cyan" />
-            <MetricCard label="Sleep respiratory rate" value={num(metrics.rr)} unit="/min" tone="violet" />
-          </div>
-        </Card>
+        {dailyOverview}
 
         <Card title="Recovery summary">
           <div className="grid gap-4">
@@ -75,7 +132,7 @@ export function NexRingInsights({
 
       <Card
         title="Sleep sessions"
-        subtitle="Each session gets its own stage rail and quality card. Split sleep and naps should not be flattened."
+        subtitle="Each session keeps its own stage rail and quality card; split sleep and naps are not flattened."
       >
         <SleepSessionsPanel sessions={sleepSessions} fallbackMetrics={metrics} />
       </Card>
@@ -197,6 +254,8 @@ function SleepSessionsPanel({
         startTs: now - total * 60_000,
         endTs: now,
         totalMinutes: total,
+        asleepMinutes: total,
+        timeInBedMinutes: sleepTimeInBedFromStages(fallbackMetrics.sleepStages),
         score: fallbackMetrics.sleepScore,
         stages: {
           awake: fallbackMetrics.sleepStages?.awake,
@@ -236,7 +295,10 @@ function SleepSessionCard({ session }: { session: SleepSession }) {
           <div className="mt-1 text-lg font-semibold text-slate-900">
             {formatClock(session.startTs)} — {formatClock(session.endTs)}
           </div>
-          <div className="mt-1 text-sm text-slate-500">Total {session.totalMinutes} min</div>
+          <div className="mt-1 text-sm text-slate-500">
+            Asleep {session.asleepMinutes ?? session.totalMinutes} min
+            {session.timeInBedMinutes ? ` · In bed ${session.timeInBedMinutes} min` : ''}
+          </div>
         </div>
 
         <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
@@ -245,7 +307,7 @@ function SleepSessionCard({ session }: { session: SleepSession }) {
       </div>
 
       <div className="mt-4">
-        <SleepStageTimeline stages={session.stages} total={session.totalMinutes} />
+        <SleepStageTimeline stages={session.stages} total={session.timeInBedMinutes ?? session.totalMinutes} />
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-4">
@@ -316,3 +378,4 @@ function SleepStageTimeline({
     </div>
   );
 }
+

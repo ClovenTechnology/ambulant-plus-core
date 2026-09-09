@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NexRingSession } from '@/src/devices/nexring/nexring-session';
+import { detectNexRingCapabilities } from '@/src/devices/nexring/nexring-capabilities';
 import { createNexRingMetricPersister } from '@/src/devices/nexring/nexring-persistence';
 import type {
   RingCommandResult,
@@ -360,7 +361,11 @@ export default function NexRingPanel({
 
   const actions = {
     askPermissions: () => sessionRef.current?.askPermissions(),
-    scan: () => sessionRef.current?.startScan(),
+    scan: () => {
+      setDevices([]);
+      setSelectedId('');
+      return sessionRef.current?.startScan();
+    },
     stopScan: () => sessionRef.current?.stopScan(),
     connect: () => {
       setTrace([]);
@@ -383,7 +388,12 @@ export default function NexRingPanel({
     requestNewAlgorithmHistoryData: () =>
       sessionRef.current?.requestNewAlgorithmHistoryData(),
     runHydrationBootstrap: () => sessionRef.current?.runHydrationBootstrap(),
+    startSr09Sport: (options: { mode: 0 | 1; timeInterval: number; duration: number }) =>
+      sessionRef.current?.startSr09Sport(options),
+    stopSr09Sport: () => sessionRef.current?.stopSr09Sport(),
   };
+
+  const capabilities = detectNexRingCapabilities(selected ?? state.connectedDevice ?? null, deviceInfo);
 
   const mergedMetrics: Metrics = {
     ...metrics,
@@ -397,8 +407,8 @@ export default function NexRingPanel({
     <div
       className={
         embedded
-          ? 'space-y-4'
-          : 'space-y-4 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm'
+          ? 'min-w-0 space-y-4'
+          : 'min-w-0 space-y-4 rounded-3xl border border-slate-200 bg-white/95 p-3 shadow-sm sm:p-4'
       }
     >
       <NexRingHero
@@ -442,6 +452,7 @@ export default function NexRingPanel({
           deviceInfo={deviceInfo}
           lastCmd={lastCmd}
           hydration={hydration}
+          capabilities={capabilities}
           dailySummary={reportSnapshot?.dailySummary ?? null}
           trace={trace}
           compact={embedded}
@@ -452,9 +463,11 @@ export default function NexRingPanel({
           stressHistory={stressHistory}
           tempHistory={tempHistory}
           sleepSessions={sleepSessions}
+          compact={embedded}
         />
       </section>
 
     </div>
   );
 }
+

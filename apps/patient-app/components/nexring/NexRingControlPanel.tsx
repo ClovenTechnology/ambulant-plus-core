@@ -11,6 +11,7 @@ import type {
   RingSessionState,
   RingTraceEvent,
 } from '@/src/devices/nexring/nexring-types';
+import type { NexRingCapabilities } from '@/src/devices/nexring/nexring-capabilities';
 import { relativeTime } from '@/src/devices/nexring/nexring-view-model';
 import { ActionButton, Card, InfoTile } from './NexRingPrimitives';
 
@@ -34,13 +35,10 @@ type ControlActions = {
   requestNewAlgorithmHistoryCount: () => void;
   requestNewAlgorithmHistoryData: () => void;
   runHydrationBootstrap: () => void;
+  startSr09Sport: (options: { mode: 0 | 1; timeInterval: number; duration: number }) => void;
+  stopSr09Sport: () => void;
 };
 
-function formatDistance(meters?: number | null) {
-  if (typeof meters !== 'number' || !Number.isFinite(meters)) return '—';
-  if (meters >= 1000) return `${(meters / 1000).toFixed(2)} km`;
-  return `${Math.round(meters)} m`;
-}
 
 function formatNumber(value?: number | null, suffix = '') {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
@@ -61,9 +59,10 @@ export function NexRingControlPanel({
   persistInfo,
   lastPersistAt,
   state,
-  deviceInfo,
+  deviceInfo: _deviceInfo,
   lastCmd: _lastCmd,
   hydration,
+  capabilities,
   dailySummary,
   trace: _trace,
   compact = false,
@@ -80,74 +79,87 @@ export function NexRingControlPanel({
   deviceInfo: RingDeviceInfo | null;
   lastCmd: RingCommandResult | null;
   hydration: RingHydrationState;
+  capabilities: NexRingCapabilities;
   dailySummary: RingDailySummary | null;
   trace: RingTraceEvent[];
   compact?: boolean;
 }) {
   const connected = isConnectedPhase(state.phase);
+  const scanning = state.phase === 'scanning';
+  const [sportMode, setSportMode] = React.useState<0 | 1>(1);
+  const [sportInterval, setSportInterval] = React.useState(10);
+  const [sportDuration, setSportDuration] = React.useState(30);
   const selectedLabel =
     selected?.name || state.connectedDevice?.name || 'No ring selected';
-  const connectedLabel =
-    state.connectedDevice?.name || selected?.name || 'Not connected';
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <Card
         title="Ring connection"
-        subtitle="Pair, sync and refresh NexRing wellness metrics."
+        subtitle="Pair once, then sync wellness, sleep and activity from your NexRing."
       >
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3">
           <InfoTile
             label="Status"
-            value={connected ? 'Connected' : state.phase || 'Ready'}
+            value={connected ? 'Connected' : scanning ? 'Scanning' : state.phase || 'Ready'}
           />
-          <InfoTile label="Selected ring" value={selectedLabel} />
+          <InfoTile label="Ring" value={selectedLabel} />
           <InfoTile label="Last seen" value={relativeTime(state.lastSeenTs)} />
           <InfoTile label="Last sync" value={relativeTime(lastPersistAt)} />
         </div>
 
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-medium text-slate-700">
+            {isWebTransport ? 'Browser Bluetooth' : 'Android native'}
+          </span>
+          {connected ? (
+            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-medium text-emerald-700">
+              Ready to sync
+            </span>
+          ) : null}
+        </div>
+
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <ActionButton
-            onClick={actions.askPermissions}
-            disabled={isWebTransport}
-          >
-            Enable Bluetooth
-          </ActionButton>
-          <ActionButton onClick={actions.scan}>Find ring</ActionButton>
-          <ActionButton onClick={actions.stopScan}>Stop scan</ActionButton>
-          <ActionButton disabled={!selected} onClick={actions.connect}>
-            Connect
-          </ActionButton>
-          <ActionButton onClick={actions.disconnect}>Disconnect</ActionButton>
-          <ActionButton onClick={actions.runHydrationBootstrap}>
-            Sync ring
-          </ActionButton>
-          <ActionButton onClick={actions.requestBattery}>
-            Refresh battery
-          </ActionButton>
-          <ActionButton onClick={actions.syncTime}>Sync time</ActionButton>
+          {!isWebTransport && !connected ? (
+            <ActionButton onClick={actions.askPermissions}>Enable Bluetooth</ActionButton>
+          ) : null}
+
+          {!connected && !scanning ? (
+            <ActionButton onClick={actions.scan}>
+              {isWebTransport ? 'Choose ring' : 'Find ring'}
+            </ActionButton>
+          ) : null}
+
+          {scanning ? (
+            <ActionButton onClick={actions.stopScan}>Stop scan</ActionButton>
+          ) : null}
+
+          {!connected && !scanning && selected ? (
+            <ActionButton onClick={actions.connect}>Connect</ActionButton>
+          ) : null}
+
+          {connected ? (
+            <>
+              <ActionButton onClick={actions.runHydrationBootstrap}>Sync ring</ActionButton>
+              <ActionButton onClick={actions.requestBattery}>Refresh battery</ActionButton>
+              <ActionButton onClick={actions.syncTime}>Sync time</ActionButton>
+              <ActionButton onClick={actions.disconnect}>Disconnect</ActionButton>
+            </>
+          ) : null}
         </div>
 
-        <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-xs leading-5 text-cyan-900">
-          NexRing sync pulls wellness, sleep, activity and recovery metrics into
-          your patient reports. Advanced protocol diagnostics have moved out of
-          this patient-facing panel.
-        </div>
-
-        <div className="mt-3">
-          <a
-            href="/myCare/devices/ble-debug"
-            className="text-xs font-semibold text-cyan-700 underline-offset-4 hover:underline"
-          >
-            Open advanced BLE debug console
-          </a>
-        </div>
+        {!connected && !scanning && devices.length === 0 ? (
+          <p className="mt-3 text-xs leading-5 text-slate-500">
+            Keep the ring nearby and awake. On web, choosing a ring opens the browser
+            Bluetooth picker. In the Android app, Find ring starts the native BLE scan.
+          </p>
+        ) : null}
       </Card>
 
-      {devices.length > 0 ? (
+      {devices.length > 0 && !connected ? (
         <Card
           title="Nearby rings"
-          subtitle="Select the ring you want to pair before connecting."
+          subtitle="Choose the ring you want to connect."
         >
           <div className="max-h-72 overflow-auto rounded-2xl border border-slate-200">
             <div className="divide-y divide-slate-200">
@@ -157,13 +169,14 @@ export function NexRingControlPanel({
                 return (
                   <button
                     key={d.id || d.mac || `${d.name}-${d.rssi}`}
-                    className={`flex w-full items-center justify-between px-4 py-3 text-left ${
-                      active ? 'bg-cyan-50' : 'bg-white'
+                    className={`flex min-h-[56px] w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left transition ${
+                      active ? 'bg-cyan-50' : 'bg-white hover:bg-slate-50'
                     }`}
                     onClick={() => onSelectDevice(d.id)}
                     type="button"
+                    aria-pressed={active}
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-semibold text-slate-900">
                         {d.name || 'Unnamed ring'}
                       </div>
@@ -171,8 +184,8 @@ export function NexRingControlPanel({
                         {d.mac || d.id}
                       </div>
                     </div>
-                    <div className="ml-3 text-xs text-slate-500">
-                      RSSI {d.rssi ?? '—'}
+                    <div className="shrink-0 text-xs text-slate-500">
+                      {typeof d.rssi === 'number' ? `${d.rssi} dBm` : 'Signal —'}
                     </div>
                   </button>
                 );
@@ -183,27 +196,12 @@ export function NexRingControlPanel({
       ) : null}
 
       <Card title="Today from NexRing">
-        <div className="grid gap-3 md:grid-cols-2">
-          <InfoTile
-            label="Steps"
-            value={formatNumber(dailySummary?.steps)}
-          />
-          <InfoTile
-            label="Calories"
-            value={formatNumber(dailySummary?.calories, ' kcal')}
-          />
-          <InfoTile
-            label="Distance"
-            value={formatDistance(dailySummary?.distanceMeters)}
-          />
-          <InfoTile
-            label="Walking steps"
-            value={formatNumber(dailySummary?.walkingSteps)}
-          />
-          <InfoTile
-            label="Running steps"
-            value={formatNumber(dailySummary?.runningSteps)}
-          />
+        <div className="grid grid-cols-2 gap-2 sm:gap-3">
+          <InfoTile label="Steps" value={formatNumber(dailySummary?.steps)} />
+          <InfoTile label="Walking" value={formatNumber(dailySummary?.walkingSteps)} />
+          {!compact ? (
+            <InfoTile label="Running" value={formatNumber(dailySummary?.runningSteps)} />
+          ) : null}
           <InfoTile
             label="Battery"
             value={
@@ -213,72 +211,119 @@ export function NexRingControlPanel({
             }
           />
         </div>
-      </Card>
-
-      <Card
-        title="Exercise and mindfulness"
-        subtitle="Mode support is being verified before patient-facing controls are enabled."
-      >
-        <div className="grid gap-3 md:grid-cols-2">
-          <InfoTile label="Exercise mode" value="Command detected · pending verification" />
-          <InfoTile label="Mindfulness mode" value="Stream detected · command not confirmed" />
-        </div>
-
         <p className="mt-3 text-xs leading-5 text-slate-500">
-          NexRing packets can identify exercise and mindfulness streams, but
-          production start/stop buttons remain disabled until the command
-          payloads and safe stop semantics are confirmed against the ring.
-        </p>
-      </Card>
-
-      <Card title="Report sync">
-        <div className="grid gap-3 md:grid-cols-2">
-          <InfoTile label="Sync phase" value={hydration.phase || 'ready'} />
-          <InfoTile
-            label="Metrics received"
-            value={String(hydration.receivedMetrics || 0)}
-          />
-          <InfoTile
-            label="Sleep records"
-            value={String(hydration.sleepPackets || 0)}
-          />
-          <InfoTile
-            label="Activity records"
-            value={String(hydration.activePackets || 0)}
-          />
-          <InfoTile label="Persist status" value={persistInfo} />
-          <InfoTile label="Transport" value={isWebTransport ? 'Web bridge' : 'Web Bluetooth'} />
-        </div>
-
-        <p className="mt-3 text-xs leading-5 text-slate-500">
-          Sleep, recovery, daytime stress, activity and temperature variation
-          are synced as wellness metrics. NexRing temperature variation is kept
-          separate from clinical body temperature.
+          Steps are read from vendor history. Distance and calories are intentionally not
+          estimated because this SDK does not expose an authoritative distance calculation.
         </p>
       </Card>
 
       {!compact ? (
-        <Card title="Ring details">
-          <div className="grid gap-3 md:grid-cols-2">
-            <InfoTile label="Connected ring" value={connectedLabel} />
-            <InfoTile
-              label="Device address"
-              value={
-                state.connectedDevice?.mac ||
-                selected?.mac ||
-                selected?.id ||
-                '—'
-              }
-            />
-            <InfoTile label="Model" value={deviceInfo?.model || '—'} />
-            <InfoTile label="Firmware" value={deviceInfo?.firmware || '—'} />
-            <InfoTile
-              label="Manufacturer"
-              value={deviceInfo?.manufacturer || '—'}
-            />
-            <InfoTile label="Software" value={deviceInfo?.software || '—'} />
-          </div>
-        </Card>
+        <>
+          <Card
+            title="Exercise and mindfulness"
+            subtitle={`Detected model family: ${capabilities.model.toUpperCase()}`}
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <InfoTile
+                label="Exercise protocol"
+                value={
+                  capabilities.legacySport
+                    ? 'Legacy Sport Mode · Run / Other'
+                    : capabilities.advancedExercise
+                      ? 'SR28 advanced exercise'
+                      : 'Unavailable until model is identified'
+                }
+              />
+              <InfoTile
+                label="Mindfulness"
+                value={capabilities.mindfulness ? 'SR28 supported' : 'Not proven for this model'}
+              />
+            </div>
+
+            {capabilities.legacySport ? (
+              <div className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="text-xs font-medium text-slate-700">
+                    Sport
+                    <select
+                      className="mt-1 min-h-[44px] w-full rounded-xl border border-slate-300 bg-white px-3 text-sm"
+                      value={sportMode}
+                      onChange={(e) => setSportMode(Number(e.target.value) as 0 | 1)}
+                    >
+                      <option value={1}>Run</option>
+                      <option value={0}>Other sport</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-medium text-slate-700">
+                    Record every (sec)
+                    <input
+                      className="mt-1 min-h-[44px] w-full rounded-xl border border-slate-300 bg-white px-3 text-sm"
+                      type="number"
+                      min={10}
+                      max={180}
+                      step={1}
+                      value={sportInterval}
+                      onChange={(e) => setSportInterval(Number(e.target.value))}
+                    />
+                  </label>
+                  <label className="text-xs font-medium text-slate-700">
+                    Duration (min)
+                    <input
+                      className="mt-1 min-h-[44px] w-full rounded-xl border border-slate-300 bg-white px-3 text-sm"
+                      type="number"
+                      min={5}
+                      max={180}
+                      step={1}
+                      value={sportDuration}
+                      onChange={(e) => setSportDuration(Number(e.target.value))}
+                    />
+                  </label>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <ActionButton
+                    onClick={() =>
+                      actions.startSr09Sport({
+                        mode: sportMode,
+                        timeInterval: sportInterval,
+                        duration: sportDuration,
+                      })
+                    }
+                  >
+                    Start exercise
+                  </ActionButton>
+                  <ActionButton onClick={actions.stopSr09Sport}>End exercise</ActionButton>
+                </div>
+                <p className="text-xs leading-5 text-slate-500">
+                  A successful command only proves that Ambulant+ sent the documented vendor
+                  protocol. End exercise automatically refreshes legacy history; returned ring
+                  history remains the authority for recorded activity.
+                </p>
+              </div>
+            ) : capabilities.advancedExercise ? (
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                SR28 uses the separate advanced exercise protocol with pause/continue and
+                mindfulness support. SR09 legacy controls are intentionally not sent to SR28.
+              </p>
+            ) : (
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                Sport controls stay disabled until the connected ring can be identified as
+                SR09/SR23 or SR28.
+              </p>
+            )}
+          </Card>
+
+          <Card title="Report sync">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3">
+              <InfoTile label="Sync phase" value={hydration.phase || 'idle'} />
+              <InfoTile label="Metrics received" value={String(hydration.receivedMetrics)} />
+              <InfoTile label="Sleep records" value={String(hydration.sleepPackets)} />
+              <InfoTile label="Activity packets" value={String(hydration.activePackets)} />
+            </div>
+            <p className="mt-3 break-words text-xs leading-5 text-slate-500">
+              {persistInfo || 'No patient-report writes yet.'}
+            </p>
+          </Card>
+        </>
       ) : null}
     </div>
   );

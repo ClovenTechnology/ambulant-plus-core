@@ -208,7 +208,7 @@ function ActiveSurface({
         </Link>
       </div>
 
-      {tab === 'wearable' ? <WearablePane /> : null}
+      {tab === 'wearable' ? <WearablePane roomId={roomId} patientId={patientId} embedded /> : null}
       {tab === 'hm' ? <HMPane roomId={roomId} patientId={patientId} onResult={onHealthMonitorResult} /> : null}
       {tab === 'stetho' ? <StethoPane /> : null}
       {tab === 'oto' ? <OtoPane /> : null}
@@ -258,3 +258,4 @@ export default function IoMTPane({ roomId, patientId, onHealthMonitorResult }: I
     </div>
   );
 }
+

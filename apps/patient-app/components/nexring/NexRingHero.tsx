@@ -13,6 +13,7 @@ import {
   readinessNarrative,
   sleepNarrative,
   sleepTotalFromStages,
+  sleepTimeInBedFromStages,
   relativeTime,
   formatClock,
   capitalize,
@@ -295,19 +296,19 @@ function CompactSleepHero({
         <SleepBar
           label="Light"
           value={stages?.light}
-          total={sleepTotalFromStages(stages)}
+          total={sleepTimeInBedFromStages(stages)}
           color="bg-sky-400"
         />
         <SleepBar
           label="Deep"
           value={stages?.deep}
-          total={sleepTotalFromStages(stages)}
+          total={sleepTimeInBedFromStages(stages)}
           color="bg-indigo-500"
         />
         <SleepBar
           label="REM"
           value={stages?.rem}
-          total={sleepTotalFromStages(stages)}
+          total={sleepTimeInBedFromStages(stages)}
           color="bg-cyan-300"
         />
       </div>
@@ -491,25 +492,25 @@ function SleepHero({
         <SleepBar
           label="Light"
           value={stages?.light}
-          total={sleepTotalFromStages(stages)}
+          total={sleepTimeInBedFromStages(stages)}
           color="bg-sky-400"
         />
         <SleepBar
           label="Deep"
           value={stages?.deep}
-          total={sleepTotalFromStages(stages)}
+          total={sleepTimeInBedFromStages(stages)}
           color="bg-indigo-500"
         />
         <SleepBar
           label="REM"
           value={stages?.rem}
-          total={sleepTotalFromStages(stages)}
+          total={sleepTimeInBedFromStages(stages)}
           color="bg-cyan-300"
         />
         <SleepBar
           label="Awake"
           value={stages?.awake}
-          total={sleepTotalFromStages(stages)}
+          total={sleepTimeInBedFromStages(stages)}
           color="bg-slate-400"
         />
       </div>
