@@ -11,90 +11,77 @@ import type { Vital } from '@/src/hooks/selfcheck/useSelfCheckState';
 export default function SelfCheckVitalsStep(props: {
   vitals: Vital[];
   setVitals: (updater: (prev: Vital[]) => Vital[]) => void;
-  abnormal: string[];
-  riskColor: string;
-  riskLabel: string;
   busy: boolean;
   onNext: () => void;
-  onAnalyze: () => void;
 }) {
-  const { vitals, setVitals, abnormal, riskColor, riskLabel, busy, onNext, onAnalyze } = props;
-
+  const { vitals, setVitals, busy, onNext } = props;
   const [editOpen, setEditOpen] = useState(false);
 
   const editable = useMemo(() => {
-    // Only show “quick edit” for demo-friendly vitals
-    const keys = new Set(['hr', 'spo2', 'temp', 'bp']);
-    return vitals.filter((v) => keys.has(v.key));
+    const keys = new Set([
+      'temperature',
+      'heartRate',
+      'spo2',
+      'systolic',
+      'diastolic',
+      'glucose',
+    ]);
+    return vitals.filter((vital) => keys.has(vital.key));
   }, [vitals]);
 
-  function patchVital(key: string, value: any) {
-    setVitals((prev) => prev.map((v) => (v.key === key ? { ...v, value } : v)));
+  function patchVital(key: string, value: number | null) {
+    setVitals((prev) =>
+      prev.map((vital) => (vital.key === key ? { ...vital, value } : vital)),
+    );
   }
 
   return (
-    <div className="bg-white/80 border border-slate-200 rounded-2xl shadow-sm p-4">
-      <div className="flex items-start justify-between gap-4 mb-3">
-        <div>
-          <div className="text-xs text-slate-500">Step 1</div>
-          <div className="text-lg font-semibold text-slate-900">Vitals</div>
-          <div className="text-sm text-slate-600">
-            {abnormal.length === 0 ? 'Within typical ranges.' : `Flagged: ${abnormal.join(', ')}`}
-          </div>
-        </div>
-
-        <div className={`px-3 py-2 rounded-xl ${riskColor} shadow-sm`}>
-          <div className="text-xs opacity-90">Status</div>
-          <div className="font-bold">{riskLabel}</div>
+    <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+      <div className="mb-3">
+        <div className="text-xs text-slate-500">Step 1</div>
+        <div className="text-lg font-semibold text-slate-900">Vitals</div>
+        <div className="mt-1 text-sm text-slate-600">
+          Review or enter the readings you want included in this self-check.
         </div>
       </div>
 
       <div className="flex flex-wrap gap-3">
-        {vitals.map((v) => (
+        {vitals.map((vital) => (
           <VitalsCard
-            key={v.key}
-            label={v.label}
-            value={v.value}
-            unit={v.unit}
-            min={v.min}
-            max={v.max}
-            sparkline={<Sparkline points={Array.isArray(v.trend) ? v.trend : []} />}
+            key={vital.key}
+            label={vital.label}
+            value={vital.value}
+            unit={vital.unit}
+            sparkline={<Sparkline points={Array.isArray(vital.trend) ? vital.trend : []} />}
           />
         ))}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2 items-center">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         <button
           onClick={onNext}
-          className="px-4 py-2 rounded-xl bg-slate-900 text-white font-semibold hover:opacity-95"
+          disabled={busy}
+          className="rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white hover:opacity-95 disabled:opacity-50"
           type="button"
         >
           Next: Symptoms →
         </button>
 
         <button
-          onClick={onAnalyze}
-          disabled={busy}
-          className="px-4 py-2 rounded-xl bg-cyan-600 text-white font-semibold hover:opacity-95 disabled:opacity-50"
           type="button"
+          onClick={() => setEditOpen((open) => !open)}
+          className="rounded-xl border border-slate-200 bg-white px-4 py-2 font-semibold text-slate-800 hover:bg-slate-50"
         >
-          {busy ? 'Checking…' : 'Check My Health'}
+          {editOpen ? 'Close vital entry' : 'Enter / edit vitals'}
         </button>
 
-        <button
-          type="button"
-          onClick={() => setEditOpen((s) => !s)}
-          className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-800 font-semibold hover:bg-slate-50"
-        >
-          {editOpen ? 'Close quick edit' : 'Quick edit vitals'}
-        </button>
-
-        <div className="ml-auto text-xs text-slate-500 flex items-center gap-2">
-          <span>Why this matters</span>
+        <div className="ml-auto flex items-center gap-2 text-xs text-slate-500">
+          <span>About self-check</span>
           <InfoTooltip label="Self-check info">
-            <div className="font-semibold text-slate-900">Non-diagnostic self-check</div>
+            <div className="font-semibold text-slate-900">Decision support, not diagnosis</div>
             <div className="mt-1 text-slate-600">
-              This summarizes trends and flags patterns. If symptoms feel severe or urgent, seek immediate medical help.
+              Results are generated only after the next step is submitted to InsightCore.
+              If symptoms are severe or urgent, seek immediate medical help.
             </div>
           </InfoTooltip>
         </div>
@@ -102,27 +89,29 @@ export default function SelfCheckVitalsStep(props: {
 
       {editOpen && (
         <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <div className="text-sm font-semibold text-slate-900">Quick edit</div>
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {editable.map((v) => (
-              <label key={v.key} className="block">
-                <div className="text-xs text-slate-600 mb-1">{v.label}</div>
-
-                {v.key === 'bp' ? (
-                  <input
-                    value={String(v.value ?? '')}
-                    onChange={(e) => patchVital(v.key, e.target.value)}
-                    placeholder="120/80"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-900"
-                  />
-                ) : (
-                  <input
-                    type="number"
-                    value={Number.isFinite(Number(v.value)) ? Number(v.value) : ''}
-                    onChange={(e) => patchVital(v.key, e.target.value === '' ? null : Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-900"
-                  />
-                )}
+          <div className="text-sm font-semibold text-slate-900">Vital entry</div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {editable.map((vital) => (
+              <label key={vital.key} className="block">
+                <div className="mb-1 text-xs text-slate-600">
+                  {vital.label}{vital.unit ? ` (${vital.unit})` : ''}
+                </div>
+                <input
+                  type="number"
+                  step="any"
+                  value={
+                    vital.value === null || vital.value === undefined || vital.value === ''
+                      ? ''
+                      : String(vital.value)
+                  }
+                  onChange={(event) =>
+                    patchVital(
+                      vital.key,
+                      event.target.value === '' ? null : Number(event.target.value),
+                    )
+                  }
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900"
+                />
               </label>
             ))}
           </div>

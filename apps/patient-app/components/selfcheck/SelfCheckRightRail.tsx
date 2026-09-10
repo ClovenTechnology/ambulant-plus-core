@@ -1,53 +1,55 @@
 'use client';
 
 import React from 'react';
-
-import WellnessInsightsCard from '@/components/selfcheck/WellnessInsightsCard';
 import type { BodyAreaKey } from '@/components/selfcheck/BodyMap2D';
 import { labelBodyAreaKey } from '@/components/selfcheck/BodyMap2D';
 
 export default function SelfCheckRightRail(props: {
-  cardio: any;
-  hypeIndex: any;
-  stress: any;
-  trendSummary: string[];
-
   areas: BodyAreaKey[];
-  gender: 'male' | 'female';
-  view: 'front' | 'back';
-
   busy: boolean;
+  hasAnalyzed: boolean;
   onAnalyze: () => void;
   onCopy: () => void;
 }) {
-  const { cardio, hypeIndex, stress, trendSummary, areas, gender, view, busy, onAnalyze, onCopy } = props;
+  const { areas, busy, hasAnalyzed, onAnalyze, onCopy } = props;
 
   return (
     <aside className="space-y-4">
-      <WellnessInsightsCard cardio={cardio} hypeIndex={hypeIndex} stress={stress} trendSummary={trendSummary} />
+      <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+        <div className="text-sm font-semibold text-slate-900">Assessment status</div>
+        <div className="mt-2 text-sm text-slate-600">
+          {hasAnalyzed
+            ? 'InsightCore analysis completed.'
+            : 'Complete Steps 1 and 2, then run analysis to unlock results.'}
+        </div>
 
-      <div className="bg-white/80 border border-slate-200 rounded-2xl shadow-sm p-4">
-        <div className="text-sm font-semibold mb-2 text-slate-900">Quick actions</div>
-        <div className="flex gap-2">
+        <div className="mt-3 text-xs text-slate-500">
+          Selected body areas:{' '}
+          {areas.length ? areas.map(labelBodyAreaKey).join(', ') : 'None selected'}
+        </div>
+
+        <div className="mt-4 flex gap-2">
           <button
             onClick={onAnalyze}
             disabled={busy}
-            className="flex-1 py-2 rounded-xl bg-cyan-600 text-white font-semibold disabled:opacity-50"
+            className="flex-1 rounded-xl bg-cyan-600 px-3 py-2 font-semibold text-white disabled:opacity-50"
             type="button"
           >
-            {busy ? 'Checking…' : 'Re-check'}
+            {busy ? 'Checking…' : hasAnalyzed ? 'Re-check' : 'Analyze'}
           </button>
           <button
             onClick={onCopy}
-            className="flex-1 py-2 rounded-xl bg-white border border-slate-200 text-slate-800 font-semibold hover:bg-slate-50"
+            disabled={!hasAnalyzed}
+            className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 font-semibold text-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
             type="button"
           >
             Copy summary
           </button>
         </div>
 
-        <div className="mt-3 text-xs text-slate-500">
-          Areas: {areas.length ? areas.map(labelBodyAreaKey).join(', ') : '—'} · Gender: {gender} · Emphasis: {view}
+        <div className="mt-3 text-xs leading-5 text-slate-500">
+          Results are generated only after a successful InsightCore response. No local
+          fallback score is used.
         </div>
       </div>
     </aside>

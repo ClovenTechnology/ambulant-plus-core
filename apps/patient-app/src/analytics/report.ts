@@ -1,31 +1,42 @@
-// ============================================================================
-// apps/patient-app/src/analytics/report.ts  (augment: add antenatalHandoff flag)
-// ============================================================================
-import { jsPDF } from 'jspdf';
-import { renderHealthMonitorReport } from './reports/healthMonitorReport';
-import { renderSleepReport } from './reports/sleepReport';
-import { renderFertilityReport } from './reports/fertilityReport';
-import { renderStressReport } from './reports/stressReport';
-import { renderAntenatalReport } from './reports/antenatalReport';
-import { renderAntenatalHandoff } from './reports/antenatalHandoff';
+// apps/patient-app/src/analytics/report.ts
+
+export type HealthReportSections = {
+  bp?: boolean;
+  sleep?: boolean;
+  fertility?: boolean;
+  stress?: boolean;
+  antenatal?: boolean;
+  antenatalHandoff?: boolean;
+  ladyCenter?: boolean;
+};
+
+function safeFilename(response: Response): string {
+  const disposition = response.headers.get('content-disposition') || '';
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  return match?.[1] || `ambulant-health-report-${Date.now()}.pdf`;
+}
 
 export async function generateHealthReport(
-  userId: string,
-  sections: { bp?: boolean; sleep?: boolean; fertility?: boolean; stress?: boolean; antenatal?: boolean; antenatalHandoff?: boolean } = {}
+  _legacySubject: string,
+  sections: HealthReportSections = {},
 ): Promise<{ blob: Blob; filename: string }> {
-  const doc = new jsPDF();
-  doc.setFontSize(18); doc.text(`Health Report for ${userId}`, 14, 20);
-  doc.setFontSize(11); doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 28);
+  if (sections.antenatal || sections.antenatalHandoff || sections.ladyCenter) {
+    throw new Error('unsupported_report_section_use_dedicated_server_report');
+  }
 
-  const wantsAll = !sections || Object.keys(sections).length === 0 || !Object.values(sections).some(Boolean);
+  const response = await fetch('/api/reports/sleep', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sections }),
+    cache: 'no-store',
+  });
 
-  if (wantsAll || sections.bp) await renderHealthMonitorReport(doc);
-  if (wantsAll || sections.sleep) await renderSleepReport(doc);
-  if (wantsAll || sections.fertility) await renderFertilityReport(doc);
-  if (wantsAll || sections.stress) await renderStressReport(doc);
-  if (wantsAll || sections.antenatal) await renderAntenatalReport(doc);
-  if (sections.antenatalHandoff) await renderAntenatalHandoff(doc);
+  if (!response.ok) {
+    throw new Error(`health_report_failed_${response.status}`);
+  }
 
-  const blob = doc.output('blob');
-  return { blob, filename: `health_report_${userId}_${Date.now()}.pdf` };
+  return {
+    blob: await response.blob(),
+    filename: safeFilename(response),
+  };
 }

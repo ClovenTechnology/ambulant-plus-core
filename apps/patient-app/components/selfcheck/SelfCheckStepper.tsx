@@ -6,8 +6,13 @@ function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
 }
 
-
 export type SelfCheckStep = 'data' | 'symptoms' | 'results';
+
+const STEPS: Array<{ key: SelfCheckStep; title: string; sub: string }> = [
+  { key: 'data', title: 'Vitals', sub: 'Step 1' },
+  { key: 'symptoms', title: 'Symptoms', sub: 'Step 2' },
+  { key: 'results', title: 'Results', sub: 'Step 3' },
+];
 
 function IconCheck(props: { className?: string }) {
   return (
@@ -42,100 +47,91 @@ function IconLock(props: { className?: string }) {
   );
 }
 
-type StepMeta = {
-  key: SelfCheckStep;
-  title: string;
-  sub: string;
-};
-
-const STEPS: StepMeta[] = [
-  { key: 'data', title: 'Vitals', sub: 'Step 1' },
-  { key: 'symptoms', title: 'Symptoms', sub: 'Step 2' },
-  { key: 'results', title: 'Results', sub: 'Step 3' },
-];
-
 export default function SelfCheckStepper(props: {
   step: SelfCheckStep;
-  onStep: (s: SelfCheckStep) => void;
-
-  // NEW: completion + gating
+  onStep: (step: SelfCheckStep) => void;
   completed?: Partial<Record<SelfCheckStep, boolean>>;
+  canGoSymptoms?: boolean;
   canGoResults?: boolean;
-  lockedHint?: string;
+  symptomsLockedHint?: string;
+  resultsLockedHint?: string;
 }) {
-  const { step, onStep, completed, canGoResults = true, lockedHint = 'Run analysis to unlock results.' } = props;
+  const {
+    step,
+    onStep,
+    completed,
+    canGoSymptoms = true,
+    canGoResults = false,
+    symptomsLockedHint = 'Complete Step 1 first.',
+    resultsLockedHint = 'Complete Step 2 first.',
+  } = props;
 
   return (
-    <div className="bg-white/80 border border-slate-200 rounded-2xl shadow-sm p-3">
-      <div className="flex items-center gap-2 overflow-x-auto">
-        {STEPS.map((s, idx) => {
-          const isActive = s.key === step;
-          const isCompleted = !!completed?.[s.key];
-
-          const locked = s.key === 'results' && !canGoResults;
+    <div className="rounded-2xl border border-slate-200 bg-white/80 p-3 shadow-sm">
+      <div className="flex min-w-max items-center gap-2">
+        {STEPS.map((item, index) => {
+          const active = item.key === step;
+          const done = Boolean(completed?.[item.key]);
+          const locked =
+            (item.key === 'symptoms' && !canGoSymptoms) ||
+            (item.key === 'results' && !canGoResults);
+          const hint =
+            item.key === 'symptoms'
+              ? symptomsLockedHint
+              : item.key === 'results'
+                ? resultsLockedHint
+                : undefined;
 
           return (
-            <React.Fragment key={s.key}>
+            <React.Fragment key={item.key}>
               <button
                 type="button"
-                onClick={() => {
-                  if (locked) return;
-                  onStep(s.key);
-                }}
-                title={locked ? lockedHint : undefined}
+                disabled={locked}
+                onClick={() => onStep(item.key)}
+                title={locked ? hint : undefined}
                 className={cx(
-                  'flex items-center gap-3 px-3 py-2 rounded-xl border transition whitespace-nowrap',
-                  isActive
-                    ? 'bg-slate-900 text-white border-slate-900'
+                  'flex items-center gap-3 rounded-xl border px-3 py-2 transition whitespace-nowrap',
+                  active
+                    ? 'border-slate-900 bg-slate-900 text-white'
                     : locked
-                    ? 'bg-white text-slate-400 border-slate-200 cursor-not-allowed'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
                 )}
               >
-                <div
+                <span
                   className={cx(
-                    'w-8 h-8 rounded-lg grid place-items-center border',
-                    isActive
+                    'grid h-8 w-8 place-items-center rounded-lg border',
+                    active
                       ? 'border-white/20 bg-white/10'
-                      : locked
-                      ? 'border-slate-200 bg-slate-50'
-                      : 'border-slate-200 bg-slate-50'
+                      : 'border-slate-200 bg-slate-50',
                   )}
                 >
                   {locked ? (
-                    <IconLock className={cx('w-4 h-4', isActive ? 'text-white' : 'text-slate-400')} />
-                  ) : isCompleted ? (
-                    <IconCheck className={cx('w-5 h-5', isActive ? 'text-white' : 'text-emerald-600')} />
+                    <IconLock className="h-4 w-4" />
+                  ) : done ? (
+                    <IconCheck className={cx('h-5 w-5', active ? 'text-white' : 'text-emerald-600')} />
                   ) : (
-                    <span className={cx('text-sm font-extrabold', isActive ? 'text-white' : 'text-slate-700')}>
-                      {idx + 1}
-                    </span>
+                    <span className="text-sm font-extrabold">{index + 1}</span>
                   )}
-                </div>
+                </span>
 
-                <div className="text-left leading-tight">
-                  <div className={cx('text-[11px] uppercase tracking-wider', isActive ? 'text-white/80' : 'text-slate-400')}>
-                    {s.sub}
-                  </div>
-                  <div className={cx('text-sm font-semibold', isActive ? 'text-white' : locked ? 'text-slate-400' : 'text-slate-900')}>
-                    {s.title}
-                  </div>
-                </div>
+                <span className="text-left leading-tight">
+                  <span className={cx('block text-[11px] uppercase tracking-wider', active ? 'text-white/80' : 'text-slate-400')}>
+                    {item.sub}
+                  </span>
+                  <span className={cx('block text-sm font-semibold', active ? 'text-white' : 'text-slate-900')}>
+                    {item.title}
+                  </span>
+                </span>
               </button>
 
-              {idx < STEPS.length - 1 && (
-                <div className="h-px w-6 bg-slate-200 shrink-0" />
-              )}
+              {index < STEPS.length - 1 ? (
+                <div className="h-px w-6 shrink-0 bg-slate-200" />
+              ) : null}
             </React.Fragment>
           );
         })}
       </div>
-
-      {!canGoResults && (
-        <div className="mt-2 text-xs text-slate-500">
-          <span className="font-semibold text-slate-700">Results locked:</span> {lockedHint}
-        </div>
-      )}
     </div>
   );
 }

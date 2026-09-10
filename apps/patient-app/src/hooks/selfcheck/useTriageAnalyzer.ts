@@ -1,24 +1,23 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import useSelfCheckHistory from './useSelfCheckHistory';
 import {
   analyzeSelfCheckWithInsightCore,
   postInsightLearningEvent,
+  type PatientInsightResponse,
 } from '@/src/lib/insightcore/api';
 
-type RiskLevel = 'low' | 'medium' | 'high';
-type AnalysisSource = 'insightcore';
+export type SelfCheckRiskLevel = 'low' | 'medium' | 'high';
 
 type Concern = {
   name: string;
-  prob: number;
+  prob: number | null;
 };
 
 type Explanation = {
   feature: string;
-  impact: number;
-  note?: string;
+  impact: number | null;
+  note: string | null;
 };
 
 type TriageAnalyzerArgs = {
@@ -28,9 +27,7 @@ type TriageAnalyzerArgs = {
   extraMeta?: Record<string, any>;
 };
 
-function normalizeAnalyzerArgs(
-  args?: TriageAnalyzerArgs
-): Required<TriageAnalyzerArgs> {
+function normalizeAnalyzerArgs(args?: TriageAnalyzerArgs): Required<TriageAnalyzerArgs> {
   return {
     vitals: Array.isArray(args?.vitals) ? args.vitals : [],
     symptoms:
@@ -52,78 +49,90 @@ function normalizeAnalyzerArgs(
   };
 }
 
-function normalizeConcerns(
-  items: Array<{ name?: unknown; prob?: unknown }> | null | undefined
-): Concern[] {
-  if (!Array.isArray(items)) return [];
+function normalizeScore(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, n));
+}
 
+function normalizeRiskLevel(value: unknown): SelfCheckRiskLevel | null {
+  if (value === 'high' || value === 'critical') return 'high';
+  if (value === 'moderate' || value === 'watch') return 'medium';
+  if (value === 'low') return 'low';
+  return null;
+}
+
+function normalizeConcerns(items: PatientInsightResponse['concerns'] | null | undefined): Concern[] {
+  if (!Array.isArray(items)) return [];
   return items
     .map((item) => {
       const name = String(item?.name ?? '').trim();
-      const prob = Number(item?.prob);
-
-      return {
-        name,
-        prob: Number.isFinite(prob) ? prob : 0,
-      };
+      const prob = normalizeScore(item?.prob);
+      return name ? { name, prob } : null;
     })
-    .filter((item) => item.name.length > 0);
+    .filter((item): item is Concern => Boolean(item));
 }
 
 function normalizeRecommendations(items: unknown): string[] {
   if (!Array.isArray(items)) return [];
-
-  return items
-    .map((item) => String(item ?? '').trim())
-    .filter((item) => item.length > 0);
+  return items.map((item) => String(item ?? '').trim()).filter(Boolean);
 }
 
 function normalizeExplanations(
-  items:
-    | Array<{
-        feature?: unknown;
-        impact?: unknown;
-        note?: unknown;
-      }>
-    | null
-    | undefined
+  items: PatientInsightResponse['explanations'] | null | undefined,
 ): Explanation[] {
   if (!Array.isArray(items)) return [];
-
   return items
     .map((item) => {
       const feature = String(item?.feature ?? '').trim();
-      const impact = Number(item?.impact);
+      if (!feature) return null;
+      const impact =
+        item?.impact === null || item?.impact === undefined
+          ? null
+          : Number.isFinite(Number(item.impact))
+            ? Number(item.impact)
+            : null;
       const note =
         item?.note === null || item?.note === undefined
-          ? undefined
-          : String(item.note);
-
-      return {
-        feature,
-        impact: Number.isFinite(impact) ? impact : 0,
-        ...(note ? { note } : {}),
-      };
+          ? null
+          : String(item.note).trim() || null;
+      return { feature, impact, note };
     })
-    .filter((item) => item.feature.length > 0);
+    .filter((item): item is Explanation => Boolean(item));
 }
 
 export default function useTriageAnalyzer(args?: TriageAnalyzerArgs) {
   const { vitals, symptoms, bmi, extraMeta } = normalizeAnalyzerArgs(args);
-  const history = useSelfCheckHistory('selfcheck', 'vitals');
 
   const [busy, setBusy] = useState(false);
-  const [healthScore, setHealthScore] = useState<number>(85);
-  const [riskLevel, setRiskLevel] = useState<RiskLevel>('low');
+  const [healthScore, setHealthScore] = useState<number | null>(null);
+  const [riskLevel, setRiskLevel] = useState<SelfCheckRiskLevel | null>(null);
+  const [riskLabel, setRiskLabel] = useState<string | null>(null);
+  const [confidence, setConfidence] = useState<number | null>(null);
   const [recommendations, setRecommendations] = useState<string[]>([]);
   const [concerns, setConcerns] = useState<Concern[]>([]);
   const [explanations, setExplanations] = useState<Explanation[]>([]);
-  const [analysisSource, setAnalysisSource] =
-    useState<AnalysisSource>('insightcore');
+  const [result, setResult] = useState<PatientInsightResponse | null>(null);
   const [degradedMode, setDegradedMode] = useState(false);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string | null>(null);
+
+  const resetResult = useCallback(() => {
+    setHealthScore(null);
+    setRiskLevel(null);
+    setRiskLabel(null);
+    setConfidence(null);
+    setRecommendations([]);
+    setConcerns([]);
+    setExplanations([]);
+    setResult(null);
+    setDegradedMode(false);
+    setRemoteError(null);
+    setHasAnalyzed(false);
+    setLastAnalyzedAt(null);
+  }, []);
 
   const analyze = useCallback(
     async (
@@ -135,10 +144,11 @@ export default function useTriageAnalyzer(args?: TriageAnalyzerArgs) {
             bmi?: number | null;
             extraMeta?: Record<string, any>;
           },
-      payloadSymptoms?: Record<string, boolean>
-    ) => {
+      payloadSymptoms?: Record<string, boolean>,
+    ): Promise<PatientInsightResponse | null> => {
       setBusy(true);
       setRemoteError(null);
+      setHasAnalyzed(false);
 
       const objectPayload =
         payloadVitals &&
@@ -171,125 +181,135 @@ export default function useTriageAnalyzer(args?: TriageAnalyzerArgs) {
       const usedExtraMeta = objectPayload?.extraMeta ?? extraMeta ?? {};
 
       try {
-        const payload: {
-          vitals: any[];
-          symptoms: Record<string, boolean>;
-          meta: Record<string, any>;
-        } = {
+        const learningBodyAreas = Array.isArray(usedExtraMeta.bodyAreas)
+          ? usedExtraMeta.bodyAreas
+          : [];
+
+        const payload = {
           vitals: usedVitals,
           symptoms: usedSymptoms,
           meta: {
             clientTime: new Date().toISOString(),
-            ua:
-              typeof navigator !== 'undefined'
-                ? navigator.userAgent
-                : 'unknown',
             bmi: usedBmi,
             ...(usedExtraMeta || {}),
           },
         };
 
-        await history.append({
-          vitals: payload.vitals,
-          symptoms: payload.symptoms,
-          bmi: usedBmi,
-          meta: payload.meta,
-          score: null,
-        });
+        const remote = await analyzeSelfCheckWithInsightCore(payload);
 
-        const remote = await analyzeSelfCheckWithInsightCore({
-          vitals: payload.vitals,
-          symptoms: payload.symptoms,
-          meta: payload.meta,
-        });
+        if (!remote || remote.source !== 'insightcore') {
+          throw new Error('invalid_insightcore_source');
+        }
 
-        const score = Number(remote?.summary?.healthScore ?? 80);
+        if (remote.degradedMode) {
+          throw new Error('insightcore_degraded_result');
+        }
 
-        setHealthScore(score);
+        const nextRiskLevel = normalizeRiskLevel(remote.summary?.riskLevel);
+        const nextRiskLabel = String(remote.summary?.riskLabel ?? '').trim();
 
-        const nextRisk: RiskLevel =
-          remote?.summary?.riskLevel === 'critical' ||
-          remote?.summary?.riskLevel === 'high'
-            ? 'high'
-            : remote?.summary?.riskLevel === 'moderate' ||
-                remote?.summary?.riskLevel === 'watch'
-              ? 'medium'
-              : 'low';
+        if (!nextRiskLevel || !nextRiskLabel) {
+          throw new Error('incomplete_insightcore_result');
+        }
 
-        setRiskLevel(nextRisk);
-        setRecommendations(normalizeRecommendations(remote?.recommendations));
-        setConcerns(normalizeConcerns(remote?.concerns));
-        setExplanations(normalizeExplanations(remote?.explanations));
-        setAnalysisSource('insightcore');
-        setDegradedMode(Boolean(remote?.degradedMode));
+        const nextHealthScore = normalizeScore(remote.summary?.healthScore);
+        const nextConfidence = normalizeScore(remote.summary?.confidence);
+        const completedAt = new Date().toISOString();
 
-        postInsightLearningEvent({
-          id: remote?.requestId,
-          ts: new Date().toISOString(),
+        setHealthScore(nextHealthScore);
+        setRiskLevel(nextRiskLevel);
+        setRiskLabel(nextRiskLabel);
+        setConfidence(nextConfidence);
+        setRecommendations(normalizeRecommendations(remote.recommendations));
+        setConcerns(normalizeConcerns(remote.concerns));
+        setExplanations(normalizeExplanations(remote.explanations));
+        setResult(remote);
+        setDegradedMode(false);
+        setHasAnalyzed(true);
+        setLastAnalyzedAt(completedAt);
+
+        void postInsightLearningEvent({
+          id: remote.requestId,
+          ts: completedAt,
           app: 'patient-app',
           surface: 'self-check',
           inputSnapshot: {
             vitals: payload.vitals,
             symptoms: payload.symptoms,
-            medications: payload.meta?.medicationAdherence,
-            wearable: payload.meta?.wearableDrivers,
             domain: {
-              bodyAreas: payload.meta?.bodyAreas || [],
+              bodyAreas: learningBodyAreas,
             },
           },
           outputSnapshot: {
-            riskLabel: remote?.summary?.riskLabel,
-            riskLevel: remote?.summary?.riskLevel,
-            healthScore: remote?.summary?.healthScore,
-            concerns: (remote?.concerns || []).map((c: any) => c.name),
-            recommendations: remote?.recommendations || [],
-            confidence: remote?.summary?.confidence ?? null,
-            degradedMode: remote?.degradedMode,
+            riskLabel: remote.summary.riskLabel,
+            riskLevel: remote.summary.riskLevel,
+            healthScore: remote.summary.healthScore ?? null,
+            confidence: remote.summary.confidence ?? null,
             source: 'insightcore',
           },
-          userAction: {
-            action: 'viewed',
-          },
+          userAction: { action: 'viewed' },
         }).catch(() => undefined);
-      } catch (err: any) {
-        setRemoteError(err?.message || 'InsightCore self-check failed.');
+
+        return remote;
+      } catch {
+        setHealthScore(null);
+        setRiskLevel(null);
+        setRiskLabel(null);
+        setConfidence(null);
+        setRecommendations([]);
+        setConcerns([]);
+        setExplanations([]);
+        setResult(null);
         setDegradedMode(true);
-        setAnalysisSource('insightcore');
+        setRemoteError('Self-check analysis is temporarily unavailable. Please retry.');
+        setHasAnalyzed(false);
+        setLastAnalyzedAt(null);
+        return null;
       } finally {
-        setHasAnalyzed(true);
-        setLastAnalyzedAt(new Date().toISOString());
         setBusy(false);
       }
     },
-    [vitals, symptoms, bmi, extraMeta, history]
+    [vitals, symptoms, bmi, extraMeta],
   );
 
-  const riskLabel = useMemo(
-    () =>
-      riskLevel === 'low'
-        ? 'All good'
-        : riskLevel === 'medium'
-          ? 'Monitor'
-          : 'Follow up',
-    [riskLevel]
-  );
+  const analysisSource = 'insightcore' as const;
 
-  return {
-    busy,
-    healthScore,
-    riskLevel,
-    riskLabel,
-    recommendations,
-    concerns,
-    explanations,
-    analysisSource,
-    degradedMode,
-    remoteError,
-    hasAnalyzed,
-    lastAnalyzedAt,
-    confidence: healthScore,
-    analyze,
-    runAnalyze: analyze,
-    history,
-  };
+  return useMemo(
+    () => ({
+      busy,
+      healthScore,
+      riskLevel,
+      riskLabel,
+      recommendations,
+      concerns,
+      explanations,
+      analysisSource,
+      degradedMode,
+      remoteError,
+      hasAnalyzed,
+      lastAnalyzedAt,
+      confidence,
+      result,
+      analyze,
+      runAnalyze: analyze,
+      reset: resetResult,
+    }),
+    [
+      busy,
+      healthScore,
+      riskLevel,
+      riskLabel,
+      recommendations,
+      concerns,
+      explanations,
+      degradedMode,
+      remoteError,
+      hasAnalyzed,
+      lastAnalyzedAt,
+      confidence,
+      result,
+      analyze,
+      resetResult,
+    ],
+  );
 }
