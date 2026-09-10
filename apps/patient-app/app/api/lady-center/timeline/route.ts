@@ -1,11 +1,20 @@
 import { NextRequest } from 'next/server';
-import { resolveLadyPatientContext, jsonErr, jsonOk, mapLadyDayLog } from '@/app/api/lady-center/_lib/server';
+import {
+  resolveLadyPatientContext,
+  jsonErr,
+  jsonOk,
+  mapLadyDayLog,
+} from '@/app/api/lady-center/_lib/server';
+import {
+  patientGatewayHeaders,
+  readPatientGatewayIdentity,
+} from '@/src/lib/gateway-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function clampDays(v: string | null) {
-  const n = Number(v);
+function clampDays(value: string | null) {
+  const n = Number(value);
   if (!Number.isFinite(n)) return 90;
   if (n <= 14) return 14;
   if (n <= 28) return 28;
@@ -16,26 +25,26 @@ export async function GET(req: NextRequest) {
   const ctx = await resolveLadyPatientContext(req);
   if (!ctx.ok) return jsonErr(ctx.error, ctx.status);
 
+  const identity = await readPatientGatewayIdentity(req);
+  if (!identity) return jsonErr('patient_authentication_required', 401);
+  if (identity.patientId !== ctx.patientId) return jsonErr('patient_context_mismatch', 403);
+
   const days = clampDays(req.nextUrl.searchParams.get('days'));
   const from = new Date();
   from.setDate(from.getDate() - (days - 1));
   from.setHours(0, 0, 0, 0);
+  const range = days <= 30 ? '30d' : '90d';
 
-  const [logs, fert] = await Promise.all([
+  const [logs, fertility] = await Promise.all([
     ctx.prisma.ladyCenterDayLog.findMany({
-      where: {
-        patientId: ctx.patientId,
-        date: { gte: from },
-      },
+      where: { patientId: ctx.patientId, date: { gte: from } },
       orderBy: { date: 'asc' },
     }),
-    fetch(
-      `${req.nextUrl.origin}/api/reports/fertility?patientId=${encodeURIComponent(ctx.patientId)}&range=${
-        days <= 30 ? '30d' : days <= 90 ? '90d' : '1y'
-      }`,
-      { cache: 'no-store' }
-    )
-      .then(async (r) => (r.ok ? r.json() : null))
+    fetch(`${req.nextUrl.origin}/api/reports/fertility?range=${range}`, {
+      cache: 'no-store',
+      headers: patientGatewayHeaders({ req, identity }),
+    })
+      .then(async (res) => (res.ok ? res.json() : null))
       .catch(() => null),
   ]);
 
@@ -45,35 +54,30 @@ export async function GET(req: NextRequest) {
     logMap.set(mapped.date, mapped);
   }
 
-  const fertMap = new Map<string, any>();
-  if (fert?.ok && Array.isArray(fert.trend)) {
-    for (const row of fert.trend) {
-      fertMap.set(row.date, row);
+  const fertilityMap = new Map<string, any>();
+  if (fertility?.ok && Array.isArray(fertility.trend)) {
+    for (const row of fertility.trend) {
+      const date = String(row?.date || '').slice(0, 10);
+      if (date) fertilityMap.set(date, row);
     }
   }
 
-  const out: Array<{
-    date: string;
-    log: any | null;
-    fertility: any | null;
-  }> = [];
+  const items: Array<{ date: string; log: any | null; fertility: any | null }> = [];
 
-  for (let i = 0; i < days; i++) {
+  for (let i = 0; i < days; i += 1) {
     const d = new Date(from);
     d.setDate(from.getDate() + i);
     const iso = d.toISOString().slice(0, 10);
-
-    out.push({
+    items.push({
       date: iso,
       log: logMap.get(iso) || null,
-      fertility: fertMap.get(iso) || null,
+      fertility: fertilityMap.get(iso) || null,
     });
   }
 
   return jsonOk({
-    patientId: ctx.patientId,
     days,
-    items: out,
+    items,
     generatedAtISO: new Date().toISOString(),
   });
 }

@@ -2,35 +2,25 @@ import { NextRequest } from 'next/server';
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer';
 import { buildLadyState, resolveLadyPatientContext, jsonErr } from '@/app/api/lady-center/_lib/server';
+import {
+  patientGatewayHeaders,
+  readPatientGatewayIdentity,
+  type PatientGatewayIdentity,
+} from '@/src/lib/gateway-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type FertilityReportResponse = {
   ok: boolean;
-  patientId: string;
   range: string;
   generatedAtISO: string;
-  mock?: boolean;
+  mock?: false;
+  inferenceMode?: 'observational_only';
   summary?: {
-    currentPhase?: string;
-    confidence?: number;
-    baselineTempC?: number | null;
     latestTempDelta?: number | null;
     avgHrv?: number | null;
     avgRhr?: number | null;
-    likelyPregnancy?: boolean;
-    pregnancyConfidence?: number;
-  };
-  latest?: {
-    date?: string | null;
-    deltaTemp?: number;
-    tempC?: number;
-    hrv?: number;
-    rhr?: number;
-    spo2?: number;
-    phase?: string;
-    confidence?: number;
   };
   trend?: Array<{
     date: string;
@@ -39,15 +29,7 @@ type FertilityReportResponse = {
     hrv?: number;
     rhr?: number;
     spo2?: number;
-    phase?: string;
-    confidence?: number;
   }>;
-  insights?: {
-    headline?: string;
-    bullets?: string[];
-    recommendations?: Array<{ title: string; detail: string }>;
-  };
-  sources?: Record<string, { source: string; recorded_at?: string | null; inferred?: boolean }>;
 };
 
 const styles = StyleSheet.create({
@@ -160,11 +142,16 @@ function modeLabel(mode?: string | null) {
   return 'Not configured';
 }
 
-async function fetchFertilityReport(origin: string, patientId: string, range: string) {
-  const qs = new URLSearchParams({ patientId, range });
+async function fetchFertilityReport(
+  req: NextRequest,
+  identity: PatientGatewayIdentity,
+  range: string,
+) {
   try {
-    const res = await fetch(`${origin}/api/reports/fertility?${qs.toString()}`, {
+    const qs = new URLSearchParams({ range });
+    const res = await fetch(`${req.nextUrl.origin}/api/reports/fertility?${qs.toString()}`, {
       cache: 'no-store',
+      headers: patientGatewayHeaders({ req, identity }),
     });
     if (!res.ok) return null;
     const json = (await res.json().catch(() => null)) as FertilityReportResponse | null;
@@ -187,6 +174,10 @@ function buildScreeningSummary(screening: Record<string, { lastDoneISO?: string 
 export async function GET(req: NextRequest) {
   const ctx = await resolveLadyPatientContext(req);
   if (!ctx.ok) return jsonErr(ctx.error, ctx.status);
+
+  const identity = await readPatientGatewayIdentity(req);
+  if (!identity) return jsonErr('patient_authentication_required', 401);
+  if (identity.patientId !== ctx.patientId) return jsonErr('patient_context_mismatch', 403);
 
   const range = req.nextUrl.searchParams.get('range') || '90d';
   const { prisma, patientId } = ctx;
@@ -213,7 +204,7 @@ export async function GET(req: NextRequest) {
       orderBy: { date: 'desc' },
       take: 60,
     }),
-    fetchFertilityReport(req.nextUrl.origin, patientId, range),
+    fetchFertilityReport(req, identity, range),
   ]);
 
   const updatedAtISO =
@@ -250,7 +241,7 @@ export async function GET(req: NextRequest) {
       React.createElement(
         Text,
         { style: styles.meta },
-        `Patient: ${patientId} • Range: ${String(range).toUpperCase()} • Generated: ${new Date().toLocaleString()}`
+        `Range: ${String(range).toUpperCase()} • Generated: ${new Date().toLocaleString()}`
       ),
 
       React.createElement(
@@ -284,7 +275,7 @@ export async function GET(req: NextRequest) {
       React.createElement(
         View,
         { style: styles.section },
-        React.createElement(Text, { style: styles.h2 }, 'Fertility / cycle summary'),
+        React.createElement(Text, { style: styles.h2 }, 'Observational physiology'),
         fertility?.ok
           ? React.createElement(
               View,
@@ -295,43 +286,32 @@ export async function GET(req: NextRequest) {
                 React.createElement(
                   View,
                   { style: styles.stat },
-                  React.createElement(Text, { style: styles.statLabel }, 'Current phase'),
-                  React.createElement(Text, { style: styles.statValue }, fertility.summary?.currentPhase || '—')
+                  React.createElement(Text, { style: styles.statLabel }, 'Latest temperature delta'),
+                  React.createElement(Text, { style: styles.statValue }, fmtNum(fertility.summary?.latestTempDelta))
                 ),
                 React.createElement(
                   View,
                   { style: styles.stat },
-                  React.createElement(Text, { style: styles.statLabel }, 'Confidence'),
-                  React.createElement(
-                    Text,
-                    { style: styles.statValue },
-                    `${fmtNum((fertility.summary?.confidence ?? 0) * 100, 0)}%`
-                  )
+                  React.createElement(Text, { style: styles.statLabel }, 'Average HRV'),
+                  React.createElement(Text, { style: styles.statValue }, fmtNum(fertility.summary?.avgHrv))
                 ),
                 React.createElement(
                   View,
                   { style: styles.stat },
-                  React.createElement(Text, { style: styles.statLabel }, 'Pregnancy signal'),
-                  React.createElement(
-                    Text,
-                    { style: styles.statValue },
-                    fertility.summary?.likelyPregnancy ? 'Likely' : 'None'
-                  )
+                  React.createElement(Text, { style: styles.statLabel }, 'Average resting HR'),
+                  React.createElement(Text, { style: styles.statValue }, fmtNum(fertility.summary?.avgRhr))
                 ),
               ),
               React.createElement(
                 Text,
                 { style: styles.bullet },
-                fertility.insights?.headline || 'Fertility summary derived from the patient-scoped fertility adapter.'
-              ),
-              ...(fertility.insights?.bullets || []).slice(0, 4).map((b, i) =>
-                React.createElement(Text, { key: `fert-b-${i}`, style: styles.bullet }, `• ${b}`)
+                'Wearable physiology is shown as observation only. Menstrual phase, ovulation and pregnancy are not inferred from wearable signals.'
               ),
             )
           : React.createElement(
               Text,
               { style: styles.bullet },
-              'Fertility report adapter unavailable.'
+              'Observational wearable physiology is unavailable for this report.'
             ),
       ),
 
@@ -427,7 +407,7 @@ export async function GET(req: NextRequest) {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="lady-center-${patientId}-${Date.now()}.pdf"`,
+      'Content-Disposition': `attachment; filename="ambulant-lady-center-report-${Date.now()}.pdf"`,
       'Cache-Control': 'no-store',
     },
   });

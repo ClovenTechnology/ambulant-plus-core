@@ -10,7 +10,6 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { useSearchParams } from "next/navigation";
 import { Baby, Calendar, FileText } from "lucide-react";
 
 import { generateHealthReport } from "@/src/analytics/report";
@@ -18,7 +17,6 @@ import {
   predictCycleDates,
   type FertilityPrefs,
   type WearablePoint,
-  detectPregnancy,
 } from "@/src/analytics/prediction";
 import { buildFertilityICSUrlFromPrefs } from "@/src/analytics/ics";
 import { track } from "@/src/lib/analytics";
@@ -70,6 +68,11 @@ ChartJS.register(
 
 type LadyMode = "cycle" | "symptoms" | "pregnancy" | "menopause";
 type BannerKind = "info" | "success" | "error";
+type PregnancySignal = {
+  status: "none" | "likely" | "confirmed";
+  confidence: number | null;
+  reasons: string[];
+};
 type DocTag = "Gynae" | "Labs" | "Imaging" | "Rx" | "Notes";
 
 type LadyProfile = {
@@ -261,7 +264,6 @@ const LS = {
   daylogs: "ambulant.lady.daylogs.v2",
   windowDays: "ladyCenter:windowDays",
   series: "ladyCenter:series",
-  pregDismiss: "ladyCenter:pregnancy:dismissedAt",
   legacyDaylogs: "fertilityDayLogs",
 };
 
@@ -351,14 +353,6 @@ function modeLabel(mode: LadyMode) {
   }
 }
 
-function loadPrefsClient(): FertilityPrefs | null {
-  try {
-    const raw = localStorage.getItem("fertilityPrefs");
-    return raw ? (JSON.parse(raw) as FertilityPrefs) : null;
-  } catch {
-    return null;
-  }
-}
 
 function guessTag(fileName: string): DocTag {
   const f = fileName.toLowerCase();
@@ -656,15 +650,6 @@ const SYMPTOM_CHOICES: SymptomChoice[] = [
 ];
 
 function LadyCenterPageContent() {
-  const searchParams = useSearchParams();
-
-  const qs = useMemo(
-    () => new URLSearchParams(searchParams?.toString() ?? ''),
-    [searchParams],
-  );
-
-  const patientId = qs.get("patientId") || "";
-
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -761,8 +746,6 @@ function LadyCenterPageContent() {
   const [toastCopied, setToastCopied] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
 
-  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
-
   const [syncState, setSyncState] = useState<
     "idle" | "syncing" | "ok" | "error"
   >("idle");
@@ -773,10 +756,9 @@ function LadyCenterPageContent() {
 
   const sensitiveHidden = discreet && Date.now() > revealUntil;
   const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const prefs: FertilityPrefs | null = useMemo(
-    () => (mounted ? loadPrefsClient() : null),
-    [mounted],
-  );
+  // Sensitive cycle preferences are no longer sourced from browser storage.
+  // Prediction remains unavailable until a server-authoritative preference contract exists.
+  const prefs = useMemo<FertilityPrefs | null>(() => null, []);
 
   function showBanner(kind: BannerKind, text: string) {
     setBanner({ kind, text });
@@ -788,13 +770,7 @@ function LadyCenterPageContent() {
     track("lady_discreet_reveal", { seconds });
   }
 
-  const apiUrl = useCallback(
-    (path: string) => {
-      if (!patientId) return path;
-      return `${path}${path.includes("?") ? "&" : "?"}patientId=${encodeURIComponent(patientId)}`;
-    },
-    [patientId],
-  );
+  const apiUrl = useCallback((path: string) => path, []);
 
   const patchProfile = useCallback((patch: Partial<LadyProfile>) => {
     setProfile((prev) => ({
@@ -808,7 +784,6 @@ function LadyCenterPageContent() {
     async (days: 14 | 28 | 90) => {
       const r = await apiTry(async () => {
         return await fetchJson<{
-          patientId: string;
           days: number;
           items: TimelineApiItem[];
           generatedAtISO: string;
@@ -859,6 +834,8 @@ function LadyCenterPageContent() {
         LS.screening,
         LS.daylogs,
         LS.legacyDaylogs,
+        "fertilityPrefs",
+        "ladyCenter:pregnancy:dismissedAt",
       ]) {
         localStorage.removeItem(key);
       }
@@ -936,9 +913,7 @@ function LadyCenterPageContent() {
     (async () => {
       const r = await apiTry(async () => {
         return await fetchJson<ViewerProfile>(
-          patientId
-            ? `/api/profile?patientId=${encodeURIComponent(patientId)}`
-            : "/api/profile",
+          "/api/profile",
           {
             method: "GET",
             signal: ac.signal,
@@ -955,7 +930,7 @@ function LadyCenterPageContent() {
     })();
 
     return () => ac.abort();
-  }, [mounted, patientId]);
+  }, [mounted]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -1095,31 +1070,19 @@ function LadyCenterPageContent() {
     });
   }, [baseHistory, prediction]);
 
-  const preg = useMemo(
-    () =>
-      detectPregnancy(effectivePrefs, wearableSeries, predictionLogs, {
-        highAccuracy: true,
-        useLogs: true,
-      }),
-    [effectivePrefs, wearableSeries, predictionLogs],
+  // Wearable physiology remains observational and does not infer pregnancy.
+  // Pregnancy mode is available only through explicit patient setup/action.
+  const preg = useMemo<PregnancySignal>(
+    () => ({
+      status: "none",
+      confidence: null,
+      reasons: [],
+    }),
+    [],
   );
 
-  const showPregnancyBanner = useMemo(() => {
-    if (!mounted) return false;
-    if (preg.status === "none") return false;
-    if (!dismissedAt) return true;
-    const daysSince = (Date.now() - dismissedAt) / 86400000;
-    return daysSince > 7;
-  }, [mounted, preg.status, dismissedAt]);
-
-  const dismissPregnancyBanner = () => {
-    const now = Date.now();
-    setDismissedAt(now);
-    try {
-      localStorage.setItem(LS.pregDismiss, String(now));
-    } catch {}
-    track("pregnancy_dismiss", { status: preg.status });
-  };
+  const showPregnancyBanner = false;
+  const dismissPregnancyBanner = () => undefined;
 
   const trimmedHistory = useMemo(
     () => history.slice(-windowDays),
@@ -1840,7 +1803,6 @@ function LadyCenterPageContent() {
     if (conceivedOn) p.set("conceivedOn", conceivedOn);
     if (prediction?.nextPeriodStart)
       p.set("source", "lady-center-pregnancy-rollover");
-    if (patientId) p.set("patientId", patientId);
     if (preg.status === "confirmed") p.set("preloadMilestones", "1");
 
     return p.toString();
@@ -1848,29 +1810,8 @@ function LadyCenterPageContent() {
     prefs?.lmp,
     prediction?.ovulation,
     prediction?.nextPeriodStart,
-    patientId,
     preg.status,
   ]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    if (preg.status !== "confirmed") return;
-
-    setProfile((prev) => {
-      if (!prev)
-        return {
-          ...defaultProfile("pregnancy"),
-          mode: "pregnancy",
-          trackCycle: false,
-        };
-      if (prev.mode === "pregnancy") return prev;
-      return {
-        ...prev,
-        mode: "pregnancy",
-        trackCycle: false,
-      };
-    });
-  }, [mounted, preg.status]);
 
   const buildCarePathPlan = useCallback(
     (key: string) => {
@@ -2944,32 +2885,16 @@ function buildInsights(
       tone: "info",
       title: prediction
         ? `Next window: ${formatNiceDate(prediction.nextPeriodStart)} → ${formatNiceDate(predictionNextPeriodEnd(prediction) ?? prediction.nextPeriodStart)}`
-        : "Set preferences for predictions",
+        : "Cycle observations",
       summary: prediction
-        ? "This estimate uses your preferences and improves with consistent logs."
-        : "Add LMP + cycle length in Setup Preferences to unlock predictions and calendar subscription.",
+        ? "This estimate uses explicit cycle preferences and logged events."
+        : "Prediction is unavailable until cycle preferences are stored in the authenticated patient record.",
       why: prediction
-        ? "We use the cycle model configured in FertilitySetup, plus your logged events."
-        : "No preferences are set yet.",
-      next: "Log cycle starts and symptoms for 2–3 cycles to refine. If timing varies a lot, Symptoms-only mode can still give clarity.",
+        ? "Only explicit patient-entered cycle anchors are used for calendar estimates."
+        : "Wearable physiology alone is not used to infer menstrual phase, ovulation, or pregnancy.",
+      next: "Continue logging period starts and symptoms. Seek clinician review if changes or symptoms are concerning.",
     });
 
-    if (preg.status && preg.status !== "none") {
-      out.push({
-        id: "i_preg_signal",
-        tone: preg.status === "confirmed" ? "good" : "attention",
-        title:
-          preg.status === "confirmed"
-            ? "Pregnancy signal: confirmed"
-            : "Pregnancy signal detected",
-        summary:
-          "If you can, confirm with a test and discuss with a clinician for next steps.",
-        why: preg.reasons?.length
-          ? preg.reasons.join(" • ")
-          : "We noticed a pattern that can match early pregnancy signals.",
-        next: "Log your test result in the day log. If you feel unwell or worried, please consult a clinician.",
-      });
-    }
   } else if (mode === "pregnancy") {
     out.push({
       id: "i_preg",
