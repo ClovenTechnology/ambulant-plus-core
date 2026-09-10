@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  patientGatewayHeaders,
+  readPatientGatewayIdentity,
+  type PatientGatewayIdentity,
+} from '@/src/lib/gateway-identity';
 import { getFertilityStatus } from '@/src/analytics/fertility';
 import { detectPregnancy, computeAnomalies, summarizeCycleChanges } from '@/src/analytics/prediction';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function isProductionRuntime() {
-  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
-}
 
 type RangeKey = '7d' | '30d' | '90d' | '1y';
 
@@ -108,15 +110,10 @@ function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
 }
 
-function smoothRand(seed: number) {
-  let t = seed % 2147483647;
-  return () => {
-    t = (t * 48271) % 2147483647;
-    return (t & 0xfffffff) / 0xfffffff;
-  };
-}
 
 async function fetchVitalsForType(
+  req: NextRequest,
+  identity: PatientGatewayIdentity,
   origin: string,
   patientId: string,
   type?: string,
@@ -132,7 +129,10 @@ async function fetchVitalsForType(
     qs.toString() ? `?${qs.toString()}` : ''
   }`;
 
-  const r = await fetch(url, { cache: 'no-store' });
+  const r = await fetch(url, {
+    cache: 'no-store',
+    headers: patientGatewayHeaders({ req, identity }),
+  });
   if (!r.ok) return [];
 
   const j = await r.json().catch(() => ({ items: [] }));
@@ -142,171 +142,6 @@ async function fetchVitalsForType(
 function toDateISO(v: string | null): string | null {
   if (!v) return null;
   return v.slice(0, 10);
-}
-
-function buildMockFertilityReport(patientId: string, range: RangeKey, lmp?: string | null, cycleDays?: number | null): FertilityReportResponse {
-  const days = rangeToDays(range);
-  const now = new Date();
-  const rnd = smoothRand(now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate());
-
-  let tempBase = 36.5;
-  let hrvBase = 56;
-  let rhrBase = 59;
-  let spo2Base = 98;
-
-  const temps: number[] = [];
-  const hrvArr: number[] = [];
-  const rhrArr: number[] = [];
-  const trend: FertilityTrendPoint[] = [];
-
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(now.getDate() - i);
-
-    const cycleLen = cycleDays && cycleDays >= 21 && cycleDays <= 35 ? cycleDays : 28;
-    const cycleDay = ((days - i) % cycleLen) + 1;
-    const aroundOvulation = cycleDay >= cycleLen - 15 && cycleDay <= cycleLen - 12;
-    const luteal = cycleDay > cycleLen - 12;
-
-    const tempC = clamp(
-      tempBase +
-        (luteal ? 0.25 : 0) +
-        (aroundOvulation ? 0.05 : 0) +
-        (rnd() * 0.12 - 0.06),
-      36.1,
-      37.2,
-    );
-    const hrv = clamp(
-      hrvBase - (aroundOvulation ? 8 : 0) + (rnd() * 6 - 3),
-      25,
-      95,
-    );
-    const rhr = clamp(
-      rhrBase + (luteal ? 4 : 0) + (rnd() * 4 - 2),
-      45,
-      85,
-    );
-    const spo2 = clamp(
-      spo2Base + (rnd() * 2 - 1),
-      94,
-      100,
-    );
-
-    temps.push(tempC);
-    hrvArr.push(hrv);
-    rhrArr.push(rhr);
-
-    trend.push({
-      date: d.toISOString().slice(0, 10),
-      tempC,
-      hrv: Math.round(hrv),
-      rhr: Math.round(rhr),
-      spo2: Math.round(spo2),
-    });
-  }
-
-  const baseline = avg(temps.slice(0, Math.min(14, temps.length))) ?? 36.5;
-  const points = trend.map((p) => ({
-    ...p,
-    deltaTemp: typeof p.tempC === 'number' ? Number((p.tempC - baseline).toFixed(2)) : undefined,
-  }));
-
-  const phase = getFertilityStatus(
-    points.map((p) => p.deltaTemp ?? 0),
-    points.map((p) => p.hrv ?? 0),
-    points.map((p) => p.rhr ?? 0),
-    baseline,
-  );
-
-  const pregnancy = detectPregnancy(
-    lmp && cycleDays ? { lmp, cycleDays } : null,
-    points.map((p) => ({
-      date: p.date,
-      deltaTemp: p.deltaTemp,
-      hrv: p.hrv,
-      rhr: p.rhr,
-      spo2: p.spo2,
-    })),
-    {},
-    { highAccuracy: true },
-  );
-
-  const enriched = points.map((p) => ({
-    ...p,
-    phase: phase.phase,
-    confidence: phase.confidence,
-  }));
-
-  const latest = enriched[enriched.length - 1] || null;
-  const bullets = summarizeCycleChanges(
-    enriched.map((p) => ({
-      date: p.date,
-      deltaTemp: p.deltaTemp,
-      hrv: p.hrv,
-      rhr: p.rhr,
-      spo2: p.spo2,
-    })),
-  );
-
-  return {
-    ok: true,
-    patientId,
-    range,
-    generatedAtISO: new Date().toISOString(),
-    mock: true,
-    summary: {
-      currentPhase: phase.phase,
-      confidence: phase.confidence,
-      baselineTempC: baseline,
-      latestTempDelta: latest?.deltaTemp ?? null,
-      avgHrv: avg(enriched.map((p) => p.hrv)),
-      avgRhr: avg(enriched.map((p) => p.rhr)),
-      likelyPregnancy: pregnancy.status === 'likely' || pregnancy.status === 'confirmed',
-      pregnancyConfidence: pregnancy.confidence,
-      sampleCounts: {
-        temperature: enriched.length,
-        temperatureDeviation: 0,
-        hrv: enriched.length,
-        rhr: enriched.length,
-        spo2: enriched.length,
-      },
-    },
-    latest: latest
-      ? {
-          date: latest.date,
-          deltaTemp: latest.deltaTemp,
-          tempC: latest.tempC,
-          hrv: latest.hrv,
-          rhr: latest.rhr,
-          spo2: latest.spo2,
-          phase: latest.phase,
-          confidence: latest.confidence,
-        }
-      : {
-          date: null,
-        },
-    trend: enriched,
-    insights: {
-      headline: 'Live fertility data is pending until persisted wearable-derived fertility inputs are available.',
-      bullets,
-      recommendations: [
-        {
-          title: 'Build continuous wear history',
-          detail: 'Fertility interpretation improves when temperature, HRV, and resting HR stay continuous across more cycle days.',
-        },
-        {
-          title: 'Add cycle anchors',
-          detail: 'LMP, period logs, and ovulation confirmations strengthen confidence dramatically.',
-        },
-      ],
-    },
-    sources: {
-      temperature: { source: 'mock_fertility_generator', recorded_at: latest?.date ?? null, inferred: true },
-      hrv: { source: 'mock_fertility_generator', recorded_at: latest?.date ?? null, inferred: true },
-      rhr: { source: 'mock_fertility_generator', recorded_at: latest?.date ?? null, inferred: true },
-      spo2: { source: 'mock_fertility_generator', recorded_at: latest?.date ?? null, inferred: true },
-    },
-  };
 }
 
 function buildUnavailableFertilityReport(patientId: string, range: RangeKey): FertilityReportResponse {
@@ -366,9 +201,16 @@ function buildUnavailableFertilityReport(patientId: string, range: RangeKey): Fe
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-
-  const patientId = url.searchParams.get('patientId') || 'patient-123';
   const range = parseRange(url.searchParams.get('range'));
+  const identity = await readPatientGatewayIdentity(req);
+  if (!identity) {
+    return NextResponse.json({ ok: false, error: 'patient_authentication_required' }, { status: 401 });
+  }
+  const requestedPatientId = String(url.searchParams.get('patientId') || '').trim();
+  if (requestedPatientId && requestedPatientId !== identity.patientId) {
+    return NextResponse.json({ ok: false, error: 'patient_context_mismatch' }, { status: 403 });
+  }
+  const patientId = identity.patientId;
   const lmp = url.searchParams.get('lmp');
   const cycleDays = (() => {
     const n = Number(url.searchParams.get('cycleDays'));
@@ -383,12 +225,12 @@ export async function GET(req: NextRequest) {
   const to = now.toISOString();
 
   const [tempRows, tempDeviationRows, hrvRows, rhrRows, hrRows, spo2Rows] = await Promise.all([
-    fetchVitalsForType(url.origin, patientId, 'temperature', from, to),
-    fetchVitalsForType(url.origin, patientId, 'temperature_deviation', from, to),
-    fetchVitalsForType(url.origin, patientId, 'hrv', from, to),
-    fetchVitalsForType(url.origin, patientId, 'resting_heart_rate', from, to),
-    fetchVitalsForType(url.origin, patientId, 'heart_rate', from, to),
-    fetchVitalsForType(url.origin, patientId, 'spo2', from, to),
+    fetchVitalsForType(req, identity, url.origin, patientId, 'temperature', from, to),
+    fetchVitalsForType(req, identity, url.origin, patientId, 'temperature_deviation', from, to),
+    fetchVitalsForType(req, identity, url.origin, patientId, 'hrv', from, to),
+    fetchVitalsForType(req, identity, url.origin, patientId, 'resting_heart_rate', from, to),
+    fetchVitalsForType(req, identity, url.origin, patientId, 'heart_rate', from, to),
+    fetchVitalsForType(req, identity, url.origin, patientId, 'spo2', from, to),
   ]);
 
   const byDate = new Map<string, FertilityTrendPoint>();
@@ -502,11 +344,7 @@ export async function GET(req: NextRequest) {
     trend.some((t) => typeof t.rhr === 'number');
 
   if (!meaningful) {
-    if (isProductionRuntime()) {
-      return NextResponse.json(buildUnavailableFertilityReport(patientId, range));
-    }
-
-    return NextResponse.json(buildMockFertilityReport(patientId, range, lmp, cycleDays));
+    return NextResponse.json(buildUnavailableFertilityReport(patientId, range));
   }
 
   const tempSeries = trend.map((p) => p.tempC).filter((n): n is number => typeof n === 'number');

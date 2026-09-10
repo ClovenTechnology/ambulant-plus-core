@@ -829,63 +829,39 @@ function LadyCenterPageContent() {
     [apiUrl],
   );
 
-  // Local hydrate only
+  // Local hydrate: non-sensitive UI preferences only.
+  // Clinical and reproductive-health records are server-authoritative.
   useEffect(() => {
     if (!mounted) return;
 
     try {
       const d = localStorage.getItem(LS.discreet);
       setDiscreet(d === "1");
-    } catch {}
 
-    const p = safeJsonParse<LadyProfile>(localStorage.getItem(LS.profile));
-    setProfile(p);
-
-    const dd = safeJsonParse<LadyDoc[]>(localStorage.getItem(LS.docs));
-    setDocs(dd ?? []);
-
-    const nn = safeJsonParse<
-      { id: string; text: string; createdISO: string }[]
-    >(localStorage.getItem(LS.notes));
-    setNotes(nn ?? []);
-
-    const ss = safeJsonParse<Record<string, { lastDoneISO?: string | null }>>(
-      localStorage.getItem(LS.screening),
-    );
-    setScreening(ss ?? {});
-
-    const dlNew = safeJsonParse<Record<string, DayLog>>(
-      localStorage.getItem(LS.daylogs),
-    );
-    if (dlNew) {
-      setDayLogs(dlNew);
-    } else {
-      const legacy = safeJsonParse<Record<string, DayLog>>(
-        localStorage.getItem(LS.legacyDaylogs),
-      );
-      if (legacy) {
-        setDayLogs(legacy);
-        try {
-          localStorage.setItem(LS.daylogs, JSON.stringify(legacy));
-        } catch {}
-      }
-    }
-
-    try {
       const w = localStorage.getItem(LS.windowDays);
-      if (w && ["14", "28", "90"].includes(w))
+      if (w && ["14", "28", "90"].includes(w)) {
         setWindowDays(Number(w) as 14 | 28 | 90);
+      }
+
       const s = localStorage.getItem(LS.series);
-      if (s)
+      if (s) {
         setVisibleSeries((prev) => ({
           ...prev,
           ...(safeJsonParse<Record<string, boolean>>(s) ?? {}),
         }));
-    } catch {}
+      }
 
-    try {
-      const ds = localStorage.getItem(LS.pregDismiss);
-      if (ds) setDismissedAt(Number(ds));
+      // Remove historical browser copies of Lady Center clinical records.
+      for (const key of [
+        LS.profile,
+        LS.docs,
+        LS.notes,
+        LS.screening,
+        LS.daylogs,
+        LS.legacyDaylogs,
+      ]) {
+        localStorage.removeItem(key);
+      }
     } catch {}
   }, [mounted]);
 
@@ -937,27 +913,6 @@ function LadyCenterPageContent() {
         setScreening(remote.screening ?? {});
         setDayLogs(remote.dayLogs ?? {});
 
-        try {
-          localStorage.setItem(
-            LS.profile,
-            JSON.stringify(remote.profile ?? null),
-          );
-          localStorage.setItem(LS.docs, JSON.stringify(remote.docs ?? []));
-          localStorage.setItem(LS.notes, JSON.stringify(remote.notes ?? []));
-          localStorage.setItem(
-            LS.screening,
-            JSON.stringify(remote.screening ?? {}),
-          );
-          localStorage.setItem(
-            LS.daylogs,
-            JSON.stringify(remote.dayLogs ?? {}),
-          );
-          localStorage.setItem(
-            LS.legacyDaylogs,
-            JSON.stringify(remote.dayLogs ?? {}),
-          );
-        } catch {}
-
         await loadTimeline(90);
       }
 
@@ -1008,43 +963,6 @@ function LadyCenterPageContent() {
       localStorage.setItem(LS.discreet, discreet ? "1" : "0");
     } catch {}
   }, [discreet, mounted]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    try {
-      if (profile) localStorage.setItem(LS.profile, JSON.stringify(profile));
-      else localStorage.removeItem(LS.profile);
-    } catch {}
-  }, [profile, mounted]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    try {
-      localStorage.setItem(LS.docs, JSON.stringify(docs));
-    } catch {}
-  }, [docs, mounted]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    try {
-      localStorage.setItem(LS.notes, JSON.stringify(notes));
-    } catch {}
-  }, [notes, mounted]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    try {
-      localStorage.setItem(LS.screening, JSON.stringify(screening));
-    } catch {}
-  }, [screening, mounted]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    try {
-      localStorage.setItem(LS.daylogs, JSON.stringify(dayLogs));
-      localStorage.setItem(LS.legacyDaylogs, JSON.stringify(dayLogs));
-    } catch {}
-  }, [dayLogs, mounted]);
 
   useEffect(() => {
     if (!mounted) return;

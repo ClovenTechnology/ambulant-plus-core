@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/api/vitals/route.ts
+// apps/patient-app/app/api/vitals/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -64,10 +64,7 @@ function normalizeTrendPoint(point: any): PublicVital | null {
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const range = url.searchParams.get('range') || '30d';
-  const patientId = url.searchParams.get('patientId') || '';
-
   const qs = new URLSearchParams({ range });
-  if (patientId) qs.set('patientId', patientId);
 
   const res = await fetch(`${url.origin}/api/reports/vitals?${qs.toString()}`, {
     cache: 'no-store',

@@ -1,5 +1,10 @@
 // apps/patient-app/app/api/reports/vitals/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  patientGatewayHeaders,
+  readPatientGatewayIdentity,
+  type PatientGatewayIdentity,
+} from '@/src/lib/gateway-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -170,26 +175,28 @@ function latestMetric(rows: VitalRow[], keys: string[], pick: (row: VitalRow) =>
   return found || null;
 }
 
-async function resolvePatientId(req: NextRequest) {
-  const url = new URL(req.url);
-  const queryPatientId = String(url.searchParams.get('patientId') || '').trim();
-  if (queryPatientId) return queryPatientId;
+async function resolvePatientContext(req: NextRequest) {
+  const identity = await readPatientGatewayIdentity(req);
+  if (!identity) return { identity: null, mismatch: false };
 
-  const profileRes = await fetch(`${url.origin}/api/profile`, {
-    cache: 'no-store',
-    headers: {
-      cookie: req.headers.get('cookie') || '',
-      authorization: req.headers.get('authorization') || '',
-    },
-  }).catch(() => null);
+  const requestedPatientId = String(
+    req.nextUrl.searchParams.get('patientId') || '',
+  ).trim();
 
-  if (!profileRes?.ok) return '';
-
-  const profile = await profileRes.json().catch(() => null);
-  return String(profile?.patientId || profile?.id || '').trim();
+  return {
+    identity,
+    mismatch:
+      Boolean(requestedPatientId) &&
+      requestedPatientId !== identity.patientId,
+  };
 }
 
-async function loadVitals(req: NextRequest, patientId: string, range: RangeKey) {
+async function loadVitals(
+  req: NextRequest,
+  identity: PatientGatewayIdentity,
+  range: RangeKey,
+) {
+  const patientId = identity.patientId;
   const to = new Date();
   const from = new Date(to.getTime() - rangeDays(range) * 24 * 60 * 60 * 1000);
   const qs = new URLSearchParams({
@@ -203,10 +210,10 @@ async function loadVitals(req: NextRequest, patientId: string, range: RangeKey) 
     `${url.origin}/api/v1/patients/${encodeURIComponent(patientId)}/vitals?${qs.toString()}`,
     {
       cache: 'no-store',
-      headers: {
-        cookie: req.headers.get('cookie') || '',
-        authorization: req.headers.get('authorization') || '',
-      },
+      headers: patientGatewayHeaders({
+        req,
+        identity,
+      }),
     },
   ).catch(() => null);
 
@@ -409,7 +416,17 @@ function normalizeTrend(rows: VitalRow[]) {
 
 export async function GET(req: NextRequest) {
   const range = parseRange(req.nextUrl.searchParams.get('range'));
-  const patientId = await resolvePatientId(req);
+  const { identity, mismatch } = await resolvePatientContext(req);
+
+  if (!identity) {
+    return json({ ok: false, error: 'patient_authentication_required' }, 401);
+  }
+
+  if (mismatch) {
+    return json({ ok: false, error: 'patient_context_mismatch' }, 403);
+  }
+
+  const patientId = identity.patientId;
 
   if (!patientId) {
     return json({
@@ -433,7 +450,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const rows = await loadVitals(req, patientId, range);
+  const rows = await loadVitals(req, identity, range);
   const trend = normalizeTrend(rows);
 
   const latestTs =
