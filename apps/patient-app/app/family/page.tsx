@@ -63,7 +63,7 @@ function FamilyPageContent() {
   );
 
   const acceptToken = qs.get('token');
-  const demoMode = qs.get('demo') === '1';
+  const demoMode = process.env.NODE_ENV !== 'production' && qs.get('demo') === '1';
 
   const [me, setMe] = useState<AuthMe | null>(null);
 
@@ -220,7 +220,7 @@ function FamilyPageContent() {
 
       const combined = [...activeMembers, ...pendingInviteMembers];
 
-      if (combined.length === 0 && demoMode && process.env.NODE_ENV !== 'production') {
+      if (combined.length === 0 && demoMode) {
         setUsingMock(true);
         setMockNote('Development fallback is enabled because no live family links were found.');
         applyMembers(buildMockFamilyMembers());

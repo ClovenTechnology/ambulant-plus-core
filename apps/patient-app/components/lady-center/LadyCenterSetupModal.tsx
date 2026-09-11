@@ -133,7 +133,7 @@ export default function LadyCenterSetupModal(props: {
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <div className="text-sm font-semibold text-slate-900">Reproductive context</div>
                 <div className="mt-1 text-sm text-slate-600">
-                  These settings improve fertility, pregnancy, and irregularity interpretation.
+                  These settings add context to cycle, pregnancy, and symptom tracking.
                 </div>
 
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -169,7 +169,7 @@ export default function LadyCenterSetupModal(props: {
                   <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:col-span-2">
                     <div>
                       <div className="text-sm font-medium text-slate-900">Trying to conceive</div>
-                      <div className="text-xs text-slate-600">This helps tune fertile-window and pregnancy interpretation.</div>
+                      <div className="text-xs text-slate-600">This adds context to cycle tracking; it does not diagnose ovulation or pregnancy.</div>
                     </div>
                     <button
                       className={[

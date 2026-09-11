@@ -242,7 +242,7 @@ export function TopBar(props: {
   return (
     <header className="sticky top-0 z-40 flex items-center justify-between p-4 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 shadow-sm">
       <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold">Patient Console — Room {roomId}</h1>
+        <h1 className="text-xl font-semibold">Patient Consultation Console</h1>
         <span className="text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border">
           <span
             className={`h-2 w-2 rounded-full ${
@@ -830,9 +830,7 @@ function SessionInfo({ appt }: { appt: any }) {
   return (
     <div className="grid grid-cols-1 gap-2">
       <Field label="Patient Name" value={appt.patientName} />
-      <Field label="Patient ID" value={appt.patientId} />
       <Field label="Case Name" value={appt.reason} bold />
-      <Field label="Session ID" value={<span className="font-mono">{appt.id}</span>} />
       <Field label="Session Date" value={<SafeDate iso={appt.when} />} />
       <Field label="Clinician" value={appt.clinicianName} />
       <Field label="Status" value={appt.status} />

@@ -358,57 +358,12 @@ function makePatientSfuLink(roomId: string, ctx: Ctx) {
   return `/sfu/${encodeURIComponent(room)}?${query.toString()}`;
 }
 
-function readVitalsSnapshot(roomId: string, patientId?: string) {
-  if (typeof window === 'undefined') return null;
-
-  const keys = [
-    `latestVitals:${roomId}`,
-    `vitals:${roomId}`,
-    `patient-lobby-vitals:${roomId}`,
-    patientId ? `latestVitals:${patientId}` : '',
-    patientId ? `vitals:${patientId}` : '',
-  ].filter(Boolean);
-
-  for (const key of keys) {
-    try {
-      const raw = window.localStorage.getItem(key);
-      if (!raw) continue;
-
-      const parsed = JSON.parse(raw) as SnapshotVitals;
-      if (parsed && typeof parsed === 'object') return parsed;
-    } catch {
-      // Ignore malformed local snapshots.
-    }
-  }
-
+function readVitalsSnapshot(_roomId: string, _patientId?: string): SnapshotVitals | null {
   return null;
 }
 
-function writeVitalsSnapshot(args: {
-  roomId: string;
-  patientId?: string;
-  vitals: SnapshotVitals;
-}) {
-  if (typeof window === 'undefined') return;
-
-  const { roomId, patientId, vitals } = args;
-  const payload = JSON.stringify(vitals);
-
-  const keys = [
-    `latestVitals:${roomId}`,
-    `vitals:${roomId}`,
-    `patient-lobby-vitals:${roomId}`,
-    patientId ? `latestVitals:${patientId}` : '',
-    patientId ? `vitals:${patientId}` : '',
-  ].filter(Boolean);
-
-  keys.forEach((key) => {
-    try {
-      window.localStorage.setItem(key, payload);
-    } catch {
-      // Storage can fail in restricted/private contexts.
-    }
-  });
+function writeVitalsSnapshot(_args: { roomId: string; patientId?: string; vitals: SnapshotVitals }) {
+  // Consultation vitals are not persisted in browser storage.
 }
 
 function toNumber(value: string) {
@@ -1401,7 +1356,7 @@ export default function PatientLobbyPage() {
     });
 
     setVitalsSnapshot(snapshot);
-    setManualSaveNote('Manual vitals saved locally for this consultation room.');
+    setManualSaveNote('Manual vitals prepared for this consultation.');
     setActionAudit((prev) =>
       [`${formatZaTime()} · Manual vitals saved`, ...prev].slice(
         0,
@@ -1411,7 +1366,7 @@ export default function PatientLobbyPage() {
 
     if (!ctx.patientId) {
       setManualSaveNote(
-        'Manual vitals were saved locally. Add patientId to the lobby URL to persist them to the patient record.',
+        'Patient identity could not be verified for this appointment. Return to your appointments and reopen the consultation.',
       );
       return;
     }
@@ -1498,7 +1453,7 @@ export default function PatientLobbyPage() {
 
       if (failed.length > 0) {
         setManualSaveNote(
-          'Manual vitals were saved locally, but one or more server writes failed. Please retry if needed.',
+          'One or more vital-sign writes failed. Please retry if needed.',
         );
       } else {
         setManualSaveNote(
@@ -1508,7 +1463,7 @@ export default function PatientLobbyPage() {
     } catch (err: any) {
       setManualSaveNote(
         err?.message ||
-          'Manual vitals were saved locally, but could not be sent to the patient record.',
+          'Manual vitals could not be saved to the patient record.',
       );
     } finally {
       setManualSaving(false);
@@ -1540,7 +1495,7 @@ export default function PatientLobbyPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Pill tone="info">Room: {roomId || '—'}</Pill>
+              <Pill tone="info">Consultation room: {roomId ? 'Ready' : 'Pending'}</Pill>
               <Pill
                 tone={
                   readinessScore >= 80
@@ -1602,7 +1557,7 @@ export default function PatientLobbyPage() {
             >
               <div className="grid gap-3 sm:grid-cols-2">
                 <Stat label="Patient" value={ctx.patientName || 'Not provided'} />
-                <Stat label="Patient ID" value={ctx.patientId || 'Not provided'} />
+                <Stat label="Patient identity" value={ctx.patientId ? 'Verified' : 'Not resolved'} />
                 <Stat
                   label="Clinician"
                   value={ctx.clinicianName || 'Not provided'}

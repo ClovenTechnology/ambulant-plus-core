@@ -295,8 +295,6 @@ function StickyHeader({
             <div className="text-xxs md:text-xs text-gray-500 flex items-center gap-1">
               <Clock className="w-3.5 h-3.5" aria-hidden />
               <span>Last sync: {lastSyncHuman ?? 'Not yet synced'}</span>
-              <span className="mx-1">•</span>
-              <span>ID {profile?.patientId ?? patientId}</span>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-2 mx-3 overflow-x-auto">
@@ -582,33 +580,25 @@ function ExportComposer({
   async function downloadServerPdf() {
     try {
       setDownloading(true);
-      const res = await fetch('/api/reports/patient', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          fromDate,
-          toDate,
-          sections: includeSections,
-          signOff,
-          clinicianName: '',
-          clinicianSignatureDataUrl: '',
-          patientId: patient?.patientId || undefined,
-        }),
-      });
-      if (!res.ok) {
-        const t = await res.text().catch(() => '');
-        throw new Error(t || 'Failed');
-      }
-      const blob = await res.blob();
+      const fromMs = Date.parse(fromDate);
+      const toMs = Date.parse(toDate);
+      const days = Number.isFinite(fromMs) && Number.isFinite(toMs)
+        ? Math.max(1, Math.ceil((toMs - fromMs) / 86_400_000))
+        : 7;
+      const range = days <= 7 ? '7d' : days <= 30 ? '30d' : days <= 90 ? '90d' : '1y';
+      const res = await fetch(`/api/reports/vitals?range=${range}`, { cache: 'no-store' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || 'verified_vitals_report_failed');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'ambulant-patient-report.pdf';
+      a.download = `ambulant-verified-vitals-${range}.json`;
       a.click();
       URL.revokeObjectURL(url);
       onAfterDownload?.();
     } catch {
-      alert('PDF export failed');
+      alert('Verified vitals export failed');
     } finally {
       setDownloading(false);
     }
@@ -621,7 +611,7 @@ function ExportComposer({
   return (
     <SectionCard
       title="Report composer"
-      subtitle="Build an audit-ready report for a date range."
+      subtitle="Export a verified projection from the live vitals record."
       status={
         <button
           className="text-xs px-2 py-1 rounded-lg border inline-flex items-center gap-1 bg-white"
@@ -701,7 +691,7 @@ function ExportComposer({
           disabled={downloading}
           onClick={downloadServerPdf}
         >
-          {downloading ? 'Preparing...' : 'Download PDF (server)'}
+          {downloading ? 'Preparing...' : 'Download verified data'}
         </button>
       </div>
       <ReportHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
@@ -709,97 +699,11 @@ function ExportComposer({
   );
 }
 
-function SavedExports({ patientId }: { patientId: string }) {
-  const [rows, setRows] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        setLoading(true);
-        const r = await fetch(
-          `/api/reports/patient?patientId=${encodeURIComponent(patientId)}&limit=20`,
-          { cache: 'no-store' }
-        );
-        const j = await r.json().catch(() => ({ items: [] }));
-        if (!mounted) return;
-        setRows(j.items || []);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [patientId]);
-
+function SavedExports() {
   return (
-    <SectionCard title="Saved exports" subtitle="Previously generated PDFs">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left border-b">
-              <th className="py-2 pr-3">Created</th>
-              <th className="py-2 pr-3">Range</th>
-              <th className="py-2 pr-3">Brand</th>
-              <th className="py-2 pr-3">Sections</th>
-              <th className="py-2 pr-3">Size</th>
-              <th className="py-2 pr-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr>
-                <td colSpan={6} className="py-4 text-center text-slate-500">
-                  Loading...
-                </td>
-              </tr>
-            )}
-            {!loading && rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="py-4 text-center text-slate-500">
-                  No exports yet
-                </td>
-              </tr>
-            )}
-            {rows.map((r: any) => (
-              <tr key={r.id} className="border-b">
-                <td className="py-2 pr-3">{new Date(r.createdAt).toLocaleString()}</td>
-                <td className="py-2 pr-3">
-                  {r.fromDate?.slice(0, 10)} → {r.toDate?.slice(0, 10)}
-                </td>
-                <td className="py-2 pr-3">{r.brand}</td>
-                <td className="py-2 pr-3">
-                  <div className="flex flex-wrap gap-1">
-                    {Object.entries(r.sections || {})
-                      .filter(([, v]) => v)
-                      .map(([k]) => (
-                        <span key={k} className="px-2 py-0.5 rounded-full border text-xs">
-                          {String(k).replace('spo2', 'SpO₂')}
-                        </span>
-                      ))}
-                  </div>
-                </td>
-                <td className="py-2 pr-3">{r.fileBytes ? `${Math.round(r.fileBytes / 1024)} KB` : '—'}</td>
-                <td className="py-2 pr-3">
-                  <div className="flex gap-2">
-                    {r.fileUrl && (
-                      <a className="px-2 py-1 rounded border" href={r.fileUrl} target="_blank" rel="noreferrer">
-                        Download
-                      </a>
-                    )}
-                    <form method="post" action={`/api/reports/patient/${r.id}/recreate`}>
-                      <button className="px-2 py-1 rounded border bg-white" type="submit">
-                        Recreate
-                      </button>
-                    </form>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <SectionCard title="Verified exports" subtitle="Exports are generated from the live vitals record on demand.">
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+        Legacy server-saved report files have been retired. Use “Download verified data” above to export the current authenticated record.
       </div>
     </SectionCard>
   );
@@ -2312,7 +2216,7 @@ function HealthMonitorPageInner() {
   }, []);
 
   function shareSummary() {
-    const text = `Ambulant+ Health Monitor summary for patient ${patientId} on ${new Date().toLocaleString(locale)}`;
+    const text = `Ambulant+ Health Monitor summary on ${new Date().toLocaleString(locale)}`;
     if (navigator.share) {
       navigator.share({ title: 'Health summary', text }).catch(() => {});
     } else {
@@ -2798,7 +2702,7 @@ function HealthMonitorPageInner() {
             {patientId ? (
               <>
                 <ExportComposer patient={profile} vitalsSummary={vitalsSummary ?? EMPTY_SUMMARY} onAfterDownload={() => {}} />
-                <SavedExports patientId={patientId} />
+                <SavedExports />
               </>
             ) : (
               <SectionCard
@@ -2814,7 +2718,7 @@ function HealthMonitorPageInner() {
         )}
 
         <div aria-live="polite" className="sr-only">
-          Current locale {locale}. Patient {profile?.name ?? 'Patient'}. Room {roomId}. PPG samples {livePpgSamples.length}.
+          Current locale {locale}. Patient {profile?.name ?? 'Patient'}. PPG samples {livePpgSamples.length}.
         </div>
       </main>
 

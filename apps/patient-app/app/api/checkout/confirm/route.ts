@@ -1,6 +1,7 @@
-﻿// apps/patient-app/app/api/checkout/confirm/route.ts
+// apps/patient-app/app/api/checkout/confirm/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getAppointment, updateAppointment } from '@/app/api/_store';
+import { patientGatewayHeaders, readPatientGatewayIdentity } from '@/src/lib/gateway-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,46 +39,20 @@ function apiGatewayBase() {
   ).replace(/\/+$/, '');
 }
 
-function forwardJsonHeaders(req: NextRequest) {
-  const headers = new Headers();
-
-  const passthrough = [
-    'authorization',
-    'cookie',
-    'x-ambulant-identity',
-    'x-ambulant-user-id',
-    'x-ambulant-org-id',
-    'x-ambulant-role',
-    'x-user-id',
-    'x-uid',
-    'x-role',
-    'x-email',
-    'x-name',
-    'x-display-name',
-    'x-org-id',
-    'x-correlation-id',
-    'x-request-id',
-  ];
-
-  for (const key of passthrough) {
-    const value = req.headers.get(key);
-    if (value) headers.set(key, value);
-  }
-
-  headers.set('content-type', 'application/json');
-  headers.set('accept', 'application/json');
-
-  return headers;
+function forwardJsonHeaders(req: NextRequest, identity: NonNullable<Awaited<ReturnType<typeof readPatientGatewayIdentity>>>) {
+  return patientGatewayHeaders({ req, identity, includeJson: true });
 }
 
+
 async function fetchMedicalAids(
+  req: NextRequest,
   origin: string,
-  patientId: string,
+  identity: NonNullable<Awaited<ReturnType<typeof readPatientGatewayIdentity>>>,
 ): Promise<MedicalAidMembership[]> {
   try {
     const res = await fetch(
-      `${origin}/api/medical-aids?patientId=${encodeURIComponent(patientId)}`,
-      { cache: 'no-store' },
+      `${origin}/api/medical-aids`,
+      { cache: 'no-store', headers: patientGatewayHeaders({ req, identity }) },
     );
 
     if (!res.ok) return [];
@@ -136,6 +111,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const identity = await readPatientGatewayIdentity(req);
+    if (!identity) {
+      return json({ ok: false, error: 'patient_authentication_required' }, 401);
+    }
+
     const url = new URL(req.url);
     const queryId = url.searchParams.get('a') || url.searchParams.get('id');
 
@@ -171,12 +151,15 @@ export async function POST(req: NextRequest) {
       'caseId_required',
     );
 
-    const patientId = requireContextId(
-      body,
-      appt,
-      ['patientId', 'patientUserId'],
-      'patientId_required',
-    );
+    const appointmentPatientId = cleanId(appt?.patientId || appt?.patientUserId);
+    const suppliedPatientId = cleanId(body?.patientId || body?.patientUserId);
+    if (appointmentPatientId && appointmentPatientId !== identity.patientId) {
+      return json({ ok: false, error: 'appointment_patient_context_mismatch' }, 403);
+    }
+    if (suppliedPatientId && suppliedPatientId !== identity.patientId) {
+      return json({ ok: false, error: 'patient_context_mismatch' }, 403);
+    }
+    const patientId = identity.patientId;
 
     const clinicianId = requireContextId(
       body,
@@ -199,7 +182,7 @@ export async function POST(req: NextRequest) {
 
     const amountCents = Math.max(0, Math.round(amountZAR * 100));
 
-    const medicalAids = await fetchMedicalAids(url.origin, patientId);
+    const medicalAids = await fetchMedicalAids(req, url.origin, identity);
     const membership = pickActiveMembership(medicalAids);
 
     let paymentMethod: PaymentMethod = 'self-pay-card';
@@ -218,7 +201,7 @@ export async function POST(req: NextRequest) {
     if (paymentMethod === 'self-pay-card') {
       const res = await fetch(`${gatewayBase}/api/payments`, {
         method: 'POST',
-        headers: forwardJsonHeaders(req),
+        headers: forwardJsonHeaders(req, identity),
         body: JSON.stringify({
           amountCents,
           currency: 'ZAR',
@@ -264,7 +247,7 @@ export async function POST(req: NextRequest) {
 
       const res = await fetch(`${gatewayBase}/api/vouchers/redeem`, {
         method: 'POST',
-        headers: forwardJsonHeaders(req),
+        headers: forwardJsonHeaders(req, identity),
         body: JSON.stringify({
           code: voucherCode,
           encounterId,

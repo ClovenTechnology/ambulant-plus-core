@@ -1,5 +1,5 @@
-// apps/patient-app/app/api/insightcore/alerts/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { patientGatewayHeaders, readPatientGatewayIdentity } from '@/src/lib/gateway-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,62 +13,34 @@ const GATEWAY_ORIGIN = (
 ).replace(/\/+$/, '');
 
 function jsonError(message: string, status = 500, details?: Record<string, unknown>) {
-  return NextResponse.json(
-    {
-      ok: false,
-      error: message,
-      ...(details ? { details } : {}),
-    },
-    { status },
-  );
-}
-
-function requireGatewayOrigin(): string {
-  if (!GATEWAY_ORIGIN) {
-    throw Object.assign(new Error('insightcore_gateway_not_configured'), {
-      status: 500,
-    });
-  }
-
-  return GATEWAY_ORIGIN;
+  return NextResponse.json({ ok: false, error: message, ...(details ? { details } : {}) }, { status });
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const gateway = requireGatewayOrigin();
+    if (!GATEWAY_ORIGIN) return jsonError('insightcore_gateway_not_configured', 500);
 
-    const url = new URL(`${gateway}/api/insightcore/alerts`);
+    const identity = await readPatientGatewayIdentity(req);
+    if (!identity) return jsonError('patient_authentication_required', 401);
+
+    const requestedPatientId = String(req.nextUrl.searchParams.get('patientId') || '').trim();
+    if (requestedPatientId && requestedPatientId !== identity.patientId) {
+      return jsonError('patient_context_mismatch', 403);
+    }
+
+    const url = new URL(`${GATEWAY_ORIGIN}/api/insightcore/alerts`);
     url.searchParams.set('limit', req.nextUrl.searchParams.get('limit') || '5');
-
-    const patientId = req.nextUrl.searchParams.get('patientId');
-    if (patientId) url.searchParams.set('patientId', patientId);
-
-    const orgId = req.nextUrl.searchParams.get('orgId');
-    if (orgId) url.searchParams.set('orgId', orgId);
-
-    const cookie = req.headers.get('cookie');
-    const uid = req.headers.get('x-uid');
-    const role = req.headers.get('x-role') || 'patient';
+    url.searchParams.set('patientId', identity.patientId);
+    const since = req.nextUrl.searchParams.get('since');
+    if (since) url.searchParams.set('since', since);
 
     const response = await fetch(url.toString(), {
       method: 'GET',
-      headers: {
-        ...(cookie ? { cookie } : {}),
-        ...(uid ? { 'x-uid': uid } : {}),
-        'x-role': role,
-      },
+      headers: patientGatewayHeaders({ req, identity }),
       cache: 'no-store',
     });
 
-    const text = await response.text();
-    let payload: unknown = null;
-
-    try {
-      payload = text ? JSON.parse(text) : null;
-    } catch {
-      payload = text;
-    }
-
+    const payload = await response.json().catch(() => null);
     if (!response.ok) {
       return jsonError('insightcore_alerts_gateway_failed', response.status, {
         upstreamStatus: response.status,
@@ -77,7 +49,6 @@ export async function GET(req: NextRequest) {
     }
 
     const data = payload as { alerts?: unknown[] };
-
     return NextResponse.json({
       ok: true,
       source: 'insightcore',

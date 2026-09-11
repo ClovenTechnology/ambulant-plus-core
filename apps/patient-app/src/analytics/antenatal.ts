@@ -1,9 +1,9 @@
 // ============================================================================
 // apps/patient-app/src/analytics/antenatal.ts
-// Antenatal utilities, checklist, eRx, local persistence.
+// Antenatal utilities, checklist and eRx backed by authenticated server persistence.
 // ----------------------------------------------------------------------------
 // Safe to replace existing antenatal.ts.
-// Retains existing storage keys and exported function names.
+// Retains exported function names while removing browser-storage persistence.
 // ============================================================================
 
 export type AntenatalPrefs = {
@@ -172,60 +172,73 @@ export function riskFlags(logs: AntenatalLog[]): {
 }
 
 // -----------------------------------------------------------------------------
-// Local storage
+// Authenticated server persistence with in-memory runtime cache
 // -----------------------------------------------------------------------------
 
-const PREFS_KEY = 'antenatal:prefs';
+const runtimeState: {
+  prefs: AntenatalPrefs | null;
+  logs: AntenatalLog[];
+  labs: Record<string, any>;
+  erx: any[];
+} = { prefs: null, logs: [], labs: {}, erx: [] };
+
+let hydratePromise: Promise<void> | null = null;
+
+export async function hydrateAntenatalState(force = false): Promise<void> {
+  if (hydratePromise && !force) return hydratePromise;
+  hydratePromise = (async () => {
+    const res = await fetch('/api/wellness/antenatal', {
+      cache: 'no-store',
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) throw new Error(data?.error || 'antenatal_state_load_failed');
+    runtimeState.prefs = data?.data?.prefs && typeof data.data.prefs === 'object' ? data.data.prefs : null;
+    runtimeState.logs = Array.isArray(data?.data?.logs) ? data.data.logs : [];
+    runtimeState.labs = data?.data?.labs && typeof data.data.labs === 'object' ? data.data.labs : {};
+    runtimeState.erx = Array.isArray(data?.data?.erx) ? data.data.erx : [];
+  })();
+  try {
+    await hydratePromise;
+  } finally {
+    hydratePromise = null;
+  }
+}
+
+async function persistSection(section: 'prefs' | 'logs' | 'labs' | 'erx', value: unknown): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const res = await fetch('/api/wellness/antenatal', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ section, value }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || `antenatal_persistence_http_${res.status}`);
+  }
+}
 
 export function loadAntenatalPrefs(): AntenatalPrefs | null {
-  if (typeof window === 'undefined') return null;
-
-  try {
-    const raw = window.localStorage.getItem(PREFS_KEY);
-    return raw ? (JSON.parse(raw) as AntenatalPrefs) : null;
-  } catch {
-    return null;
-  }
+  return runtimeState.prefs ? { ...runtimeState.prefs } : null;
 }
 
-export function saveAntenatalPrefs(prefs: AntenatalPrefs): void {
-  if (typeof window === 'undefined') return;
-
-  try {
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-  } catch {
-    // Ignore storage failures.
-  }
+export async function saveAntenatalPrefs(prefs: AntenatalPrefs): Promise<void> {
+  const next = { ...prefs };
+  await persistSection('prefs', next);
+  runtimeState.prefs = next;
 }
-
-const LOGS_KEY = 'antenatal:logs';
 
 export function loadAntenatalLogs(): AntenatalLog[] {
-  if (typeof window === 'undefined') return [];
-
-  try {
-    const parsed = JSON.parse(
-      window.localStorage.getItem(LOGS_KEY) || '[]'
-    ) as unknown;
-
-    return Array.isArray(parsed) ? (parsed as AntenatalLog[]) : [];
-  } catch {
-    return [];
-  }
+  return runtimeState.logs.map((item) => ({ ...item }));
 }
 
 export function saveAntenatalLog(entry: AntenatalLog): void {
-  if (typeof window === 'undefined') return;
-
-  const all = loadAntenatalLogs().filter((x) => x.date !== entry.date);
-  all.push(entry);
+  const all = runtimeState.logs.filter((x) => x.date !== entry.date);
+  all.push({ ...entry });
   all.sort((a, b) => a.date.localeCompare(b.date));
-
-  try {
-    window.localStorage.setItem(LOGS_KEY, JSON.stringify(all));
-  } catch {
-    // Ignore storage failures.
-  }
+  runtimeState.logs = all;
+  void persistSection('logs', all).catch((error) => console.warn('antenatal persistence failed', error));
 }
 
 // -----------------------------------------------------------------------------
@@ -332,33 +345,15 @@ export function getChecklistItem(code: string): ChecklistItem | undefined {
   return CHECKLIST.find((item) => item.code.toUpperCase() === normalizedCode);
 }
 
-const LABS_KEY = 'antenatal:labs';
-
 export function loadChecklistDone(): ChecklistDoneMap {
-  if (typeof window === 'undefined') return {};
-
-  try {
-    const parsed = JSON.parse(
-      window.localStorage.getItem(LABS_KEY) || '{}'
-    ) as unknown;
-
-    return parsed && typeof parsed === 'object'
-      ? (parsed as ChecklistDoneMap)
-      : {};
-  } catch {
-    return {};
-  }
+  return { ...(runtimeState.labs as ChecklistDoneMap) };
 }
 
 export function saveChecklistDone(map: ChecklistDoneMap): void {
-  if (typeof window === 'undefined') return;
-
-  try {
-    window.localStorage.setItem(LABS_KEY, JSON.stringify(map));
-  } catch {
-    // Ignore storage failures.
-  }
+  runtimeState.labs = { ...map };
+  void persistSection('labs', runtimeState.labs).catch((error) => console.warn('antenatal persistence failed', error));
 }
+
 
 export function statusFor(
   item: ChecklistWithDates,
@@ -493,25 +488,13 @@ export type ERx = {
   notes?: string;
 };
 
-const ERX_KEY = 'antenatal:erx';
-
 export function loadERx(): ERx[] {
-  if (typeof window === 'undefined') return [];
-
-  try {
-    const parsed = JSON.parse(
-      window.localStorage.getItem(ERX_KEY) || '[]'
-    ) as unknown;
-
-    return Array.isArray(parsed) ? (parsed as ERx[]) : [];
-  } catch {
-    return [];
-  }
+  return (runtimeState.erx as ERx[]).map((item) => ({ ...item }));
 }
 
 export function saveERx(rx: ERx): void {
   const all = loadERx().filter((item) => item.id !== rx.id);
-  all.push(rx);
+  all.push({ ...rx });
   persistERx(all);
 }
 
@@ -520,11 +503,6 @@ export function removeERx(id: string): void {
 }
 
 function persistERx(all: ERx[]): void {
-  if (typeof window === 'undefined') return;
-
-  try {
-    window.localStorage.setItem(ERX_KEY, JSON.stringify(all));
-  } catch {
-    // Ignore storage failures.
-  }
+  runtimeState.erx = all.map((item) => ({ ...item }));
+  void persistSection('erx', runtimeState.erx).catch((error) => console.warn('antenatal persistence failed', error));
 }

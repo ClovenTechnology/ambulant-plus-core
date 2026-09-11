@@ -5,9 +5,9 @@ import { FertilitySetup } from '@/src/screens/FertilitySetup';
 export default function FertilityDashboard() {
   return (
     <section className="space-y-6">
-      <h2 className="text-2xl font-semibold">Fertility Analytics</h2>
+      <h2 className="text-2xl font-semibold">Cycle Tracking</h2>
       <p className="text-gray-600">
-        Cycle phases, ovulation prediction, and probability overlays.
+        Record cycle information and review tracked data without predictive claims.
       </p>
 
       <div className="p-4 border rounded-lg bg-white">
@@ -17,8 +17,7 @@ export default function FertilityDashboard() {
       <div className="p-4 border rounded-lg bg-white">
         <h3 className="text-lg font-semibold">Upcoming</h3>
         <p className="text-sm text-gray-500">
-          Calendar with fertile window confidence %, baseline establishment tips,
-          and report accuracy notices.
+          Additional cycle visualisations can be added once validated data sources are available.
         </p>
       </div>
     </section>

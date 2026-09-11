@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { API } from '@/src/lib/config';
 import { prisma } from '@/src/lib/db';
 import crypto from 'node:crypto';
+import { patientGatewayHeaders, readPatientGatewayIdentity, type PatientGatewayIdentity } from '@/src/lib/gateway-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,140 +46,33 @@ function json(data: any, status = 200) {
   });
 }
 
-function base64urlToBuffer(s: string) {
-  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
-  const b64 = (s + pad).replace(/-/g, '+').replace(/_/g, '/');
-  return Buffer.from(b64, 'base64');
-}
-
 function safeJsonParse(value: unknown) {
   if (!value) return null;
-
   try {
-    if (Buffer.isBuffer(value)) {
-      return JSON.parse(value.toString('utf8'));
-    }
-
-    if (typeof value === 'string') {
-      return JSON.parse(value);
-    }
-
+    if (Buffer.isBuffer(value)) return JSON.parse(value.toString('utf8'));
+    if (typeof value === 'string') return JSON.parse(value);
     return value;
   } catch {
     return null;
   }
 }
 
-function verifyJwtHs256(token: string, secret: string): any | null {
-  try {
-    const parts = String(token || '').split('.');
-    if (parts.length !== 3) return null;
-
-    const [h, p, sig] = parts;
-    const data = `${h}.${p}`;
-
-    const expected = crypto.createHmac('sha256', secret).update(data).digest();
-    const got = base64urlToBuffer(sig);
-
-    if (got.length !== expected.length) return null;
-    if (!crypto.timingSafeEqual(got, expected)) return null;
-
-    const payload = safeJsonParse(base64urlToBuffer(p));
-    if (!payload) return null;
-
-    const now = Math.floor(Date.now() / 1000);
-    if (typeof payload.exp === 'number' && payload.exp <= now) return null;
-
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
-function readSessionPayload(req: NextRequest): any | null {
-  const secret = process.env.AUTH_SESSION_SECRET;
-  if (!secret) return null;
-
-  const token =
-    req.cookies.get('ambulant_session')?.value ||
-    req.cookies.get('__Host-ambulant_session')?.value ||
-    req.cookies.get('ambulant.session')?.value ||
-    req.cookies.get('auth_session')?.value ||
-    req.cookies.get('session')?.value ||
-    req.cookies.get('token')?.value ||
-    '';
-
-  if (!token) return null;
-
-  return verifyJwtHs256(token, secret);
-}
-
-function readIdentity(req: NextRequest) {
-  const payload = readSessionPayload(req);
-
-  return {
-    userId: String(payload?.sub || payload?.userId || payload?.uid || '').trim(),
-    patientId: String(payload?.actorRefId || payload?.patientId || '').trim(),
-    email: String(payload?.email || '').trim(),
-    name: String(payload?.name || payload?.displayName || '').trim(),
-    role: String(payload?.actorType || payload?.role || '').trim().toLowerCase(),
-  };
-}
-
-function readUserId(req: NextRequest, url: URL) {
-  const identity = readIdentity(req);
-
-  return (
-    url.searchParams.get('userId') ||
-    req.headers.get('x-ambulant-user-id') ||
-    req.headers.get('x-user-id') ||
-    req.headers.get('x-uid') ||
-    identity.userId ||
-    ''
+function requestedIdentityMismatch(req: NextRequest, identity: PatientGatewayIdentity, body?: any) {
+  const url = req.nextUrl;
+  const requestedUserId = String(
+    body?.userId || url.searchParams.get('userId') || '',
   ).trim();
-}
-
-function readPatientId(req: NextRequest, url: URL) {
-  const identity = readIdentity(req);
-
-  return (
-    url.searchParams.get('patientId') ||
-    url.searchParams.get('subjectPatientId') ||
-    req.headers.get('x-ambulant-patient-id') ||
-    req.headers.get('x-patient-id') ||
-    identity.patientId ||
-    ''
+  const requestedPatientId = String(
+    body?.patientId ||
+      url.searchParams.get('patientId') ||
+      url.searchParams.get('subjectPatientId') ||
+      '',
   ).trim();
-}
 
-function forwardHeaders(req: NextRequest) {
-  const h = new Headers();
-
-  [
-    'cookie',
-    'authorization',
-    'x-ambulant-identity',
-    'x-ambulant-user-id',
-    'x-ambulant-patient-id',
-    'x-ambulant-org-id',
-    'x-ambulant-role',
-    'x-user-id',
-    'x-patient-id',
-    'x-uid',
-    'x-role',
-    'x-email',
-    'x-name',
-    'x-display-name',
-    'x-org-id',
-    'x-correlation-id',
-    'x-request-id',
-  ].forEach((key) => {
-    const value = req.headers.get(key);
-    if (value) h.set(key, value);
-  });
-
-  h.set('accept', 'application/json');
-  return h;
+  return Boolean(
+    (requestedUserId && requestedUserId !== identity.uid) ||
+      (requestedPatientId && requestedPatientId !== identity.patientId),
+  );
 }
 
 
@@ -740,7 +634,6 @@ function shapeLocalProfile(localPatient: any, sharingPreference: SharingPreferen
     createdAt: toIso(localPatient.createdAt),
     updatedAt: toIso(localPatient.updatedAt),
 
-    patientRaw: localPatient,
     source: 'local_patient_profile',
   };
 }
@@ -855,85 +748,63 @@ function shapeGatewayProfile(patient: GatewayPatient, data: any, userId: string)
 
     profileMetadata: {},
 
-    patientRaw: data,
     source: 'gateway_patient_profile',
   };
 }
 
-async function fetchGatewayProfile(req: NextRequest, userId: string) {
-  if (!API) {
-    return null;
-  }
+async function fetchGatewayProfile(req: NextRequest, identity: PatientGatewayIdentity) {
+  if (!API) return null;
 
   const baseUrl = API.replace(/\/+$/, '');
   const target = new URL('/api/patients/profile', baseUrl);
-
-  if (userId) {
-    target.searchParams.set('userId', userId);
-  }
+  target.searchParams.set('userId', identity.uid);
 
   const r = await fetch(target.toString(), {
-    headers: forwardHeaders(req),
+    headers: patientGatewayHeaders({ req, identity }),
     cache: 'no-store',
   });
 
   const data = await r.json().catch(() => null);
-
   if (!r.ok || !data) {
     throw new Error(data?.error || data?.message || `profile_gateway_http_${r.status}`);
   }
 
   const patient: GatewayPatient = (data?.patient || data?.profile || data || {}) as GatewayPatient;
-  return shapeGatewayProfile(patient, data, userId);
+  const shaped = shapeGatewayProfile(patient, data, identity.uid);
+  if (shaped?.patientId && shaped.patientId !== identity.patientId) {
+    throw new Error('profile_gateway_patient_context_mismatch');
+  }
+  return shaped;
 }
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const userId = readUserId(req, url);
-  const patientId = readPatientId(req, url);
+  const identity = await readPatientGatewayIdentity(req);
+  if (!identity) {
+    return json({ ok: false, error: 'patient_authentication_required', profile: null }, 401);
+  }
+  if (requestedIdentityMismatch(req, identity)) {
+    return json({ ok: false, error: 'patient_context_mismatch', profile: null }, 403);
+  }
 
-  const localPatient = await readLocalPatientProfile({ userId, patientId });
+  const localPatient = await readLocalPatientProfile({
+    userId: identity.uid,
+    patientId: identity.patientId,
+  });
 
   if (localPatient) {
     const sharingPreference = await readSharingPreference(localPatient.id);
     const profile = shapeLocalProfile(localPatient, sharingPreference);
-
-    return json({
-      ok: true,
-      profile,
-      ...profile,
-    });
+    return json({ ok: true, profile, ...profile });
   }
 
   try {
-    const gatewayProfile = await fetchGatewayProfile(req, userId);
-
-    if (gatewayProfile) {
-      return json({
-        ok: true,
-        profile: gatewayProfile,
-        ...gatewayProfile,
-      });
-    }
+    const gatewayProfile = await fetchGatewayProfile(req, identity);
+    if (gatewayProfile) return json({ ok: true, profile: gatewayProfile, ...gatewayProfile });
   } catch (err: any) {
-    return json(
-      {
-        ok: false,
-        error: err?.message || 'profile_gateway_failed',
-        profile: null,
-      },
-      502,
-    );
+    return json({ ok: false, error: err?.message || 'profile_gateway_failed', profile: null }, 502);
   }
 
-  return json(
-    {
-      ok: false,
-      error: userId || patientId ? 'patient_profile_not_found' : 'patient_identity_required',
-      profile: null,
-    },
-    userId || patientId ? 404 : 401,
-  );
+  return json({ ok: false, error: 'patient_profile_not_found', profile: null }, 404);
 }
 
 function readNumber(value: unknown, mode: 'int' | 'float') {
@@ -1054,7 +925,6 @@ function buildProfileUpdateData(body: any, existing: any) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const url = new URL(req.url);
     const ct = req.headers.get('content-type') || '';
 
     let body: any = {};
@@ -1073,31 +943,18 @@ export async function PATCH(req: NextRequest) {
       body = await req.json().catch(() => ({} as any));
     }
 
-    const sessionIdentity = readIdentity(req);
-    const requestedUserId =
-      cleanString(body?.userId, 160) ||
-      readUserId(req, url) ||
-      sessionIdentity.userId;
-
-    const requestedPatientId =
-      cleanString(body?.patientId, 160) ||
-      readPatientId(req, url) ||
-      sessionIdentity.patientId;
+    const identity = await readPatientGatewayIdentity(req);
+    if (!identity) {
+      return json({ ok: false, error: 'patient_authentication_required' }, 401);
+    }
+    if (requestedIdentityMismatch(req, identity, body)) {
+      return json({ ok: false, error: 'patient_context_mismatch' }, 403);
+    }
 
     const existing = await readLocalPatientProfile({
-      userId: requestedUserId,
-      patientId: requestedPatientId,
+      userId: identity.uid,
+      patientId: identity.patientId,
     });
-
-    if (!existing && !requestedUserId) {
-      return json(
-        {
-          ok: false,
-          error: 'patient_identity_required',
-        },
-        401,
-      );
-    }
 
     const data = buildProfileUpdateData(body, existing);
 
@@ -1157,9 +1014,10 @@ export async function PATCH(req: NextRequest) {
         })
       : await prisma.patientProfile.create({
           data: {
-            userId: requestedUserId,
-            contactEmail: data.contactEmail ?? sessionIdentity.email ?? null,
-            name: data.name ?? sessionIdentity.name ?? null,
+            id: identity.patientId,
+            userId: identity.uid,
+            contactEmail: identity.email || null,
+            name: identity.name || null,
             ...data,
           },
           include: {

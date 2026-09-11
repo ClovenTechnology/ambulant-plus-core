@@ -1,66 +1,101 @@
-// apps/patient-app/app/api/medical-aids/upload/route.ts
+import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { promises as fs } from 'fs';
-import path from 'path';
+import { patientGatewayHeaders, readPatientGatewayIdentity } from '@/src/lib/gateway-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const UPLOAD_DIR = path.resolve(process.cwd(), '../../uploads/medical-aids');
+function gatewayOrigin() {
+  return (
+    process.env.APIGW_BASE ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    ''
+  ).replace(/\/+$/, '');
+}
 
-function safeExt(name: string) {
-  const parts = name.split('.');
-  const ext = parts.length > 1 ? parts.pop()!.toLowerCase() : 'bin';
-  return /^[a-z0-9]{1,10}$/.test(ext) ? ext : 'bin';
+function json(data: unknown, status = 200) {
+  return NextResponse.json(data, { status, headers: { 'cache-control': 'no-store' } });
 }
 
 export async function POST(req: NextRequest) {
-  let form: FormData;
-  try {
-    form = await req.formData();
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Expected multipart/form-data' }, { status: 400 });
+  const identity = await readPatientGatewayIdentity(req);
+  if (!identity) return json({ ok: false, error: 'patient_authentication_required' }, 401);
+
+  const gateway = gatewayOrigin();
+  if (!gateway) return json({ ok: false, error: 'api_gateway_base_not_configured' }, 503);
+
+  const form = await req.formData().catch(() => null);
+  if (!form) return json({ ok: false, error: 'expected_multipart_form_data' }, 400);
+
+  const suppliedPatientId = String(form.get('patientId') || '').trim();
+  if (suppliedPatientId && suppliedPatientId !== identity.patientId) {
+    return json({ ok: false, error: 'patient_context_mismatch' }, 403);
   }
 
   const file = form.get('file');
-  const patientId = String(form.get('patientId') || '').trim();
-
-if (!patientId) {
-  return NextResponse.json(
-    { ok: false, error: 'patientId_required' },
-    { status: 400 },
-  );
-}
-
-  if (!file || typeof file === 'string') {
-    return NextResponse.json({ ok: false, error: 'file_required' }, { status: 400 });
-  }
+  if (!file || typeof file === 'string') return json({ ok: false, error: 'file_required' }, 400);
 
   const blob = file as File;
-
-  // Basic size guard (15MB)
-  const maxBytes = 15 * 1024 * 1024;
-  if ((blob as any).size && (blob as any).size > maxBytes) {
-    return NextResponse.json({ ok: false, error: 'file_too_large' }, { status: 413 });
+  if (!Number.isFinite(blob.size) || blob.size <= 0 || blob.size > 15 * 1024 * 1024) {
+    return json({ ok: false, error: 'file_size_invalid' }, blob.size > 15 * 1024 * 1024 ? 413 : 400);
   }
 
-  const arrayBuffer = await blob.arrayBuffer();
-  const buf = Buffer.from(arrayBuffer);
+  const bytes = Buffer.from(await blob.arrayBuffer());
+  const checksumSha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+  const contentType = String(blob.type || 'application/octet-stream').toLowerCase();
+  const headers = patientGatewayHeaders({ req, identity, includeJson: true });
 
-  const originalName = blob.name || 'com.pdf';
-  const ext = safeExt(originalName);
-  const fname = `com-${patientId}-${Date.now()}.${ext}`;
+  const presignResponse = await fetch(`${gateway}/api/patient-medical-aids/documents/presign`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ contentType, sizeBytes: bytes.length, checksumSha256 }),
+    cache: 'no-store',
+  });
+  const presign = await presignResponse.json().catch(() => null);
+  if (!presignResponse.ok || !presign?.uploadUrl || !presign?.objectKey) {
+    return json({ ok: false, error: presign?.error || 'patient_document_presign_failed' }, presignResponse.status || 502);
+  }
 
-  await fs.mkdir(UPLOAD_DIR, { recursive: true });
-  const filePath = path.join(UPLOAD_DIR, fname);
-  await fs.writeFile(filePath, buf);
+  const uploadHeaders = new Headers();
+  for (const [key, value] of Object.entries(presign.headers || {})) {
+    if (typeof value === 'string' && value) uploadHeaders.set(key, value);
+  }
 
-  // Return a repo-relative path so other apps can read it in dev
-  const relPath = `uploads/medical-aids/${fname}`;
+  const uploadResponse = await fetch(String(presign.uploadUrl), {
+    method: 'PUT',
+    headers: uploadHeaders,
+    body: bytes,
+  });
+  if (!uploadResponse.ok) {
+    return json({ ok: false, error: 'patient_document_object_upload_failed', upstreamStatus: uploadResponse.status }, 502);
+  }
 
-  return NextResponse.json({
+  const confirmResponse = await fetch(`${gateway}/api/patient-medical-aids/documents/confirm`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      objectKey: presign.objectKey,
+      contentType,
+      sizeBytes: bytes.length,
+      checksumSha256,
+    }),
+    cache: 'no-store',
+  });
+  const confirm = await confirmResponse.json().catch(() => null);
+  if (!confirmResponse.ok || !confirm?.managedRef) {
+    return json({ ok: false, error: confirm?.error || 'patient_document_confirm_failed' }, confirmResponse.status || 502);
+  }
+
+  const viewPath = `/api/medical-aids/documents/view?managedRef=${encodeURIComponent(confirm.managedRef)}`;
+  return json({
     ok: true,
-    comFilePath: relPath,
-    comFileName: originalName,
+    comFilePath: viewPath,
+    comManagedRef: confirm.managedRef,
+    comFileName: blob.name || 'certificate-of-membership',
+    contentType,
+    sizeBytes: bytes.length,
+    checksumSha256,
   });
 }

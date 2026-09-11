@@ -11,7 +11,7 @@ import {
   addDaysISO, calcEDD, gestationalAge, trimester, buildVisitSchedule, nextVisit,
   loadAntenatalPrefs, type AntenatalPrefs, loadAntenatalLogs, saveAntenatalLog, type AntenatalLog, riskFlags,
   buildChecklist, loadChecklistDone, saveChecklistDone, statusFor, checkDrugSafety, type ChecklistWithDates,
-  type ERx, loadERx, saveERx, removeERx
+  type ERx, loadERx, saveERx, removeERx, hydrateAntenatalState
 } from '@/src/analytics/antenatal';
 import { buildAntenatalICSUrlFromPrefs, buildKickICSUrl, buildLabICSUrl } from '@/src/analytics/ics';
 import { generateHealthReport } from '@/src/analytics/report';
@@ -24,8 +24,7 @@ const todayISO = () => new Date().toISOString().slice(0,10);
 export default function AntenatalCenter() {
   const mounted = useMounted();
   const [privacy, setPrivacy] = useState(false);
-  useEffect(()=>{ try{ const p=localStorage.getItem('antenatal:privacy'); if(p) setPrivacy(p==='1'); }catch{} },[]);
-  useEffect(()=>{ try{ localStorage.setItem('antenatal:privacy', privacy?'1':'0'); }catch{} },[privacy]);
+  const [hydrationVersion, setHydrationVersion] = useState(0);
 
   const [showSetup, setShowSetup] = useState(true);
   const [showSchedule, setShowSchedule] = useState(true);
@@ -35,7 +34,7 @@ export default function AntenatalCenter() {
   const [showKick, setShowKick] = useState(true);
   const [showERx, setShowERx] = useState(false);
 
-  const prefs: AntenatalPrefs | null = useMemo(()=> mounted ? loadAntenatalPrefs() : null, [mounted]);
+  const prefs: AntenatalPrefs | null = useMemo(()=> mounted ? loadAntenatalPrefs() : null, [mounted, hydrationVersion]);
   const edd = useMemo(()=> (!mounted ? '' : (prefs?.edd || (prefs?.lmp ? calcEDD(prefs.lmp, prefs.cycleDays ?? 28) : ''))), [mounted, prefs]);
 
   const ga = useMemo(()=> (edd ? gestationalAge(todayISO(), edd) : {weeks:0,days:0}), [edd]);
@@ -120,6 +119,21 @@ export default function AntenatalCenter() {
   // eRx
   const [erx, setErx] = useState<ERx[]>([]);
   useEffect(()=>{ setErx(loadERx()); },[]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    let alive = true;
+    void hydrateAntenatalState(true)
+      .then(() => {
+        if (!alive) return;
+        setLogs(loadAntenatalLogs());
+        setDoneMap(loadChecklistDone());
+        setErx(loadERx());
+        setHydrationVersion((v) => v + 1);
+      })
+      .catch((error) => console.warn('antenatal state load failed', error));
+    return () => { alive = false; };
+  }, [mounted]);
   const addRx = (rx: ERx) => { saveERx(rx); setErx(loadERx()); };
   const deleteRx = (id: string) => { removeERx(id); setErx(loadERx()); };
 

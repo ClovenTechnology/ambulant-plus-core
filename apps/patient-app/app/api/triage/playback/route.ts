@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // If ALLOW_PLAYBACK not set to '1', refuse access (dev/demo only)
-const allow = (process.env.ALLOW_PLAYBACK === '1' || process.env.NODE_ENV !== 'production');
+const allow = process.env.NODE_ENV !== 'production' && process.env.ALLOW_PLAYBACK === '1';
 
 if (!allow) {
   // We still export GET but it will return 403 by runtime check inside handler.

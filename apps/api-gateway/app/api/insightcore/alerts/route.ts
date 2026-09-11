@@ -1,6 +1,7 @@
 // apps/api-gateway/app/api/insightcore/alerts/route.ts
 import crypto from 'node:crypto';
 import { prisma } from '@/src/lib/db';
+import { readInternalPatientIdentity } from '@/src/lib/internal-patient-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -344,10 +345,23 @@ function parseRiskFactors(value: unknown): RiskFactors | undefined {
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const orgId = getOrgId(req);
+  const internalPatient = readInternalPatientIdentity(req);
+  const requestedRole = safeString(req.headers.get('x-role')).toLowerCase();
+  if (requestedRole === 'patient' && !internalPatient) {
+    return new Response(JSON.stringify({ ok: false, error: 'trusted_patient_identity_required' }), {
+      status: 401, headers: { 'content-type': 'application/json' },
+    });
+  }
+  const orgId = internalPatient?.orgId || getOrgId(req);
 
-  const patientId = url.searchParams.get('patientId') || undefined;
-  const clinicianId = url.searchParams.get('clinicianId') || undefined;
+  const requestedPatientId = url.searchParams.get('patientId') || undefined;
+  if (internalPatient && requestedPatientId && requestedPatientId !== internalPatient.patientId) {
+    return new Response(JSON.stringify({ ok: false, error: 'patient_context_mismatch' }), {
+      status: 403, headers: { 'content-type': 'application/json' },
+    });
+  }
+  const patientId = internalPatient?.patientId || requestedPatientId;
+  const clinicianId = internalPatient ? undefined : (url.searchParams.get('clinicianId') || undefined);
   const rawLimit = Number(url.searchParams.get('limit') || '20');
   const limit = Math.max(1, Math.min(100, Number.isFinite(rawLimit) ? rawLimit : 20));
   const sinceIso = url.searchParams.get('since') || undefined;
@@ -412,13 +426,26 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const orgId = getOrgId(req);
+  const internalPatient = readInternalPatientIdentity(req);
+  const requestedRole = safeString(req.headers.get('x-role')).toLowerCase();
+  if (requestedRole === 'patient' && !internalPatient) {
+    return new Response(JSON.stringify({ ok: false, error: 'trusted_patient_identity_required' }), {
+      status: 401, headers: { 'content-type': 'application/json' },
+    });
+  }
+  const orgId = internalPatient?.orgId || getOrgId(req);
   const body = safeJsonObject(await req.json().catch(() => ({}))) || {};
 
   const now = Date.now();
   const id = safeString(body.id, crypto.randomUUID());
-  const patientId = safeStringOrNull(body.patientId);
-  const clinicianId = safeStringOrNull(body.clinicianId);
+  const suppliedPatientId = safeStringOrNull(body.patientId);
+  if (internalPatient && suppliedPatientId && suppliedPatientId !== internalPatient.patientId) {
+    return new Response(JSON.stringify({ ok: false, error: 'patient_context_mismatch' }), {
+      status: 403, headers: { 'content-type': 'application/json' },
+    });
+  }
+  const patientId = internalPatient?.patientId || suppliedPatientId;
+  const clinicianId = internalPatient ? null : safeStringOrNull(body.clinicianId);
 
   const factors = parseRiskFactors(body.factors);
   const cfg = await loadConfig(orgId);

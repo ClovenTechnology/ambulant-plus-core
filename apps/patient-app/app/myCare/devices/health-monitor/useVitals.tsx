@@ -163,43 +163,6 @@ function normalizeAuthMeAsPatient(value: AuthMeResponse | null): PatientProfile 
   };
 }
 
-function getStoredPatientProfile(): PatientProfile | null {
-  if (typeof window === 'undefined') return null;
-
-  try {
-    const patientId = String(
-      localStorage.getItem('ambulant.patientId') ||
-        localStorage.getItem('ambulant_patient_id') ||
-        '',
-    ).trim();
-
-    if (!patientId) return null;
-
-    const userId =
-      localStorage.getItem('ambulant.userId') ||
-      localStorage.getItem('ambulant_uid') ||
-      null;
-
-    const name =
-      localStorage.getItem('ambulant.patientName') ||
-      localStorage.getItem('ambulant_patient_name') ||
-      'Patient';
-
-    return {
-      patientId,
-      userId,
-      name,
-      age: null,
-      gender: null,
-      avatarUrl: null,
-      chronicConditions: [],
-      primaryConditionsText: null,
-    };
-  } catch {
-    return null;
-  }
-}
-
 async function resolveSignedInPatient(): Promise<PatientProfile | null> {
   const profile = await getJSON<any>('/api/profile', { fallback: null });
   const normalizedProfile = normalizePatientProfile(profile);
@@ -218,7 +181,7 @@ async function resolveSignedInPatient(): Promise<PatientProfile | null> {
     return authPatient;
   }
 
-  return getStoredPatientProfile();
+  return null;
 }
 
 export function useVitals() {

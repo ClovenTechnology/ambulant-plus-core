@@ -76,9 +76,7 @@ export default function PatientLeftPane({
         <Collapse open={sessionOpen}>
           <div className={dense ? 'space-y-2' : 'space-y-3'}>
             <Field label="Patient" value={appt.patientName} />
-            <Field label="Patient ID" value={appt.patientId} />
             <Field label="Case" value={appt.reason} bold />
-            <Field label="Session ID" value={<span className="font-mono">{appt.id}</span>} />
             <Field label="Session date" value={<SafeDate iso={appt.when} />} />
             <Field label="Clinician" value={appt.clinicianName} />
             <Field label="Specialty" value={appt.clinicianSpecialty || 'General Practice'} />
