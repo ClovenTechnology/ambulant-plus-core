@@ -26,7 +26,18 @@ async function resolvePharmacyId(req: NextRequest, who: ReturnType<typeof readId
 
 export async function GET(req: NextRequest) {
   const who = readIdentity(req.headers);
-  requireRole(who, ['admin', 'pharmacy', 'pharmacy_staff']);
+
+  try {
+    requireRole(who, ['admin', 'pharmacy', 'pharmacy_staff']);
+  } catch (error: any) {
+    return NextResponse.json(
+      { ok: false, error: error?.message || 'forbidden' },
+      {
+        status: error?.status || 403,
+        headers: { 'cache-control': 'no-store' },
+      },
+    );
+  }
 
   const pharmacyId = await resolvePharmacyId(req, who);
   if (!pharmacyId) return NextResponse.json({ ok: false, error: 'pharmacyId_unresolved' }, { status: 409 });
@@ -39,7 +50,18 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const who = readIdentity(req.headers);
-  requireRole(who, ['admin', 'pharmacy', 'pharmacy_staff']);
+
+  try {
+    requireRole(who, ['admin', 'pharmacy', 'pharmacy_staff']);
+  } catch (error: any) {
+    return NextResponse.json(
+      { ok: false, error: error?.message || 'forbidden' },
+      {
+        status: error?.status || 403,
+        headers: { 'cache-control': 'no-store' },
+      },
+    );
+  }
 
   const pharmacyId = await resolvePharmacyId(req, who);
   if (!pharmacyId) return NextResponse.json({ ok: false, error: 'pharmacyId_unresolved' }, { status: 409 });
