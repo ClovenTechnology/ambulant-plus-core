@@ -280,8 +280,10 @@ function withAgreementSnapshot(value: unknown, agreementSnapshot: Record<string,
 export async function POST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
+  const isAdmin = role === 'admin';
+  const isOnboardingSystem = role === 'system';
 
-  if (role !== 'admin') {
+  if (!isAdmin && !isOnboardingSystem) {
     return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
   }
 
@@ -299,6 +301,17 @@ export async function POST(req: NextRequest) {
   const currency = cleanString(body.currency) || 'ZAR';
   const agreementSnapshot = partnerAgreementSnapshot(body, 'medreach_lab');
   const labProfileMeta = withAgreementSnapshot(body.profileMeta, agreementSnapshot);
+
+  const requestedStatus = cleanString(body.status).toUpperCase();
+  const requestedOnboardingStatus = cleanString(body.onboardingStatus);
+  const active = isAdmin ? (cleanBoolean(body.active, true) ?? true) : false;
+  const status = isAdmin ? (requestedStatus || 'ACTIVE') : 'PENDING';
+  const onboardingStatus = isAdmin
+    ? (requestedOnboardingStatus || null)
+    : 'SUBMITTED';
+  const canManageStaff = isAdmin ? (cleanBoolean(body.canManageStaff, true) ?? true) : false;
+  const canPublishResults = isAdmin ? (cleanBoolean(body.canPublishResults, true) ?? true) : false;
+  const approveNow = isAdmin && (cleanBoolean(body.approveNow, true) ?? true);
 
   if (!name) {
     return NextResponse.json({ ok: false, error: 'missing_name' }, { status: 400 });
@@ -325,20 +338,20 @@ export async function POST(req: NextRequest) {
         !Array.isArray(body.verifiedIdentityMeta)
           ? (body.verifiedIdentityMeta as any)
           : undefined,
-      active: cleanBoolean(body.active, true) ?? true,
-      status: (cleanString(body.status) || 'ACTIVE') as any,
-      onboardingStatus: cleanString(body.onboardingStatus) || null,
+      active,
+      status: status as any,
+      onboardingStatus,
       ownerUserId: cleanString(body.ownerUserId) || null,
       country: country.toUpperCase().slice(0, 2),
       currency: currency.toUpperCase().slice(0, 3),
-      canManageStaff: cleanBoolean(body.canManageStaff, true) ?? true,
-      canPublishResults: cleanBoolean(body.canPublishResults, true) ?? true,
+      canManageStaff,
+      canPublishResults,
       monthlyAccessFeeCents: cleanMoneyCents(body.monthlyAccessFeeCents, 0),
       commissionKind: (cleanString(body.commissionKind) || 'PERCENT') as any,
       commissionValue: cleanDecimalNumber(body.commissionValue, 0),
       payoutAccountMasked: cleanString(body.payoutAccountMasked) || null,
-      approvedAt: cleanBoolean(body.approveNow, true) ? new Date() : null,
-      approvedByUserId: cleanBoolean(body.approveNow, true) ? who.uid : null,
+      approvedAt: approveNow ? new Date() : null,
+      approvedByUserId: approveNow ? who.uid : null,
     },
   });
 

@@ -164,7 +164,6 @@ export async function POST(req: NextRequest) {
       payout: {
         bankName,
         accountName,
-        accountNumber,
         accountNumberLast4: accountNumber ? accountNumber.slice(-4) : '',
         branchCode,
         currency,

@@ -156,9 +156,52 @@ function banksForCountry(country: string) {
   return BANKS_BY_COUNTRY[country] || ['Other'];
 }
 
-function prettyError(value?: string) {
-  return String(value || 'Unable to submit application. Please check the form and try again.')
-    .replace(/_/g, ' ');
+function prettyError(
+  value: unknown,
+  fallback = 'Unable to submit application. Please check the form and try again.',
+): string {
+  const seen = new Set<unknown>();
+
+  function visit(input: unknown, depth = 0): string {
+    if (depth > 4 || input == null || seen.has(input)) return '';
+
+    if (typeof input === 'string') {
+      const text = input.trim();
+      if (!text || text === '[object Object]') return '';
+      return text.replace(/_/g, ' ');
+    }
+
+    if (input instanceof Error) {
+      return visit(input.message, depth + 1);
+    }
+
+    if (Array.isArray(input)) {
+      for (const item of input) {
+        const text = visit(item, depth + 1);
+        if (text) return text;
+      }
+      return '';
+    }
+
+    if (typeof input === 'object') {
+      seen.add(input);
+      const record = input as Record<string, unknown>;
+
+      for (const key of ['message', 'error', 'detail', 'reason', 'code', 'statusText']) {
+        const text = visit(record[key], depth + 1);
+        if (text) return text;
+      }
+
+      for (const key of ['errors', 'issues', 'data']) {
+        const text = visit(record[key], depth + 1);
+        if (text) return text;
+      }
+    }
+
+    return '';
+  }
+
+  return visit(value) || fallback;
 }
 
 function joinName(form: FormState) {
@@ -395,7 +438,7 @@ export default function MedReachSignupPage() {
     const payload = await res.json().catch(() => null);
 
     if (!res.ok || payload?.ok === false) {
-      throw new Error(prettyError(payload?.error || 'evidence_upload_failed'));
+      throw new Error(prettyError(payload, 'Evidence upload failed.'));
     }
   }
 
@@ -489,19 +532,32 @@ export default function MedReachSignupPage() {
       const payload = await res.json().catch(() => null);
 
       if (!res.ok || payload?.ok === false) {
-        throw new Error(prettyError(payload?.error));
+        throw new Error(prettyError(payload));
       }
 
       const applicationId = resolveApplicationId(payload);
 
+      let evidenceMessage = '';
+
       if (evidenceFile && applicationId) {
-        await submitEvidence(applicationId, form.applicantType);
+        try {
+          await submitEvidence(applicationId, form.applicantType);
+          evidenceMessage = ' Supporting evidence was uploaded.';
+        } catch (evidenceError) {
+          evidenceMessage =
+            ` Application reference: ${applicationId}. ` +
+            `The application itself was submitted, but supporting evidence did not upload: ` +
+            `${prettyError(evidenceError, 'evidence upload failed')}. ` +
+            `Use the evidence upload page with this application reference instead of resubmitting the application.`;
+        }
       }
 
       setNotice(
-        `${isLab ? 'Lab' : 'Phlebotomist'} application submitted for admin review.${
-          evidenceFile && applicationId ? ' Supporting evidence was uploaded.' : ''
-        }${applicationId ? ` Application reference: ${applicationId}` : ''}`,
+        `${isLab ? 'Lab' : 'Phlebotomist'} application submitted for admin review.` +
+          evidenceMessage +
+          `${applicationId && !evidenceMessage.includes('Application reference:')
+            ? ` Application reference: ${applicationId}`
+            : ''}`,
       );
 
       setForm((current) => ({
@@ -516,7 +572,7 @@ export default function MedReachSignupPage() {
       setEvidenceFile(null);
       setEvidenceFileName('');
     } catch (err: any) {
-      setError(err?.message || 'Unable to submit application.');
+      setError(prettyError(err));
     } finally {
       setBusy(false);
     }

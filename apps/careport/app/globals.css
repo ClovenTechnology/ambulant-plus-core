@@ -1,13 +1,22 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-/* Global defaults must be inside a Tailwind layer in v4 */
 @layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+  }
+
   html,
   body {
-    background-color: #f9fafb;
-    color: #111827;
+    min-height: 100%;
+    margin: 0;
+    background-color: #f8fafc;
+    color: #0f172a;
     font-family:
       system-ui,
       -apple-system,
@@ -17,13 +26,19 @@
     line-height: 1.5;
   }
 
-  a {
-    color: #4f46e5;
-    text-decoration-line: underline;
-    text-underline-offset: 2px;
+  body {
+    text-rendering: optimizeLegibility;
   }
 
-  a:hover {
-    color: #4338ca;
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
   }
 }

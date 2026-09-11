@@ -28,9 +28,9 @@ const pharmacyNavItems = [
     description: "Bulk upload and update pharmacy stock items.",
   },
   {
+    href: "/pharmacy/payouts",
     label: "Payouts",
-    description: "Pharmacy settlement view will be exposed after partner payout policy is finalised.",
-    status: "Pending",
+    description: "Settlement status, pending earnings and payout history.",
   },
   {
     label: "Profile / KYC",
@@ -45,7 +45,7 @@ export default function PharmacyLayout({ children }: { children: ReactNode }) {
       role="pharmacy"
       eyebrow="CarePort pharmacy"
       title="Pharmacy workspace"
-      description="Inventory, offers, eRx orders and pharmacy fulfilment only."
+      description="Inventory, offers, eRx orders, fulfilment and pharmacy settlements."
       accent="border-emerald-200 bg-emerald-50 text-emerald-900"
       navItems={pharmacyNavItems}
     >

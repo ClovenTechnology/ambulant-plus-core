@@ -8,28 +8,28 @@ const riderNavItems = [
     description: "Rider readiness, active delivery and handover summary.",
   },
   {
+    href: "/rider/jobs",
+    label: "Jobs & deliveries",
+    description: "Assigned delivery work, pickup progress and delivery status.",
+  },
+  {
+    href: "/rider/pharmacy",
+    label: "Pharmacy pickup",
+    description: "Pickup and pharmacy handover surface for medicine delivery.",
+  },
+  {
     href: "/rider/kyi",
     label: "KYI verification",
     description: "Identity, vehicle and medicine-handling verification.",
   },
   {
-    href: "/rider/jobs",
-    label: "Jobs",
-    description: "Assigned delivery jobs and status updates.",
-  },
-  {
-    href: "/rider/pharmacy",
-    label: "Pharmacy pickup",
-    description: "Pickup and pharmacy handover surface for rider delivery flow.",
-  },
-  {
+    href: "/rider/payouts",
     label: "Payouts",
-    description: "Rider settlement view will be exposed after rider payout policy is finalised.",
-    status: "Pending",
+    description: "Trip earnings, settlement status and payout history.",
   },
   {
     label: "Profile / service area",
-    description: "Rider profile, vehicle and service-area updates remain controlled through KYI/admin review.",
+    description: "Profile, vehicle and service-area changes remain controlled through KYI/admin review.",
     status: "Controlled",
   },
 ];
@@ -40,7 +40,7 @@ export default function RiderLayout({ children }: { children: ReactNode }) {
       role="rider"
       eyebrow="CarePort rider"
       title="Rider workspace"
-      description="KYI, delivery jobs, pickup handover and rider operations only."
+      description="KYI, jobs, pharmacy pickup, delivery handover and rider settlements."
       accent="border-indigo-200 bg-indigo-50 text-indigo-900"
       navItems={riderNavItems}
     >

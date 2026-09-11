@@ -2,10 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body {
-  background-color: #f9fafb;
-  color: #111827;
-  font-family: system-ui, sans-serif;
-}
+@layer base {
+  :root {
+    color-scheme: light;
+  }
 
-/* Optional: MedReach-specific tweaks */
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    min-height: 100%;
+    margin: 0;
+    background-color: #f8fafc;
+    color: #0f172a;
+    font-family:
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif;
+    line-height: 1.5;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
