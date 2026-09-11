@@ -4,11 +4,22 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function apigwBase() {
+  const productionDefault =
+    process.env.VERCEL_ENV === 'production' ||
+    (!process.env.VERCEL_ENV && process.env.NODE_ENV === 'production')
+      ? 'https://api-gateway.ambulantplus.co.za'
+      : '';
+
   const base =
     process.env.APIGW_BASE ||
     process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
     process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
-    '';
+    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
+    process.env.NEXT_PUBLIC_GATEWAY_BASE ||
+    process.env.GATEWAY_URL ||
+    productionDefault;
 
   if (!base) {
     throw new Error('api_gateway_base_url_missing');
