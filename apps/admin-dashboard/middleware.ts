@@ -9,6 +9,18 @@ const RULES: Array<{
 }> = [
   {
     prefix:
+      '/admin/compliance/renewals',
+    required: [
+      'compliance:read',
+      'compliance:manage',
+      'compliance.read',
+      'compliance.manage',
+      'compliance',
+      'manageRoles',
+    ],
+  },
+  {
+    prefix:
       '/settings/people/role-requests',
     required: [
       'staff.roles.manage',

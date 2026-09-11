@@ -218,6 +218,141 @@ model PlatformSetting {
   @@index([category, updatedAt])
 }
 
+
+/// Platform-wide compliance rule registry.
+///
+/// This deliberately keeps legal/source provenance separate from product enforcement.
+/// Rules may be stricter than statute, may be informational, or may remain pending legal
+/// sign-off. No rule in this model automatically blocks signup or a user account.
+model ComplianceControlRule {
+  id                     String   @id @default(cuid())
+  orgId                  String   @default("org-default")
+  code                   String   @db.VarChar(160)
+  title                  String   @db.VarChar(240)
+  description            String?
+  authorityClass         String   @default("AMBULANT_POLICY") @db.VarChar(80)
+  enforcementClass       String   @default("INFORMATIONAL") @db.VarChar(80)
+  enforcementPoint       String   @default("RENEWAL_GATE") @db.VarChar(80)
+  enforcementScope       String?  @db.VarChar(240)
+  applicability          Json?
+  jurisdiction           String   @default("ZA") @db.VarChar(8)
+  sourceAuthority        String?  @db.VarChar(160)
+  sourceVersion          String?  @db.VarChar(160)
+  sourceProvision        String?  @db.VarChar(240)
+  primarySource          String?
+  effectiveFrom          DateTime?
+  effectiveTo            DateTime?
+  lastLegallyReviewedAt  DateTime?
+  nextLegalReviewAt      DateTime?
+  status                 String   @default("ACTIVE") @db.VarChar(80)
+  metadata               Json?
+  createdByUserId        String?
+  updatedByUserId        String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([orgId, code])
+  @@index([orgId, status])
+  @@index([authorityClass, enforcementClass])
+  @@index([effectiveFrom, effectiveTo])
+  @@index([nextLegalReviewAt])
+}
+
+/// Common renewable credential/evidence registry.
+///
+/// `enforcementPoint` and `enforcementScope` are explicit so an expired credential can
+/// disable only the smallest affected privilege rather than disabling signup or the
+/// holder's whole account. Category-specific hard enforcement is intentionally deferred
+/// to later governed tranches.
+model ComplianceCredential {
+  id                    String   @id @default(cuid())
+  orgId                 String   @default("org-default")
+  holderType            String   @db.VarChar(80)
+  holderSubtype         String?  @db.VarChar(120)
+  holderId              String   @db.VarChar(191)
+  holderName            String   @db.VarChar(240)
+  holderEmail           String?  @db.VarChar(320)
+  credentialType        String   @db.VarChar(120)
+  credentialLabel       String   @db.VarChar(240)
+  credentialNumber      String?  @db.VarChar(240)
+  issuingAuthority      String?  @db.VarChar(240)
+  controlCode           String?  @db.VarChar(160)
+  authorityClass        String   @default("AMBULANT_POLICY") @db.VarChar(80)
+  enforcementClass      String   @default("INFORMATIONAL") @db.VarChar(80)
+  enforcementPoint      String   @default("RENEWAL_GATE") @db.VarChar(80)
+  enforcementScope      String?  @db.VarChar(240)
+  jurisdiction          String   @default("ZA") @db.VarChar(8)
+  applicability         Json?
+  issuedAt              DateTime?
+  effectiveFrom         DateTime?
+  expiresAt             DateTime?
+  nextReviewAt          DateTime?
+  state                 String   @default("VALID") @db.VarChar(80)
+  verificationMethod    String?  @db.VarChar(120)
+  sourceRef             String?
+  verifiedAt            DateTime?
+  verifiedByUserId      String?
+  evidenceHash          String?  @db.VarChar(128)
+  documentId            String?  @db.VarChar(191)
+  reminderDays          Int[]    @default([30, 14, 7, 1])
+  autoRemindersEnabled  Boolean  @default(true)
+  lastReminderAt        DateTime?
+  nextReminderAt        DateTime?
+  riskLevel             String?  @db.VarChar(40)
+  overrideStatus        String?  @db.VarChar(80)
+  overrideReason        String?
+  overrideApproverId    String?
+  metadata              Json?
+  createdByUserId       String?
+  updatedByUserId       String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  reminders ComplianceRenewalReminder[]
+
+  @@index([orgId, expiresAt])
+  @@index([orgId, holderType, holderSubtype])
+  @@index([holderType, holderId])
+  @@index([credentialType, expiresAt])
+  @@index([state, expiresAt])
+  @@index([nextReviewAt])
+}
+
+/// Immutable reminder-attempt history. `subjectKey` also supports legacy expiry adapters
+/// (clinicians, staff documents and platform insurance settings) before those records are
+/// progressively migrated into ComplianceCredential.
+model ComplianceRenewalReminder {
+  id                String                @id @default(cuid())
+  orgId             String                @default("org-default")
+  subjectKey        String                @db.VarChar(400)
+  credentialId      String?
+  holderType        String                @db.VarChar(80)
+  holderId          String                @db.VarChar(191)
+  holderName        String                @db.VarChar(240)
+  recipientEmail    String?               @db.VarChar(320)
+  credentialType    String                @db.VarChar(120)
+  dueAt             DateTime
+  reminderKind      String                @default("SCHEDULED") @db.VarChar(80)
+  thresholdDays     Int?
+  channel           String                @default("EMAIL") @db.VarChar(40)
+  status            String                @default("PENDING") @db.VarChar(80)
+  scheduledAt       DateTime              @default(now())
+  sentAt            DateTime?
+  triggeredByUserId String?
+  lastError         String?
+  metadata          Json?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  credential ComplianceCredential? @relation(fields: [credentialId], references: [id], onDelete: SetNull)
+
+  @@unique([subjectKey, dueAt, reminderKind, thresholdDays, channel], name: "compliance_reminder_dedupe")
+  @@index([orgId, status, scheduledAt])
+  @@index([credentialId, createdAt])
+  @@index([dueAt, status])
+  @@index([holderType, holderId])
+}
+
 model Encounter {
   id          String  @id
   caseId      String

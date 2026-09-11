@@ -41,6 +41,21 @@ type CoveragePolicy = {
   active: boolean;
 };
 
+type CyberLiabilitySettings = {
+  enabled: boolean;
+  insurerName?: string;
+  policyNumber?: string;
+  effectiveDate?: string | null;
+  expiryDate?: string | null;
+  coverageLimitZar?: number | null;
+  excessZar?: number | null;
+  territorialScope?: string;
+  incidentResponseContact?: string;
+  renewalContactEmail?: string;
+  policyDocumentRef?: string;
+  notesInternal?: string;
+};
+
 type InsuranceSettings = {
   // Original fields (backwards compatible)
   platformCoverEnabled: boolean;
@@ -48,6 +63,10 @@ type InsuranceSettings = {
   platformPolicyNumber?: string;
   platformCoversVirtual?: boolean;
   platformCoverNotes?: string;
+
+  // Ambulant+ corporate cyber / technology risk cover.
+  // This is tracked centrally and is not an individual partner signup requirement.
+  cyberLiability?: CyberLiabilitySettings;
 
   // New, richer schedule (optional until backend is wired)
   policies?: CoveragePolicy[];
@@ -85,6 +104,20 @@ function ensurePoliciesFromLegacy(json: any): InsuranceSettings {
     platformPolicyNumber: json.platformPolicyNumber ?? '',
     platformCoversVirtual: json.platformCoversVirtual ?? false,
     platformCoverNotes: json.platformCoverNotes ?? '',
+    cyberLiability: {
+      enabled: !!json?.cyberLiability?.enabled,
+      insurerName: json?.cyberLiability?.insurerName ?? '',
+      policyNumber: json?.cyberLiability?.policyNumber ?? '',
+      effectiveDate: json?.cyberLiability?.effectiveDate ?? null,
+      expiryDate: json?.cyberLiability?.expiryDate ?? null,
+      coverageLimitZar: json?.cyberLiability?.coverageLimitZar ?? null,
+      excessZar: json?.cyberLiability?.excessZar ?? null,
+      territorialScope: json?.cyberLiability?.territorialScope ?? '',
+      incidentResponseContact: json?.cyberLiability?.incidentResponseContact ?? '',
+      renewalContactEmail: json?.cyberLiability?.renewalContactEmail ?? '',
+      policyDocumentRef: json?.cyberLiability?.policyDocumentRef ?? '',
+      notesInternal: json?.cyberLiability?.notesInternal ?? '',
+    },
     policies: Array.isArray(json.policies) ? json.policies : undefined,
   };
 
@@ -164,6 +197,20 @@ export default function AdminInsuranceSettingsPage() {
             platformPolicyNumber: '',
             platformCoversVirtual: true,
             platformCoverNotes: '',
+            cyberLiability: {
+              enabled: false,
+              insurerName: '',
+              policyNumber: '',
+              effectiveDate: null,
+              expiryDate: null,
+              coverageLimitZar: null,
+              excessZar: null,
+              territorialScope: '',
+              incidentResponseContact: '',
+              renewalContactEmail: '',
+              policyDocumentRef: '',
+              notesInternal: '',
+            },
           }),
         );
         setErr(
@@ -218,6 +265,19 @@ export default function AdminInsuranceSettingsPage() {
   function updateCfg(patch: Partial<InsuranceSettings>) {
     if (!cfg) return;
     setCfg({ ...cfg, ...patch });
+    setSaved(false);
+  }
+
+  function updateCyber(patch: Partial<CyberLiabilitySettings>) {
+    if (!cfg) return;
+    setCfg({
+      ...cfg,
+      cyberLiability: {
+        enabled: cfg.cyberLiability?.enabled ?? false,
+        ...(cfg.cyberLiability ?? {}),
+        ...patch,
+      },
+    });
     setSaved(false);
   }
 
@@ -327,13 +387,12 @@ export default function AdminInsuranceSettingsPage() {
       {/* Header */}
       <header className="space-y-2">
         <h1 className="text-lg md:text-xl font-semibold">
-          Medical Malpractice &amp; Professional Indemnity
+          Insurance &amp; Platform Risk Cover
         </h1>
         <p className="text-sm text-gray-600">
-          Configure how platform-wide and clinician-level cover behaves. These
-          settings can be used to decide whether a clinician may practice on
-          Ambulant+, what insurer they rely on, and how cover varies by class,
-          premium tier or specific IDs.
+          Configure platform-wide professional indemnity / malpractice cover and
+          Ambulant+ corporate cyber-liability cover. Cyber cover is tracked
+          centrally and is not an individual partner signup requirement.
         </p>
         <div className="flex flex-wrap gap-2 text-[11px] text-gray-500">
           <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5">
@@ -437,6 +496,139 @@ export default function AdminInsuranceSettingsPage() {
             individual malpractice policies.
           </div>
         )}
+      </section>
+
+      {/* Ambulant+ corporate cyber liability */}
+      <section className="bg-white border rounded-2xl p-4 shadow-sm space-y-4 text-sm">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium">Platform-wide cyber liability &amp; technology cover</h2>
+            <p className="text-[11px] text-gray-500 mt-1 max-w-2xl">
+              Track Ambulant+ corporate cyber/privacy risk cover centrally. This
+              does not force each clinician, pharmacy, lab, rider or other
+              partner to buy separate cyber cover just to join the platform.
+              Partner-specific insurance remains privilege/risk dependent.
+            </p>
+          </div>
+          <label className="inline-flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={cfg.cyberLiability?.enabled ?? false}
+              onChange={(e) => updateCyber({ enabled: e.target.checked })}
+              className="h-3.5 w-3.5"
+            />
+            <span>Cyber cover active</span>
+          </label>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-3 text-xs">
+          <label className="block">
+            <div className="text-gray-600 mb-1">Insurer</div>
+            <input
+              className="border rounded px-2 py-1 w-full"
+              value={cfg.cyberLiability?.insurerName ?? ''}
+              onChange={(e) => updateCyber({ insurerName: e.target.value })}
+            />
+          </label>
+          <label className="block">
+            <div className="text-gray-600 mb-1">Policy number</div>
+            <input
+              className="border rounded px-2 py-1 w-full"
+              value={cfg.cyberLiability?.policyNumber ?? ''}
+              onChange={(e) => updateCyber({ policyNumber: e.target.value })}
+            />
+          </label>
+          <label className="block">
+            <div className="text-gray-600 mb-1">Effective date</div>
+            <input
+              type="date"
+              className="border rounded px-2 py-1 w-full"
+              value={cfg.cyberLiability?.effectiveDate ?? ''}
+              onChange={(e) => updateCyber({ effectiveDate: e.target.value || null })}
+            />
+          </label>
+          <label className="block">
+            <div className="text-gray-600 mb-1">Renewal / expiry date</div>
+            <input
+              type="date"
+              className="border rounded px-2 py-1 w-full"
+              value={cfg.cyberLiability?.expiryDate ?? ''}
+              onChange={(e) => updateCyber({ expiryDate: e.target.value || null })}
+            />
+          </label>
+          <label className="block">
+            <div className="text-gray-600 mb-1">Coverage limit (ZAR)</div>
+            <input
+              inputMode="numeric"
+              className="border rounded px-2 py-1 w-full"
+              value={formatCurrency(cfg.cyberLiability?.coverageLimitZar)}
+              onChange={(e) => updateCyber({ coverageLimitZar: parseCurrencyInput(e.target.value) })}
+            />
+          </label>
+          <label className="block">
+            <div className="text-gray-600 mb-1">Excess (ZAR)</div>
+            <input
+              inputMode="numeric"
+              className="border rounded px-2 py-1 w-full"
+              value={formatCurrency(cfg.cyberLiability?.excessZar)}
+              onChange={(e) => updateCyber({ excessZar: parseCurrencyInput(e.target.value) })}
+            />
+          </label>
+          <label className="block">
+            <div className="text-gray-600 mb-1">Renewal / broker email</div>
+            <input
+              type="email"
+              className="border rounded px-2 py-1 w-full"
+              value={cfg.cyberLiability?.renewalContactEmail ?? ''}
+              onChange={(e) => updateCyber({ renewalContactEmail: e.target.value })}
+              placeholder="renewals@example.com"
+            />
+          </label>
+          <label className="block">
+            <div className="text-gray-600 mb-1">Incident-response contact</div>
+            <input
+              className="border rounded px-2 py-1 w-full"
+              value={cfg.cyberLiability?.incidentResponseContact ?? ''}
+              onChange={(e) => updateCyber({ incidentResponseContact: e.target.value })}
+            />
+          </label>
+        </div>
+
+        <label className="text-xs block">
+          <div className="text-gray-600 mb-1">Territorial / coverage scope</div>
+          <input
+            className="border rounded px-2 py-1 w-full"
+            value={cfg.cyberLiability?.territorialScope ?? ''}
+            onChange={(e) => updateCyber({ territorialScope: e.target.value })}
+            placeholder="e.g. South Africa; approved cross-border operations subject to policy terms"
+          />
+        </label>
+
+        <label className="text-xs block">
+          <div className="text-gray-600 mb-1">Policy document reference</div>
+          <input
+            className="border rounded px-2 py-1 w-full"
+            value={cfg.cyberLiability?.policyDocumentRef ?? ''}
+            onChange={(e) => updateCyber({ policyDocumentRef: e.target.value })}
+            placeholder="Secure document ID / object reference — not a public URL"
+          />
+        </label>
+
+        <label className="text-xs block">
+          <div className="text-gray-600 mb-1">Internal notes</div>
+          <textarea
+            className="border rounded px-2 py-1 w-full"
+            rows={3}
+            value={cfg.cyberLiability?.notesInternal ?? ''}
+            onChange={(e) => updateCyber({ notesInternal: e.target.value })}
+          />
+        </label>
+
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-800">
+          The renewal date feeds the platform Compliance Renewal Centre and the
+          30 / 14 / 7 / 1-day reminder cycle. Cover applicability must still
+          follow the actual policy wording.
+        </div>
       </section>
 
       {/* Policy schedule / layers */}

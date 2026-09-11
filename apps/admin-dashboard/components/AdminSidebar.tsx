@@ -209,6 +209,7 @@ export default function AdminSidebar() {
         { href: '/admin/forms', label: 'Enterprise forms', icon: ClipboardList, requires: ['forms.read','forms.design','forms.publish'] },
         { href: '/admin/opportunities', label: 'Opportunities', icon: Briefcase, requires: ['opportunities.read','opportunities.manage','opportunities.publish'] },
         { href: '/admin/applications', label: 'Applications', icon: ClipboardCheck, requires: ['applications.read','applications.review','applications.assign','applications.decision','applications.documents.read','applications.documents.request','applications.documents.review','applications.interviews.read','applications.interviews.schedule','applications.interviews.manage','applications.interviews.evaluate'] },
+        { href: '/admin/compliance/renewals', label: 'Compliance renewals', icon: Shield, requires: ['manageRoles','compliance','compliance:read','compliance:manage','compliance.read','compliance.manage'] },
         { href: '/admin/legal', label: 'Legal department', icon: Shield, requires: ['manageRoles','compliance','compliance:read','compliance:manage','compliance.read','compliance.manage'] },
         { href: '/admin/clinicians', label: 'Admin clinicians', icon: Stethoscope, requires: ['hr','manageRoles'] },
         { href: '/admin/patients', label: 'Admin patients', icon: Users, requires: ['hr','manageRoles'] },

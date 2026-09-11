@@ -16,6 +16,20 @@ const DEFAULT_SETTINGS = {
   platformPolicyNumber: '',
   platformCoversVirtual: true,
   platformCoverNotes: '',
+  cyberLiability: {
+    enabled: false,
+    insurerName: '',
+    policyNumber: '',
+    effectiveDate: null,
+    expiryDate: null,
+    coverageLimitZar: null,
+    excessZar: null,
+    territorialScope: '',
+    incidentResponseContact: '',
+    renewalContactEmail: '',
+    policyDocumentRef: '',
+    notesInternal: '',
+  },
   policies: [],
 };
 
@@ -38,6 +52,23 @@ function stringArray(value: unknown, maxItems = 200) {
   return Array.from(
     new Set(value.map((item) => text(item, 180)).filter(Boolean)),
   ).slice(0, maxItems);
+}
+
+function normalizeCyberLiability(input: any) {
+  return {
+    enabled: bool(input?.enabled),
+    insurerName: text(input?.insurerName, 240),
+    policyNumber: text(input?.policyNumber, 240),
+    effectiveDate: text(input?.effectiveDate, 20) || null,
+    expiryDate: text(input?.expiryDate, 20) || null,
+    coverageLimitZar: nullableMoney(input?.coverageLimitZar),
+    excessZar: nullableMoney(input?.excessZar),
+    territorialScope: text(input?.territorialScope, 500),
+    incidentResponseContact: text(input?.incidentResponseContact, 500),
+    renewalContactEmail: text(input?.renewalContactEmail, 320),
+    policyDocumentRef: text(input?.policyDocumentRef, 700),
+    notesInternal: text(input?.notesInternal, 4000),
+  };
 }
 
 function normalizePolicy(input: any, index: number) {
@@ -84,6 +115,7 @@ function normalizeSettings(input: any) {
     platformPolicyNumber: text(input?.platformPolicyNumber, 240),
     platformCoversVirtual: bool(input?.platformCoversVirtual, true),
     platformCoverNotes: text(input?.platformCoverNotes, 4000),
+    cyberLiability: normalizeCyberLiability(input?.cyberLiability),
     policies,
   };
 }
@@ -164,6 +196,8 @@ export async function PUT(req: NextRequest) {
           userAgent: req.headers.get('user-agent'),
           meta: {
             platformCoverEnabled: next.platformCoverEnabled,
+            cyberLiabilityEnabled: next.cyberLiability.enabled,
+            cyberLiabilityExpiryDate: next.cyberLiability.expiryDate,
             policyCount: next.policies.length,
           },
         },
