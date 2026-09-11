@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
+import {
+  normalizeCarePortPharmacyCompliance,
+  summarizeCarePortPharmacyCompliance,
+} from '@/src/lib/careport-pharmacy-compliance';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -275,7 +279,13 @@ export async function POST(req: NextRequest) {
     const displayName = clean(body?.displayName || body?.tradingName || body?.pharmacyName || body?.name || body?.businessName, 220);
     const registeredName = clean(body?.registeredName || body?.legalName || displayName, 220);
     const registrationNumber = clean(body?.registrationNumber || body?.companyRegistrationNumber, 160);
-    const sapcNumber = clean(body?.sapcNumber || body?.licenseNumber || body?.pharmacyCouncilNumber, 160);
+    const sapcNumber = clean(body?.sapcNumber || body?.pharmacyCouncilNumber || body?.yNumber, 160);
+    const premisesLicenceNumber = clean(
+      body?.pharmacyPremisesLicenceNumber ||
+        body?.ndohPharmacyLicenceNumber ||
+        body?.licenseNumber,
+      160,
+    );
 
     const contactFirstName = clean(body?.contactFirstName || body?.firstName, 120);
     const contactMiddleName = clean(body?.contactMiddleName || body?.middleName, 120);
@@ -304,7 +314,9 @@ export async function POST(req: NextRequest) {
 
     if (!displayName) return json({ ok: false, error: 'pharmacy_display_or_trading_name_required' }, 400);
     if (!registeredName) return json({ ok: false, error: 'pharmacy_registered_name_required' }, 400);
-    if (!registrationNumber && !sapcNumber) return json({ ok: false, error: 'pharmacy_registration_or_sapc_required' }, 400);
+    if (!registrationNumber && !sapcNumber && !premisesLicenceNumber) {
+      return json({ ok: false, error: 'pharmacy_registration_or_licence_required' }, 400);
+    }
     if (!email) return json({ ok: false, error: 'email_required' }, 400);
     if (!phone) return json({ ok: false, error: 'phone_required' }, 400);
 
@@ -323,6 +335,7 @@ export async function POST(req: NextRequest) {
         legalName: registeredName,
         registrationNumber,
         sapcNumber,
+        pharmacyPremisesLicenceNumber: premisesLicenceNumber,
       },
       responsibleContact: {
         firstName: contactFirstName,
@@ -359,6 +372,13 @@ export async function POST(req: NextRequest) {
 
     attachAgreementSnapshot(kycPayload, agreementSnapshot);
     attachPartnerHierarchySnapshot(kycPayload, hierarchySnapshot);
+
+    const complianceProfile = normalizeCarePortPharmacyCompliance({
+      ...body,
+      kycPayload,
+      complianceProfile: body?.complianceProfile || body?.pharmacyCompliance || null,
+    });
+    (kycPayload as any).complianceProfile = complianceProfile;
 
     const pharmacy = await (prisma as any).pharmacyPartner.create({
       data: {
@@ -403,6 +423,8 @@ export async function POST(req: NextRequest) {
       status: 'PENDING_REVIEW',
       message: 'Pharmacy application submitted for CarePort KYC review.',
       pharmacy,
+      complianceProfile,
+      complianceSummary: summarizeCarePortPharmacyCompliance(complianceProfile),
     }, 201);
   } catch (error: any) {
     return json({ ok: false, error: error?.message || 'careport_pharmacy_application_failed' }, error?.status || 500);

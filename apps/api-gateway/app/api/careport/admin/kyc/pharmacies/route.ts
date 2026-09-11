@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
 import { readIdentity } from "@/src/lib/identity";
 import { orgIdFromHeaders, requireRole } from "@/src/lib/careport";
+import {
+  normalizeCarePortPharmacyCompliance,
+  summarizeCarePortPharmacyCompliance,
+} from "@/src/lib/careport-pharmacy-compliance";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,5 +50,14 @@ export async function GET(req: NextRequest) {
     } as any,
   });
 
-  return NextResponse.json({ ok: true, orgId, country, status, pharmacies: rows }, { status: 200 });
+  const pharmacies = rows.map((row: any) => {
+    const complianceProfile = normalizeCarePortPharmacyCompliance(row);
+    return {
+      ...row,
+      complianceProfile,
+      complianceSummary: summarizeCarePortPharmacyCompliance(complianceProfile),
+    };
+  });
+
+  return NextResponse.json({ ok: true, orgId, country, status, pharmacies }, { status: 200 });
 }

@@ -2,6 +2,82 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+type PharmacyComplianceProfile = {
+  version?: string;
+  institution?: {
+    registeredName?: string | null;
+    registrationNumber?: string | null;
+    legalForm?: string | null;
+  };
+  premises?: {
+    pharmacyCategory?: string | null;
+    yNumber?: string | null;
+    premisesLicenceNumber?: string | null;
+    licenceIssuedAt?: string | null;
+    licenceExpiresAt?: string | null;
+  };
+  responsiblePharmacist?: {
+    fullName?: string | null;
+    pNumber?: string | null;
+    registrationNumber?: string | null;
+    registrationExpiresAt?: string | null;
+  };
+  medicalScheme?: {
+    claimsEnabled?: boolean;
+    pcnsPracticeNumber?: string | null;
+    pcnsExpiresAt?: string | null;
+  };
+  sahpra?: {
+    required?: boolean;
+    operations?: string[];
+    licenceNumber?: string | null;
+    licenceExpiresAt?: string | null;
+  };
+  coldChain?: {
+    required?: boolean;
+    capable?: boolean;
+    monitoringMethod?: string | null;
+    minTempC?: number | null;
+    maxTempC?: number | null;
+    validationExpiresAt?: string | null;
+  };
+  review?: {
+    notes?: string | null;
+    updatedAt?: string | null;
+  };
+};
+
+type PharmacyComplianceItem = {
+  code: string;
+  label: string;
+  authority: string;
+  required: boolean;
+  present: boolean;
+  applicable: boolean;
+  expiresAt?: string | null;
+  status: string;
+  enforcementPoint: string;
+  enforcementScope: string;
+};
+
+type PharmacyCapabilityReadiness = {
+  applicable?: boolean;
+  ready?: boolean;
+  missing?: string[];
+};
+
+type PharmacyComplianceSummary = {
+  version?: string;
+  readyForRegulatedFulfilment?: boolean;
+  missingForRegulatedFulfilment?: string[];
+  capabilities?: {
+    medicalSchemeClaims?: PharmacyCapabilityReadiness;
+    sahpraRegulatedOperations?: PharmacyCapabilityReadiness;
+    coldChainFulfilment?: PharmacyCapabilityReadiness;
+  };
+  items?: PharmacyComplianceItem[];
+};
+
 type PharmacyKycRow = {
   id: string;
   name?: string | null;
@@ -16,6 +92,8 @@ type PharmacyKycRow = {
   kycVerifiedAt?: string | null;
   kycRejectedReason?: string | null;
   kycPayload?: unknown;
+  complianceProfile?: PharmacyComplianceProfile | null;
+  complianceSummary?: PharmacyComplianceSummary | null;
   createdAt?: string | null;
   updatedAt?: string | null;
 };
@@ -29,7 +107,7 @@ type PharmacyKycPayload = {
   pharmacies?: PharmacyKycRow[];
 };
 
-const STATUS_OPTIONS = ['PENDING_REVIEW', 'APPROVED', 'REJECTED'];
+const STATUS_OPTIONS = ['PENDING_REVIEW', 'NEEDS_MORE_INFO', 'LIMITED', 'APPROVED', 'REJECTED'];
 
 function dateText(value?: string | null) {
   if (!value) return 'Not recorded';
@@ -45,6 +123,8 @@ function statusClass(value?: string | null) {
 
   if (status === 'APPROVED') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
   if (status === 'REJECTED') return 'border-rose-200 bg-rose-50 text-rose-800';
+  if (status === 'LIMITED') return 'border-blue-200 bg-blue-50 text-blue-800';
+  if (status === 'NEEDS_MORE_INFO') return 'border-violet-200 bg-violet-50 text-violet-800';
 
   return 'border-amber-200 bg-amber-50 text-amber-900';
 }
@@ -198,6 +278,350 @@ function PharmacyEnterpriseReview({ row }: { row: PharmacyKycRow }) {
   );
 }
 
+
+function dateInputValue(value?: string | null) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 10);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function complianceTone(status?: string | null) {
+  const value = String(status || '').toUpperCase();
+  if (value === 'PRESENT') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+  if (value === 'NOT_APPLICABLE') return 'border-slate-200 bg-slate-50 text-slate-600';
+  if (value === 'EXPIRY_UNKNOWN') return 'border-amber-200 bg-amber-50 text-amber-800';
+  if (value === 'EXPIRED') return 'border-rose-200 bg-rose-50 text-rose-800';
+  return 'border-violet-200 bg-violet-50 text-violet-800';
+}
+
+function PharmacyComplianceReview({
+  row,
+  draft,
+  onChange,
+}: {
+  row: PharmacyKycRow;
+  draft: PharmacyComplianceProfile;
+  onChange: (section: keyof PharmacyComplianceProfile, field: string, value: unknown) => void;
+}) {
+  const summary = row.complianceSummary;
+  const institution = draft.institution || {};
+  const premises = draft.premises || {};
+  const rp = draft.responsiblePharmacist || {};
+  const medicalScheme = draft.medicalScheme || {};
+  const sahpra = draft.sahpra || {};
+  const coldChain = draft.coldChain || {};
+
+  const inputClass =
+    'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400';
+
+  return (
+    <section className="mt-5 rounded-3xl border border-sky-200 bg-sky-50/40 p-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
+            A7-C2 pharmacy compliance
+          </p>
+          <h3 className="mt-1 text-lg font-semibold text-slate-950">
+            Institution, premises, professional and capability assurance
+          </h3>
+          <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
+            Registration numbers, licences and professional registrations are deliberately separate.
+            Approval enables regulated CarePort fulfilment; Limited / Needs more info keeps the partner
+            workspace available without enabling dispensing or fulfilment privileges.
+          </p>
+        </div>
+
+        <div
+          className={
+            'rounded-full border px-3 py-1 text-xs font-semibold ' +
+            (summary?.readyForRegulatedFulfilment
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              : 'border-amber-200 bg-amber-50 text-amber-900')
+          }
+        >
+          {summary?.readyForRegulatedFulfilment ? 'Ready for regulated fulfilment review' : 'Compliance facts incomplete'}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        {[
+          ['Medical-scheme claims', summary?.capabilities?.medicalSchemeClaims],
+          ['SAHPRA-regulated operations', summary?.capabilities?.sahpraRegulatedOperations],
+          ['Cold-chain fulfilment', summary?.capabilities?.coldChainFulfilment],
+        ].map(([label, capability]) => {
+          const value = capability as PharmacyCapabilityReadiness | undefined;
+          const text = !value?.applicable ? 'Not applicable' : value.ready ? 'Cleared' : 'Not cleared';
+          const cls = !value?.applicable
+            ? 'border-slate-200 bg-slate-50 text-slate-600'
+            : value.ready
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              : 'border-amber-200 bg-amber-50 text-amber-900';
+
+          return (
+            <div key={String(label)} className={'rounded-2xl border px-3 py-2 text-xs ' + cls}>
+              <span className="font-semibold">{String(label)}</span>
+              <span className="ml-2">{text}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <h4 className="text-sm font-semibold text-slate-950">Institution & pharmacy premises</h4>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="text-xs font-medium text-slate-600">
+              Registered / legal name
+              <input
+                className={inputClass}
+                value={institution.registeredName || ''}
+                onChange={(e) => onChange('institution', 'registeredName', e.target.value)}
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600">
+              Business registration number
+              <input
+                className={inputClass}
+                value={institution.registrationNumber || ''}
+                onChange={(e) => onChange('institution', 'registrationNumber', e.target.value)}
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600">
+              Pharmacy category
+              <select
+                className={inputClass}
+                value={premises.pharmacyCategory || ''}
+                onChange={(e) => onChange('premises', 'pharmacyCategory', e.target.value)}
+              >
+                <option value="">Not recorded</option>
+                <option value="COMMUNITY">Community</option>
+                <option value="INSTITUTIONAL_PRIVATE">Institutional — private</option>
+                <option value="INSTITUTIONAL_PUBLIC">Institutional — public</option>
+                <option value="CONSULTANT">Consultant</option>
+                <option value="WHOLESALE">Wholesale</option>
+                <option value="MANUFACTURING">Manufacturing</option>
+              </select>
+            </label>
+            <label className="text-xs font-medium text-slate-600">
+              SAPC pharmacy Y-number
+              <input
+                className={inputClass}
+                value={premises.yNumber || ''}
+                onChange={(e) => onChange('premises', 'yNumber', e.target.value)}
+                placeholder="Y..."
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600">
+              NDoH pharmacy premises licence
+              <input
+                className={inputClass}
+                value={premises.premisesLicenceNumber || ''}
+                onChange={(e) => onChange('premises', 'premisesLicenceNumber', e.target.value)}
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600">
+              Premises licence expiry / review date
+              <input
+                type="date"
+                className={inputClass}
+                value={dateInputValue(premises.licenceExpiresAt)}
+                onChange={(e) => onChange('premises', 'licenceExpiresAt', e.target.value || null)}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <h4 className="text-sm font-semibold text-slate-950">Responsible pharmacist</h4>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="text-xs font-medium text-slate-600">
+              Responsible pharmacist name
+              <input
+                className={inputClass}
+                value={rp.fullName || ''}
+                onChange={(e) => onChange('responsiblePharmacist', 'fullName', e.target.value)}
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600">
+              SAPC P-number / registration
+              <input
+                className={inputClass}
+                value={rp.pNumber || rp.registrationNumber || ''}
+                onChange={(e) => onChange('responsiblePharmacist', 'pNumber', e.target.value)}
+                placeholder="P..."
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 md:col-span-2">
+              Registration expiry / review date
+              <input
+                type="date"
+                className={inputClass}
+                value={dateInputValue(rp.registrationExpiresAt)}
+                onChange={(e) => onChange('responsiblePharmacist', 'registrationExpiresAt', e.target.value || null)}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <h4 className="text-sm font-semibold text-slate-950">Conditional funding & establishment controls</h4>
+          <div className="mt-3 space-y-3">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={Boolean(medicalScheme.claimsEnabled)}
+                onChange={(e) => onChange('medicalScheme', 'claimsEnabled', e.target.checked)}
+              />
+              Medical-scheme claims enabled — PCNS applies to this capability
+            </label>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="text-xs font-medium text-slate-600">
+                PCNS practice number
+                <input
+                  className={inputClass}
+                  value={medicalScheme.pcnsPracticeNumber || ''}
+                  onChange={(e) => onChange('medicalScheme', 'pcnsPracticeNumber', e.target.value)}
+                  disabled={!medicalScheme.claimsEnabled}
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-600">
+                PCNS renewal / expiry
+                <input
+                  type="date"
+                  className={inputClass}
+                  value={dateInputValue(medicalScheme.pcnsExpiresAt)}
+                  onChange={(e) => onChange('medicalScheme', 'pcnsExpiresAt', e.target.value || null)}
+                  disabled={!medicalScheme.claimsEnabled}
+                />
+              </label>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={Boolean(sahpra.required)}
+                onChange={(e) => onChange('sahpra', 'required', e.target.checked)}
+              />
+              SAHPRA section 22C licence applies to this pharmacy’s activities
+            </label>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="text-xs font-medium text-slate-600">
+                SAHPRA licence number
+                <input
+                  className={inputClass}
+                  value={sahpra.licenceNumber || ''}
+                  onChange={(e) => onChange('sahpra', 'licenceNumber', e.target.value)}
+                  disabled={!sahpra.required}
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-600">
+                SAHPRA licence expiry
+                <input
+                  type="date"
+                  className={inputClass}
+                  value={dateInputValue(sahpra.licenceExpiresAt)}
+                  onChange={(e) => onChange('sahpra', 'licenceExpiresAt', e.target.value || null)}
+                  disabled={!sahpra.required}
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-600 md:col-span-2">
+                Applicable operations
+                <input
+                  className={inputClass}
+                  value={(sahpra.operations || []).join(', ')}
+                  onChange={(e) =>
+                    onChange(
+                      'sahpra',
+                      'operations',
+                      e.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+                    )
+                  }
+                  placeholder="WHOLESALE, DISTRIBUTION, MANUFACTURE, IMPORT, EXPORT"
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <h4 className="text-sm font-semibold text-slate-950">Cold-chain capability</h4>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            Only enable this requirement where the pharmacy will fulfil temperature-sensitive products.
+          </p>
+          <div className="mt-3 space-y-3">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={Boolean(coldChain.required)}
+                onChange={(e) => onChange('coldChain', 'required', e.target.checked)}
+              />
+              Cold-chain fulfilment required
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={Boolean(coldChain.capable)}
+                onChange={(e) => onChange('coldChain', 'capable', e.target.checked)}
+                disabled={!coldChain.required}
+              />
+              Validated cold-chain capability available
+            </label>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="text-xs font-medium text-slate-600">
+                Temperature monitoring method
+                <input
+                  className={inputClass}
+                  value={coldChain.monitoringMethod || ''}
+                  onChange={(e) => onChange('coldChain', 'monitoringMethod', e.target.value)}
+                  disabled={!coldChain.required}
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-600">
+                Validation expiry / review
+                <input
+                  type="date"
+                  className={inputClass}
+                  value={dateInputValue(coldChain.validationExpiresAt)}
+                  onChange={(e) => onChange('coldChain', 'validationExpiresAt', e.target.value || null)}
+                  disabled={!coldChain.required}
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {(summary?.items || []).map((item) => (
+          <div key={item.code} className="rounded-2xl border border-slate-200 bg-white p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold text-slate-900">{item.label}</p>
+                <p className="mt-1 text-[11px] text-slate-500">{item.authority}</p>
+              </div>
+              <span className={'rounded-full border px-2 py-0.5 text-[10px] font-semibold ' + complianceTone(item.status)}>
+                {item.status}
+              </span>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500">
+              {item.applicable ? item.enforcementScope.replace(/_/g, ' ') : 'Not applicable to current capability'}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
+        <strong>Control separation:</strong> NDoH pharmacy premises licence, SAPC Y-number, responsible-pharmacist
+        registration, PCNS and SAHPRA licences are not interchangeable. PCNS applies to medical-scheme claims;
+        SAHPRA section 22C is conditional on regulated establishment activities; cold chain applies only to
+        temperature-sensitive fulfilment.
+      </div>
+    </section>
+  );
+}
+
+
 function searchable(row: PharmacyKycRow) {
   return [
     row.id,
@@ -227,6 +651,7 @@ export default function CarePortPharmacyKycReviewPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [complianceDrafts, setComplianceDrafts] = useState<Record<string, PharmacyComplianceProfile>>({});
 
   async function loadRows() {
     setLoading(true);
@@ -249,7 +674,13 @@ export default function CarePortPharmacyKycReviewPage() {
         throw new Error(payload?.error || 'Failed to load pharmacy KYC submissions.');
       }
 
-      setRows(Array.isArray(payload.pharmacies) ? payload.pharmacies : []);
+      const pharmacies = Array.isArray(payload.pharmacies) ? payload.pharmacies : [];
+      setRows(pharmacies);
+      setComplianceDrafts(
+        Object.fromEntries(
+          pharmacies.map((row) => [row.id, row.complianceProfile || {}]),
+        ),
+      );
     } catch (err: any) {
       setError(err?.message || 'Failed to load pharmacy KYC submissions.');
       setRows([]);
@@ -277,11 +708,40 @@ export default function CarePortPharmacyKycReviewPage() {
     return { total: rows.length, pending, approved, rejected };
   }, [rows]);
 
-  async function decide(row: PharmacyKycRow, decision: 'approve' | 'reject') {
+  function patchComplianceDraft(
+    rowId: string,
+    section: keyof PharmacyComplianceProfile,
+    field: string,
+    value: unknown,
+  ) {
+    setComplianceDrafts((current) => {
+      const base = current[rowId] || {};
+      const sectionValue =
+        base[section] && typeof base[section] === 'object'
+          ? (base[section] as Record<string, unknown>)
+          : {};
+
+      return {
+        ...current,
+        [rowId]: {
+          ...base,
+          [section]: {
+            ...sectionValue,
+            [field]: value,
+          },
+        },
+      };
+    });
+  }
+
+  async function decide(
+    row: PharmacyKycRow,
+    decision: 'approve' | 'limited' | 'needs_more_info' | 'reject',
+  ) {
     const reason = reasons[row.id]?.trim() || '';
 
-    if (decision === 'reject' && !reason) {
-      setError('Please enter a rejection reason before rejecting this pharmacy.');
+    if (decision !== 'approve' && !reason) {
+      setError('Please enter a reason for Limited, Needs more info or Rejected decisions.');
       return;
     }
 
@@ -295,7 +755,11 @@ export default function CarePortPharmacyKycReviewPage() {
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ decision, reason }),
+          body: JSON.stringify({
+            decision,
+            reason,
+            complianceProfile: complianceDrafts[row.id] || row.complianceProfile || {},
+          }),
         },
       );
 
@@ -307,8 +771,12 @@ export default function CarePortPharmacyKycReviewPage() {
 
       setNotice(
         decision === 'approve'
-          ? 'Pharmacy KYC approved.'
-          : 'Pharmacy KYC rejected with reason recorded.',
+          ? 'Pharmacy compliance approved for regulated CarePort fulfilment.'
+          : decision === 'limited'
+            ? 'Pharmacy retained in limited workspace mode; regulated fulfilment remains disabled.'
+            : decision === 'needs_more_info'
+              ? 'Pharmacy marked as needing more compliance information.'
+              : 'Pharmacy application rejected with reason recorded.',
       );
 
       setReasons((current) => ({ ...current, [row.id]: '' }));
@@ -330,11 +798,12 @@ export default function CarePortPharmacyKycReviewPage() {
                 CarePort KYC governance
               </p>
               <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">
-                Pharmacy KYB / KYC review
+                Pharmacy KYB / KYP compliance review
               </h1>
               <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-600">
-                Review pharmacy partner KYC submissions, operational details, evidence payloads and rejection history
-                before enabling trusted marketplace and fulfilment participation.
+                Review institution identity, pharmacy-premises licensing, responsible-pharmacist assurance and
+                capability-specific evidence before enabling regulated CarePort fulfilment. Workspace access remains
+                separate from dispensing and fulfilment privileges.
               </p>
             </div>
 
@@ -497,7 +966,7 @@ export default function CarePortPharmacyKycReviewPage() {
                       onChange={(event) =>
                         setReasons((current) => ({ ...current, [row.id]: event.target.value }))
                       }
-                      placeholder="Reason required for rejection"
+                      placeholder="Reason for Limited / Needs more info / Reject"
                       className="min-h-[92px] w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-400"
                     />
 
@@ -508,7 +977,23 @@ export default function CarePortPharmacyKycReviewPage() {
                         disabled={busyId === row.id}
                         className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        Approve
+                        Approve fulfilment
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => decide(row, 'needs_more_info')}
+                        disabled={busyId === row.id}
+                        className="rounded-2xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Needs more info
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => decide(row, 'limited')}
+                        disabled={busyId === row.id}
+                        className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Limited workspace
                       </button>
                       <button
                         type="button"
@@ -521,6 +1006,14 @@ export default function CarePortPharmacyKycReviewPage() {
                     </div>
                   </div>
                 </div>
+
+                <PharmacyComplianceReview
+                  row={row}
+                  draft={complianceDrafts[row.id] || row.complianceProfile || {}}
+                  onChange={(section, field, value) =>
+                    patchComplianceDraft(row.id, section, field, value)
+                  }
+                />
 
                 <details className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <summary className="cursor-pointer text-sm font-semibold text-slate-700">

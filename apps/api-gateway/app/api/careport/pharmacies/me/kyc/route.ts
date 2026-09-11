@@ -4,6 +4,7 @@ import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
 import { orgIdFromHeaders, requireRole, pharmacyIdForStaff } from '@/src/lib/careport';
 import { COUNTRY_CONFIG, validatePharmacyKyc } from '@/src/lib/kyc';
+import { normalizeCarePortPharmacyCompliance } from '@/src/lib/careport-pharmacy-compliance';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -60,7 +61,13 @@ export async function POST(req: NextRequest) {
       country,
       currency: cfg.currency,
       kycSchemaKey: schemaKey,
-      kycPayload: v.data as any,
+      kycPayload: {
+        ...(v.data as any),
+        complianceProfile: normalizeCarePortPharmacyCompliance({
+          ...(payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}),
+          complianceProfile: body?.complianceProfile || (payload as any)?.complianceProfile || null,
+        }),
+      } as any,
       kycSubmittedAt: new Date(),
       kycVerifiedAt: null,
       kycRejectedReason: null,
