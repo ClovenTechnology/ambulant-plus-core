@@ -227,7 +227,48 @@ export type NormalizedErxMed = {
   quantity: number;
   directions: string | null;
   drugCode: string | null;
+  primaryCoding: { system: string; code: string; display: string } | null;
+  ingredientText: string | null;
+  formText: string | null;
+  strengthText: string | null;
+  doseText: string | null;
+  routeText: string | null;
+  frequencyText: string | null;
+  durationText: string | null;
+  quantityValue: number | null;
+  quantityUnit: string | null;
+  quantityText: string | null;
+  repeats: number | null;
+  sourceSnapshot: any;
 };
+
+function optionalText(value: unknown): string | null {
+  const s = String(value ?? "").trim();
+  return s || null;
+}
+
+function optionalFiniteNumber(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function structuredMedicationQuantity(m: any): {
+  value: number | null;
+  unit: string | null;
+  text: string | null;
+} {
+  const structured =
+    m?.quantity && typeof m.quantity === "object" && !Array.isArray(m.quantity)
+      ? m.quantity
+      : null;
+
+  return {
+    value: optionalFiniteNumber(structured?.value ?? m?.quantityValue),
+    unit: optionalText(structured?.unit ?? m?.quantityUnit),
+    text: optionalText(structured?.text ?? m?.quantityText),
+  };
+}
 
 export function normalizeErxMeds(erx: any): NormalizedErxMed[] {
   const medsRaw = erx?.meds ?? erx?.medications ?? null;
@@ -264,24 +305,32 @@ export function normalizeErxMeds(erx: any): NormalizedErxMed[] {
         inferDrugCodeFromText(name) ||
         null;
 
-      const structuredQuantity =
-        m?.quantity &&
-        typeof m.quantity === "object" &&
-        !Array.isArray(m.quantity)
-          ? m.quantity?.value
-          : undefined;
+      const structuredQuantity = structuredMedicationQuantity(m);
 
       return {
         erxMedKey,
         name,
         quantity: parseQty(
           m?.qty ??
-            structuredQuantity ??
-            m?.quantityText ??
+            structuredQuantity.value ??
+            structuredQuantity.text ??
             m?.quantity,
         ),
         directions: buildDirections(m),
         drugCode,
+        primaryCoding,
+        ingredientText: optionalText(m?.ingredientText),
+        formText: optionalText(m?.formText),
+        strengthText: optionalText(m?.strengthText),
+        doseText: optionalText(m?.doseText ?? m?.dose),
+        routeText: optionalText(m?.routeText ?? m?.route),
+        frequencyText: optionalText(m?.frequencyText ?? m?.freq ?? m?.frequency),
+        durationText: optionalText(m?.durationText ?? m?.duration),
+        quantityValue: structuredQuantity.value,
+        quantityUnit: structuredQuantity.unit,
+        quantityText: structuredQuantity.text,
+        repeats: optionalFiniteNumber(m?.repeats) == null ? null : Math.max(0, Math.trunc(Number(m?.repeats))),
+        sourceSnapshot: m,
       };
     });
   }
@@ -295,11 +344,61 @@ export function normalizeErxMeds(erx: any): NormalizedErxMed[] {
         quantity: 1,
         directions: String(erx?.sig ?? "").trim() || null,
         drugCode: inferDrugCodeFromText(legacyDrug),
+        primaryCoding: null,
+        ingredientText: null,
+        formText: null,
+        strengthText: null,
+        doseText: null,
+        routeText: null,
+        frequencyText: null,
+        durationText: null,
+        quantityValue: 1,
+        quantityUnit: null,
+        quantityText: "1",
+        repeats: null,
+        sourceSnapshot: { drug: legacyDrug, sig: erx?.sig ?? null },
       },
     ];
   }
 
   return [];
+}
+
+export async function carePortPatientIdentityIds(userId: string): Promise<string[]> {
+  const uid = String(userId ?? "").trim();
+  if (!uid) return [];
+
+  const profile = await prisma.patientProfile
+    .findUnique({ where: { userId: uid }, select: { id: true } })
+    .catch(() => null);
+
+  return Array.from(new Set([uid, profile?.id].filter(Boolean).map(String)));
+}
+
+export async function requireCarePortPatientResourceAccess(params: {
+  who: Who;
+  patientId: string;
+}): Promise<{ patientIdentityIds: string[] }> {
+  if (String(params.who.role) === "admin") {
+    return { patientIdentityIds: [String(params.patientId)] };
+  }
+
+  if (String(params.who.role) !== "patient") {
+    const err = new Error("forbidden");
+    (err as any).status = 403;
+    throw err;
+  }
+
+  const uid = String((params.who as any)?.uid ?? "").trim();
+  const patientIdentityIds = await carePortPatientIdentityIds(uid);
+
+  if (!uid || !patientIdentityIds.includes(String(params.patientId))) {
+    const err = new Error("forbidden");
+    (err as any).status = 403;
+    throw err;
+  }
+
+  return { patientIdentityIds };
 }
 
 export async function pharmacyIdForStaff(

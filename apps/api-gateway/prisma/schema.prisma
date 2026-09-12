@@ -3435,12 +3435,95 @@ model MedReachSpecimenEvidence {
   @@index([orgId, capturedAt])
 }
 
+model CarePortRxProcurementSession {
+  id          String                      @id @default(cuid())
+  orgId       String                      @default("org-default")
+  erxOrderId  String
+  refillNo    Int                         @default(0)
+  encounterId String
+  patientId   String
+  status      CarePortRxProcurementStatus @default(BASKET_DRAFT)
+
+  // A search location is intentionally independent from final fulfilment.
+  // It can be used for nearby-pharmacy ranking without committing the patient
+  // to delivery.
+  searchLabel   String? @db.VarChar(160)
+  searchAddress String?
+  searchLat     Float?
+  searchLng     Float?
+  searchSource  String? @db.VarChar(40)
+
+  sourceErxVersion Int?
+  sourceErxStatus  String? @db.VarChar(80)
+  sourceSnapshot   Json?
+
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  lines  CarePortRxProcurementLine[]
+  orders CarePortOrder[]
+
+  @@index([orgId, patientId, updatedAt])
+  @@index([erxOrderId, refillNo, createdAt])
+  @@index([encounterId, patientId, updatedAt])
+  @@index([status, expiresAt])
+}
+
+model CarePortRxProcurementLine {
+  id        String                         @id @default(cuid())
+  orgId     String                         @default("org-default")
+  sessionId String
+  erxMedKey String
+  state     CarePortRxProcurementLineState @default(INCLUDED)
+
+  deferReason String?   @db.VarChar(80)
+  deferredAt DateTime?
+
+  drugCode      String?
+  codingSystem  String? @db.VarChar(240)
+  codingCode    String? @db.VarChar(240)
+  codingDisplay String?
+
+  name           String
+  ingredientText String?
+  formText       String?
+  strengthText   String?
+  doseText       String?
+  routeText      String?
+  frequencyText  String?
+  durationText   String?
+
+  prescribedQuantityValue Float?
+  prescribedQuantityUnit  String? @db.VarChar(120)
+  prescribedQuantityText  String?
+  legacyQuantity          Int     @default(1)
+  directions              String?
+  repeats                  Int?
+
+  sourceMedicationSnapshot Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session CarePortRxProcurementSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, erxMedKey])
+  @@index([sessionId, state])
+  @@index([orgId, state, updatedAt])
+  @@index([drugCode])
+}
+
 model CarePortOrder {
   id    String @id @default(cuid())
   orgId String @default("org-default")
 
   erxOrderId String
   refillNo   Int    @default(0)
+
+  // CP-RX-1: optional bridge from the future-facing procurement session to a
+  // final CarePort order. Legacy direct orders remain valid with null here.
+  procurementSessionId String?
 
   encounterId String
   patientId   String
@@ -3485,7 +3568,8 @@ model CarePortOrder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  chosenPharmacy PharmacyPartner? @relation("ChosenPharmacy", fields: [chosenPharmacyId], references: [id])
+  chosenPharmacy     PharmacyPartner?              @relation("ChosenPharmacy", fields: [chosenPharmacyId], references: [id])
+  procurementSession CarePortRxProcurementSession? @relation(fields: [procurementSessionId], references: [id], onDelete: SetNull)
 
   items              CarePortOrderItem[]
   offers             CarePortOffer[]
@@ -3497,6 +3581,7 @@ model CarePortOrder {
   @@unique([erxOrderId, refillNo])
   @@index([orgId, createdAt])
   @@index([patientId, createdAt])
+  @@index([procurementSessionId])
   @@index([status, updatedAt])
   @@index([clientId, createdAt])
   @@index([clientMemberId, createdAt])
@@ -6221,6 +6306,20 @@ enum MedReachCustodyAction {
   DISPOSED
   RESULT_READY
   RESULT_PUBLISHED
+}
+
+enum CarePortRxProcurementStatus {
+  BASKET_DRAFT
+  PHARMACY_DISCOVERY
+  PHARMACY_SELECTED
+  CONVERTED_TO_ORDER
+  CANCELLED
+  EXPIRED
+}
+
+enum CarePortRxProcurementLineState {
+  INCLUDED
+  DEFERRED_BY_PATIENT
 }
 
 enum CarePortFulfillmentMode {
