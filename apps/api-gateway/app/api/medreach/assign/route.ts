@@ -54,6 +54,38 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const phleb = await prisma.medReachPhlebProfile.findFirst({
+    where: {
+      OR: [{ id: phlebId }, { userId: phlebId }],
+    },
+    select: {
+      id: true,
+      userId: true,
+      active: true,
+      approvalStatus: true,
+    },
+  });
+
+  if (!phleb) {
+    return NextResponse.json(
+      { ok: false, error: 'phleb_not_found' },
+      { status: 404 },
+    );
+  }
+
+  if (!phleb.active || String(phleb.approvalStatus).toUpperCase() !== 'ACTIVE') {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'phleb_not_ready_for_assignment',
+        detail: 'Phlebotomist must be Admin-approved and active before live assignment.',
+      },
+      { status: 409 },
+    );
+  }
+
+  const assignedPhlebId = phleb.id;
+
   const existing = await prisma.draw.findFirst({
     where: { orderId },
     orderBy: { createdAt: 'desc' },
@@ -69,7 +101,7 @@ export async function POST(req: NextRequest) {
   const nextStatus = MEDREACH_DRAW_STATUSES.ASSIGNED;
 
   const wasReassigned =
-    Boolean(existing?.phlebId) && existing?.phlebId !== phlebId;
+    Boolean(existing?.phlebId) && existing?.phlebId !== assignedPhlebId;
 
   const row = existing
     ? await prisma.draw.update({
@@ -79,7 +111,7 @@ export async function POST(req: NextRequest) {
           patientId,
           clinicianId,
           partnerId,
-          phlebId,
+          phlebId: assignedPhlebId,
           status: nextStatus,
           scheduledAt,
           assignedAt: existing.assignedAt ?? now,
@@ -93,7 +125,7 @@ export async function POST(req: NextRequest) {
           patientId,
           clinicianId,
           partnerId,
-          phlebId,
+          phlebId: assignedPhlebId,
           status: nextStatus,
           scheduledAt,
           assignedAt: now,
@@ -128,7 +160,7 @@ export async function POST(req: NextRequest) {
         patientId,
         clinicianId,
         partnerId,
-        phlebId,
+        phlebId: assignedPhlebId,
         scheduledAt: row.scheduledAt,
         previousPhlebId: existing?.phlebId ?? null,
         status: row.status,
@@ -145,7 +177,7 @@ export async function POST(req: NextRequest) {
       orderId,
       drawId: row.id,
       channel: 'medreach',
-      phlebId,
+      phlebId: assignedPhlebId,
       partnerId,
       status: row.status,
       scheduledAt: row.scheduledAt,
@@ -162,7 +194,7 @@ export async function POST(req: NextRequest) {
     at: nowIso(),
     orderId,
     drawId: row.id,
-    phlebId,
+    phlebId: assignedPhlebId,
     partnerId,
     status: row.status,
     scheduledAt: row.scheduledAt,

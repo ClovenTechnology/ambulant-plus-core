@@ -340,6 +340,21 @@ export async function POST(
     return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
   }
 
+  if (
+    !unrestricted &&
+    phleb &&
+    (!phleb.active || String(phleb.approvalStatus).toUpperCase() !== 'ACTIVE')
+  ) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'phleb_not_ready_for_live_work',
+        detail: 'Phlebotomist must be Admin-approved and active before executing live jobs.',
+      },
+      { status: 409 },
+    );
+  }
+
   const possiblePhlebIds = Array.from(
     new Set([phleb?.id, phleb?.userId, phlebId].filter(Boolean).map(String)),
   );

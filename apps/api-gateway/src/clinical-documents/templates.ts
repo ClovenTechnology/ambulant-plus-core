@@ -199,8 +199,8 @@ export function renderPrescriptionPdf(input: {
   y = ensureRoom(pdf, y, 68, brand, footer, 'Electronic prescription');
   const integrity = clean(input.signatureHash) || createHash('sha256').update(JSON.stringify({ id: input.prescriptionId, issuedAt: input.issuedAt, meds })).digest('hex');
   pdf.rect(48, y, 499, 54, [0.80, 0.86, 0.88], soft(accent));
-  pdf.text('Digitally issued via Ambulant+', 62, y + 10, { font: 'bold', size: 9.2, color: dark(accent), maxWidth: 220 });
-  pdf.text(`Clinical signature reference: SHA-256 ${integrity.slice(0, 12)}...${integrity.slice(-8)}`, 62, y + 27, { size: 7.3, color: [0.27, 0.32, 0.38], maxWidth: 300 });
+  pdf.text('Issued electronically via Ambulant+', 62, y + 10, { font: 'bold', size: 9.2, color: dark(accent), maxWidth: 220 });
+  pdf.text(`Document integrity reference: SHA-256 ${integrity.slice(0, 12)}...${integrity.slice(-8)}`, 62, y + 27, { size: 7.3, color: [0.27, 0.32, 0.38], maxWidth: 300 });
   pdf.text(`Document reference: ${brand.verificationUrl}`, 62, y + 42, { size: 7.3, color: [0.27, 0.32, 0.38], maxWidth: 300 });
   if (prescriber.regulatorRegistration) pdf.text(`HPCSA: ${clean(prescriber.regulatorRegistration)}`, 380, y + 13, { font: 'bold', size: 7.7, color: [0.16, 0.28, 0.28], maxWidth: 145 });
   pdf.text('Ambulant+', 380, y + 31, { font: 'bold', size: 12.5, color: dark(accent), maxWidth: 145 });

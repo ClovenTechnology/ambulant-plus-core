@@ -78,6 +78,46 @@ function erxHasBlockedAllergyConflict(erx: any) {
   return conflicts.length > 0;
 }
 
+
+const NON_DISPENSABLE_ERX_STATUSES = new Set([
+  "draft",
+  "void",
+  "voided",
+  "cancelled",
+  "canceled",
+  "superseded",
+  "rejected",
+  "expired",
+]);
+
+function erxNonDispensableReason(erx: any): string | null {
+  const kind = cleanString(erx?.kind).toLowerCase();
+  const status = cleanString(erx?.status).toLowerCase();
+  const notes = parseErxNotes(erx?.notes);
+  const orderState = cleanString(notes?.orderState).toLowerCase();
+
+  if (kind && kind !== "medication" && kind !== "pharmacy") {
+    return "unsupported_erx_kind";
+  }
+
+  if (NON_DISPENSABLE_ERX_STATUSES.has(status)) {
+    return `status_${status}`;
+  }
+
+  if (NON_DISPENSABLE_ERX_STATUSES.has(orderState)) {
+    return `order_state_${orderState}`;
+  }
+
+  // The canonical encounter eRx writer always records medication orders as
+  // draft or issued. Requiring issued here prevents a malformed modern order
+  // with a missing/unknown state from silently entering regulated fulfilment.
+  if (kind === "medication" && status !== "issued") {
+    return "modern_erx_not_issued";
+  }
+
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
@@ -165,23 +205,79 @@ export async function POST(req: NextRequest) {
         ? await prisma.erxOrder.findUnique({ where: { id: erxOrderIdIn } })
         : null;
 
+    let encounterCandidates: any[] = [];
+
     if (!erx && encId) {
-      erx = await prisma.erxOrder.findFirst({
+      encounterCandidates = await prisma.erxOrder.findMany({
         where: {
           encounterId: encId,
-          kind: "pharmacy",
+          kind: { in: ["medication", "pharmacy"] },
           ...(who.role === "patient" && allowedPatientIds.size
             ? { patientId: { in: Array.from(allowedPatientIds) } }
             : {}),
         },
         orderBy: { createdAt: "desc" },
+        take: 20,
       });
+
+      erx =
+        encounterCandidates.find(
+          (candidate) => !erxNonDispensableReason(candidate),
+        ) ?? encounterCandidates[0] ?? null;
     }
 
     if (!erx) {
       return NextResponse.json(
         { ok: false, error: "erx_not_found" },
         { status: 404 }
+      );
+    }
+
+    if (who.role === "patient" && allowedPatientIds.size) {
+      if (!allowedPatientIds.has(String(erx.patientId))) {
+        return NextResponse.json(
+          { ok: false, error: "forbidden" },
+          { status: 403 }
+        );
+      }
+    }
+
+    if (who.role === "clinician" && whoUid) {
+      if (cleanString(erx.clinicianId) && cleanString(erx.clinicianId) !== whoUid) {
+        return NextResponse.json(
+          { ok: false, error: "forbidden" },
+          { status: 403 }
+        );
+      }
+    }
+
+    const nonDispensableReason = erxNonDispensableReason(erx);
+    if (nonDispensableReason) {
+      await auditEvent({
+        kind: "careport_order_blocked_non_dispensable_erx",
+        actorId: whoUid || null,
+        actorRole: who.role ?? null,
+        subjectId: erx.id,
+        meta: {
+          correlationId,
+          orgId,
+          erxOrderId: erx.id,
+          encounterId: erx.encounterId,
+          patientId: erx.patientId,
+          reason: nonDispensableReason,
+          status: erx.status ?? null,
+          kind: erx.kind ?? null,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "erx_not_dispense_ready",
+          reason: nonDispensableReason,
+          correlationId,
+        },
+        { status: 409 }
       );
     }
 
@@ -210,24 +306,6 @@ export async function POST(req: NextRequest) {
         },
         { status: 409 }
       );
-    }
-
-    if (who.role === "patient" && allowedPatientIds.size) {
-      if (!allowedPatientIds.has(String(erx.patientId))) {
-        return NextResponse.json(
-          { ok: false, error: "forbidden" },
-          { status: 403 }
-        );
-      }
-    }
-
-    if (who.role === "clinician" && whoUid) {
-      if (cleanString(erx.clinicianId) && cleanString(erx.clinicianId) !== whoUid) {
-        return NextResponse.json(
-          { ok: false, error: "forbidden" },
-          { status: 403 }
-        );
-      }
     }
 
     const meds = normalizeErxMeds(erx);

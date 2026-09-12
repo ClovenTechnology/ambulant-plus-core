@@ -336,16 +336,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
   }
 
-  const requestedApproval = cleanString(body.approvalStatus || body.status).toUpperCase();
-  const approvalStatus =
-    role === 'admin' || role === 'system'
-      ? requestedApproval || 'ACTIVE'
-      : 'PENDING';
+  const isPrivilegedActor = role === 'admin' || role === 'system';
+  const existingProfile = await prisma.medReachPhlebProfile.findUnique({
+    where: { userId },
+    select: {
+      id: true,
+      active: true,
+      approvalStatus: true,
+    },
+  });
 
-  const active =
-    role === 'admin' || role === 'system'
-      ? cleanBoolean(body.active, true) ?? true
-      : true;
+  const requestedApproval = cleanString(body.approvalStatus || body.status).toUpperCase();
+  const approvalStatus = isPrivilegedActor
+    ? requestedApproval || 'ACTIVE'
+    : existingProfile?.approvalStatus || 'PENDING';
+
+  // Self-signup must never activate a phlebotomist for live work. If an
+  // already-approved phlebotomist later updates their profile through this
+  // upsert endpoint, preserve the Admin-controlled readiness state.
+  const active = isPrivilegedActor
+    ? cleanBoolean(body.active, true) ?? true
+    : existingProfile?.active ?? false;
 
   const defaultLabId = cleanString(body.defaultLabId) || null;
 
@@ -384,11 +395,11 @@ export async function POST(req: NextRequest) {
       commissionValue: cleanDecimalNumber(body.commissionValue, 0),
       defaultLabId,
       approvedAt:
-        approvalStatus === 'ACTIVE' && (role === 'admin' || role === 'system')
+        approvalStatus === 'ACTIVE' && isPrivilegedActor
           ? new Date()
           : null,
       approvedByUserId:
-        approvalStatus === 'ACTIVE' && (role === 'admin' || role === 'system')
+        approvalStatus === 'ACTIVE' && isPrivilegedActor
           ? who.uid
           : null,
     },
@@ -410,11 +421,11 @@ export async function POST(req: NextRequest) {
       commissionValue: cleanDecimalNumber(body.commissionValue, 0),
       defaultLabId,
       approvedAt:
-        approvalStatus === 'ACTIVE' && (role === 'admin' || role === 'system')
+        approvalStatus === 'ACTIVE' && isPrivilegedActor
           ? new Date()
           : undefined,
       approvedByUserId:
-        approvalStatus === 'ACTIVE' && (role === 'admin' || role === 'system')
+        approvalStatus === 'ACTIVE' && isPrivilegedActor
           ? who.uid
           : undefined,
     },

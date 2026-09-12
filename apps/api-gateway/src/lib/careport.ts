@@ -169,12 +169,56 @@ function parseQty(qty: unknown): number {
 }
 
 function buildDirections(m: any): string | null {
-  const parts = [m?.dose, m?.route, m?.freq, m?.duration]
+  const explicit = String(m?.directions ?? m?.sig ?? "").trim();
+  if (explicit) return explicit;
+
+  const parts = [
+    m?.doseText ?? m?.dose,
+    m?.routeText ?? m?.route,
+    m?.frequencyText ?? m?.freq ?? m?.frequency,
+    m?.durationText ?? m?.duration,
+  ]
     .map((x) => String(x ?? "").trim())
     .filter(Boolean);
 
   const s = parts.join(" ");
   return s ? s : null;
+}
+
+function medicationPrimaryCoding(m: any): {
+  system: string;
+  code: string;
+  display: string;
+} | null {
+  const primary =
+    m?.primaryCoding && typeof m.primaryCoding === "object"
+      ? m.primaryCoding
+      : null;
+
+  if (primary) {
+    const code = String(primary?.code ?? "").trim();
+    if (code) {
+      return {
+        system: String(primary?.system ?? "").trim(),
+        code,
+        display: String(primary?.display ?? "").trim(),
+      };
+    }
+  }
+
+  const codings = Array.isArray(m?.coding) ? m.coding : [];
+  for (const coding of codings) {
+    const code = String(coding?.code ?? "").trim();
+    if (!code) continue;
+
+    return {
+      system: String(coding?.system ?? "").trim(),
+      code,
+      display: String(coding?.display ?? "").trim(),
+    };
+  }
+
+  return null;
 }
 
 export type NormalizedErxMed = {
@@ -191,20 +235,51 @@ export function normalizeErxMeds(erx: any): NormalizedErxMed[] {
   const meds: any[] = Array.isArray(medsRaw) ? medsRaw : [];
   if (meds.length) {
     return meds.map((m, i) => {
-      const name = String(m?.drug ?? m?.name ?? "").trim() || "Medication";
+      const primaryCoding = medicationPrimaryCoding(m);
+      const name =
+        String(
+          m?.drug ??
+            m?.name ??
+            primaryCoding?.display ??
+            m?.ingredientText ??
+            primaryCoding?.code ??
+            "",
+        ).trim() || "Medication";
+
       const rxcui = String(m?.rxcui ?? "").trim();
-      const keyBase = rxcui ? `rxcui:${rxcui}` : `${name}|${i}`;
+      const primaryCode = String(primaryCoding?.code ?? "").trim();
+      const primarySystem = String(primaryCoding?.system ?? "").trim();
+      const keyBase = primaryCode
+        ? `${primarySystem || "code"}:${primaryCode}`
+        : rxcui
+          ? `rxcui:${rxcui}`
+          : `${name}|${i}`;
+
       const erxMedKey = String(m?.id ?? "").trim() || stableKey(keyBase);
 
       const drugCode =
         String(m?.drugCode ?? "").trim() ||
+        primaryCode ||
+        rxcui ||
         inferDrugCodeFromText(name) ||
-        (rxcui ? `rxnorm:${rxcui}` : null);
+        null;
+
+      const structuredQuantity =
+        m?.quantity &&
+        typeof m.quantity === "object" &&
+        !Array.isArray(m.quantity)
+          ? m.quantity?.value
+          : undefined;
 
       return {
         erxMedKey,
         name,
-        quantity: parseQty(m?.qty ?? m?.quantity),
+        quantity: parseQty(
+          m?.qty ??
+            structuredQuantity ??
+            m?.quantityText ??
+            m?.quantity,
+        ),
         directions: buildDirections(m),
         drugCode,
       };
