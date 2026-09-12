@@ -2406,9 +2406,20 @@ model PharmacyPartner {
   lng                      Float?
   supportsDelivery         Boolean                       @default(true)
   supportsPickup           Boolean                       @default(true)
+
+  // CP-RX-2 pharmacy quote availability controls.
+  // Existing pharmacies default to accepting Rx orders; missing opening-hours
+  // data is represented at runtime as availability-confirming, never as "closed".
+  acceptingRxOrders        Boolean                       @default(true)
+  rxOpeningHours           Json?
+  rxTimeZone               String?                       @db.VarChar(80)
+  rxOrderPauseReason       String?                       @db.VarChar(240)
+  rxOrderPauseUntil        DateTime?
+
   careportGenericLinks     CarePortGenericLink[]
   carePortJobs             CarePortJob[]
   careportOffers           CarePortOffer[]
+  careportRxQuotes         CarePortRxPharmacyQuote[]
   careportOrdersChosen     CarePortOrder[]               @relation("ChosenPharmacy")
   careportSkus             CarePortPharmacySku[]
   careportStaff            CarePortPharmacyStaff[]
@@ -3462,6 +3473,7 @@ model CarePortRxProcurementSession {
   updatedAt DateTime  @updatedAt
 
   lines  CarePortRxProcurementLine[]
+  quotes CarePortRxPharmacyQuote[]
   orders CarePortOrder[]
 
   @@index([orgId, patientId, updatedAt])
@@ -3506,12 +3518,111 @@ model CarePortRxProcurementLine {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  session CarePortRxProcurementSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session    CarePortRxProcurementSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  quoteLines CarePortRxPharmacyQuoteLine[]
 
   @@unique([sessionId, erxMedKey])
   @@index([sessionId, state])
   @@index([orgId, state, updatedAt])
   @@index([drugCode])
+}
+
+
+// CP-RX-2 — persisted discovery quote.
+// This is discovery truth, not a final order, stock reservation or payment object.
+model CarePortRxPharmacyQuote {
+  id         String @id @default(cuid())
+  orgId      String @default("org-default")
+  sessionId  String
+  pharmacyId String
+
+  coverageStatus   String @db.VarChar(40)
+  availabilityState String @db.VarChar(40)
+  reasonCode        String? @db.VarChar(80)
+
+  includedLineCount Int
+  coveredLineCount  Int
+  coverageRatio     Float
+  distanceKm        Float?
+
+  pharmacyOpenNow Boolean?
+  acceptingOrders Boolean @default(true)
+
+  currency    String   @default("ZAR") @db.VarChar(3)
+  generatedAt DateTime @default(now())
+  expiresAt   DateTime
+
+  session  CarePortRxProcurementSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  pharmacy PharmacyPartner              @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+  lines    CarePortRxPharmacyQuoteLine[]
+
+  @@index([sessionId, generatedAt])
+  @@index([sessionId, coverageStatus, availabilityState], map: "careport_rx_quote_session_coverage_availability_idx")
+  @@index([pharmacyId, expiresAt])
+  @@index([orgId, expiresAt])
+}
+
+model CarePortRxPharmacyQuoteLine {
+  id                String @id @default(cuid())
+  quoteId           String
+  procurementLineId String
+
+  coverageState      String @db.VarChar(60)
+  productTruthState  String @db.VarChar(80)
+  matchedOptionCount Int    @default(0)
+  sourceLineSnapshot Json?
+
+  quote           CarePortRxPharmacyQuote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  procurementLine CarePortRxProcurementLine @relation(fields: [procurementLineId], references: [id], onDelete: Cascade)
+  options         CarePortRxPharmacyQuoteOption[]
+
+  @@unique([quoteId, procurementLineId])
+  @@index([procurementLineId])
+  @@index([quoteId, coverageState])
+}
+
+model CarePortRxPharmacyQuoteOption {
+  id          String @id @default(cuid())
+  quoteLineId String
+  skuId       String
+
+  globalProductId  String? @db.VarChar(191)
+  globalProductKey String? @db.VarChar(180)
+
+  matchAuthority            String  @db.VarChar(80)
+  selectable                Boolean @default(false)
+  requiresPharmacistReview  Boolean @default(false)
+  isGeneric                 Boolean @default(false)
+
+  displayName    String
+  canonicalName  String?
+  brand          String? @db.VarChar(160)
+  manufacturer   String? @db.VarChar(160)
+  ingredientText String?
+  strengthText   String? @db.VarChar(160)
+  dosageFormText String? @db.VarChar(160)
+  packSize       String? @db.VarChar(120)
+
+  productCodeSystem String? @db.VarChar(120)
+  productCode       String? @db.VarChar(180)
+
+  listedPriceCents Int
+  currency         String @default("ZAR") @db.VarChar(3)
+
+  stockOnHandSnapshot   Int?
+  reservedStockSnapshot Int  @default(0)
+  availableStockSnapshot Int?
+  stockKnown             Boolean @default(false)
+
+  productSnapshot Json?
+  createdAt       DateTime @default(now())
+
+  quoteLine CarePortRxPharmacyQuoteLine @relation(fields: [quoteLineId], references: [id], onDelete: Cascade)
+
+  @@index([quoteLineId, selectable])
+  @@index([skuId])
+  @@index([globalProductId])
+  @@index([globalProductKey])
 }
 
 model CarePortOrder {
