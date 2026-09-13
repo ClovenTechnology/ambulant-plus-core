@@ -2420,6 +2420,8 @@ model PharmacyPartner {
   carePortJobs             CarePortJob[]
   careportOffers           CarePortOffer[]
   careportRxQuotes         CarePortRxPharmacyQuote[]
+  careportRxReservations   CarePortRxReservation[]
+  careportRxEvents         CarePortRxPharmacyEvent[]
   careportOrdersChosen     CarePortOrder[]               @relation("ChosenPharmacy")
   careportSkus             CarePortPharmacySku[]
   careportStaff            CarePortPharmacyStaff[]
@@ -3472,9 +3474,10 @@ model CarePortRxProcurementSession {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  lines  CarePortRxProcurementLine[]
-  quotes CarePortRxPharmacyQuote[]
-  orders CarePortOrder[]
+  lines        CarePortRxProcurementLine[]
+  quotes       CarePortRxPharmacyQuote[]
+  orders       CarePortOrder[]
+  reservations CarePortRxReservation[]
 
   @@index([orgId, patientId, updatedAt])
   @@index([erxOrderId, refillNo, createdAt])
@@ -3520,6 +3523,8 @@ model CarePortRxProcurementLine {
 
   session    CarePortRxProcurementSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   quoteLines CarePortRxPharmacyQuoteLine[]
+  reservationLines CarePortRxReservationLine[]
+  dispenseLines    CarePortRxDispenseLine[]
 
   @@unique([sessionId, erxMedKey])
   @@index([sessionId, state])
@@ -3555,6 +3560,7 @@ model CarePortRxPharmacyQuote {
   session  CarePortRxProcurementSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   pharmacy PharmacyPartner              @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
   lines    CarePortRxPharmacyQuoteLine[]
+  reservations CarePortRxReservation[]
 
   @@index([sessionId, generatedAt])
   @@index([sessionId, coverageStatus, availabilityState], map: "careport_rx_quote_session_coverage_availability_idx")
@@ -3618,6 +3624,7 @@ model CarePortRxPharmacyQuoteOption {
   createdAt       DateTime @default(now())
 
   quoteLine CarePortRxPharmacyQuoteLine @relation(fields: [quoteLineId], references: [id], onDelete: Cascade)
+  reservationLines CarePortRxReservationLine[]
 
   @@index([quoteLineId, selectable])
   @@index([skuId])
@@ -3688,6 +3695,11 @@ model CarePortOrder {
   payments           CarePortPaymentIntent[]
   assignment         CarePortRiderAssignment?
   providerFeeLedgers CarePortProviderFeeLedger[]
+  rxReservation       CarePortRxReservation?
+  rxPharmacistReview  CarePortRxPharmacistReview?
+  rxPharmacyFulfilment CarePortRxPharmacyFulfilment?
+  rxDispenseLines     CarePortRxDispenseLine[]
+  rxPharmacyEvents    CarePortRxPharmacyEvent[]
 
   @@unique([erxOrderId, refillNo])
   @@index([orgId, createdAt])
@@ -3757,6 +3769,14 @@ model CarePortPharmacySku {
   ageRestricted           Boolean   @default(false)
   regulatedSchedule       String?   @db.VarChar(80)
   taxCategory             String?   @db.VarChar(80)
+  // Wave AB Rx commercial truth. Null price-basis/unit/tax metadata blocks
+  // canonical Rx reservation rather than silently inferring financial truth.
+  rxPriceBasis            String?   @db.VarChar(20)
+  rxDispenseUnit          String?   @db.VarChar(80)
+  rxUnitsPerPack          Int?
+  rxTaxRateBps            Int?
+  rxPriceIncludesTax      Boolean   @default(true)
+  medicalAidClaimable     Boolean   @default(false)
   // Catalogue normalisation and governance.
   catalogueSource         String    @default("PHARMACY_SUPPLIED") @db.VarChar(80)
   normalisationStatus     String    @default("RAW_PHARMACY_SUPPLIED") @db.VarChar(80)
@@ -3778,6 +3798,8 @@ model CarePortPharmacySku {
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
   pharmacy   PharmacyPartner @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+  rxReservationLines CarePortRxReservationLine[]
+  rxDispenseLines    CarePortRxDispenseLine[]
 
   @@index([pharmacyId, isActive])
   @@index([pharmacyId, drugCode])
@@ -3785,6 +3807,7 @@ model CarePortPharmacySku {
   @@index([pharmacyId, category, isActive])
   @@index([pharmacyId, otc, marketplaceVisible])
   @@index([pharmacyId, prescriptionRequired, isActive])
+  @@index([pharmacyId, rxPriceBasis, isActive], map: "careport_sku_rx_commercial_idx")
   @@index([barcode])
   @@index([variantGroupKey])
   @@index([catalogueSource])
@@ -3891,6 +3914,11 @@ model CarePortPaymentIntent {
   providerPayload    Json?
   metadata           Json?
   paidAt             DateTime?
+  authorizedAt       DateTime?
+  capturedAt         DateTime?
+  refundedAt         DateTime?
+  refundProviderRef  String?                     @db.VarChar(191)
+  refundStatus       String?                     @db.VarChar(80)
   failedAt           DateTime?
   failureReason      String?
   createdAt          DateTime                    @default(now())
@@ -3902,6 +3930,190 @@ model CarePortPaymentIntent {
   @@index([orgId])
   @@index([provider, providerRef])
   @@index([providerStatus, updatedAt])
+}
+
+
+model CarePortRxReservation {
+  id          String                      @id @default(cuid())
+  orgId       String                      @default("org-default")
+  sessionId   String
+  orderId     String                      @unique(map: "careport_rx_reservation_order_key")
+  quoteId     String?
+  pharmacyId  String
+  status      CarePortRxReservationStatus @default(HELD)
+  fulfillment CarePortFulfillmentMode     @default(PICKUP)
+
+  destinationAddr String?
+  destinationLat  Float?
+  destinationLng  Float?
+
+  subtotalNetCents Int
+  taxCents         Int
+  subtotalGrossCents Int
+  deliveryFeeCents Int @default(0)
+  totalCents       Int
+  claimableSubtotalCents Int @default(0)
+  sponsorAmountMinor Int @default(0)
+  patientGapMinor     Int
+  currency             String @default("ZAR") @db.VarChar(3)
+
+  expiresAt   DateTime
+  securedAt   DateTime?
+  consumedAt  DateTime?
+  releasedAt  DateTime?
+  releaseReason String? @db.VarChar(120)
+  pricingSnapshot Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session  CarePortRxProcurementSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  order    CarePortOrder                @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  quote    CarePortRxPharmacyQuote?     @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  pharmacy PharmacyPartner              @relation(fields: [pharmacyId], references: [id], onDelete: Restrict)
+  lines    CarePortRxReservationLine[]
+
+  @@index([sessionId, status, expiresAt], map: "careport_rx_res_session_status_exp_idx")
+  @@index([pharmacyId, status, expiresAt], map: "careport_rx_res_pharmacy_status_exp_idx")
+  @@index([orgId, status, expiresAt], map: "careport_rx_res_org_status_exp_idx")
+}
+
+model CarePortRxReservationLine {
+  id                String @id @default(cuid())
+  reservationId     String
+  procurementLineId String
+  quoteOptionId     String?
+  skuId             String
+
+  globalProductId  String? @db.VarChar(191)
+  globalProductKey String? @db.VarChar(180)
+
+  prescribedQuantityValue Float
+  prescribedQuantityUnit  String @db.VarChar(80)
+  requiredPacks            Int
+  unitsPerPack             Int
+  dispenseUnit             String @db.VarChar(80)
+
+  unitListPriceCents Int
+  priceBasis         String @db.VarChar(20)
+  taxRateBps         Int
+  priceIncludesTax   Boolean
+  netCents           Int
+  taxCents           Int
+  grossCents         Int
+  medicalAidClaimable Boolean @default(false)
+
+  productSnapshot Json?
+  createdAt DateTime @default(now())
+
+  reservation     CarePortRxReservation       @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  procurementLine CarePortRxProcurementLine   @relation(fields: [procurementLineId], references: [id], onDelete: Restrict)
+  quoteOption     CarePortRxPharmacyQuoteOption? @relation(fields: [quoteOptionId], references: [id], onDelete: SetNull)
+  sku             CarePortPharmacySku         @relation(fields: [skuId], references: [id], onDelete: Restrict)
+  dispenseLine    CarePortRxDispenseLine?
+
+  @@unique([reservationId, procurementLineId], map: "careport_rx_res_line_unique")
+  @@index([skuId], map: "careport_rx_res_line_sku_idx")
+  @@index([procurementLineId], map: "careport_rx_res_line_proc_idx")
+}
+
+model CarePortRxPharmacistReview {
+  id         String                           @id @default(cuid())
+  orgId      String                           @default("org-default")
+  orderId    String                           @unique(map: "careport_rx_review_order_key")
+  status     CarePortRxPharmacistReviewStatus @default(PENDING)
+  reasonCode String?                          @db.VarChar(120)
+  note       String?
+  decidedBy  String?                          @db.VarChar(191)
+  decidedAt  DateTime?
+  createdAt  DateTime                         @default(now())
+  updatedAt  DateTime                         @updatedAt
+
+  order CarePortOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status, updatedAt], map: "careport_rx_review_org_status_idx")
+}
+
+model CarePortRxPharmacyFulfilment {
+  id        String @id @default(cuid())
+  orgId     String @default("org-default")
+  orderId   String @unique(map: "careport_rx_fulfil_order_key")
+
+  preparationStartedAt DateTime?
+  preparationEtaMin    Int?
+  expectedReadyAt      DateTime?
+  packingCompleteAt    DateTime?
+  readyAt              DateTime?
+  collectedAt          DateTime?
+
+  dispensingLabelVersion Int @default(0)
+  outerLabelVersion      Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order CarePortOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, expectedReadyAt], map: "careport_rx_fulfil_ready_idx")
+}
+
+model CarePortRxDispenseLine {
+  id                String @id @default(cuid())
+  orgId             String @default("org-default")
+  orderId           String
+  reservationLineId String @unique(map: "careport_rx_disp_res_line_key")
+  procurementLineId String
+  skuId             String
+
+  globalProductId String? @db.VarChar(191)
+  displayName     String
+  canonicalName   String?
+  brand           String? @db.VarChar(160)
+  manufacturer    String? @db.VarChar(160)
+  ingredientText  String?
+  strengthText    String? @db.VarChar(160)
+  dosageFormText  String? @db.VarChar(160)
+  packSize        String? @db.VarChar(120)
+
+  quantityDispensedPacks Int
+  substitution           Boolean @default(false)
+  substitutionReason     String? @db.VarChar(240)
+  pharmacistId           String? @db.VarChar(191)
+
+  unitPriceCents Int
+  currency       String @default("ZAR") @db.VarChar(3)
+  labelVersion   Int @default(1)
+  dispenseSnapshot Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order           CarePortOrder             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reservationLine CarePortRxReservationLine @relation(fields: [reservationLineId], references: [id], onDelete: Restrict)
+  procurementLine CarePortRxProcurementLine @relation(fields: [procurementLineId], references: [id], onDelete: Restrict)
+  sku             CarePortPharmacySku       @relation(fields: [skuId], references: [id], onDelete: Restrict)
+
+  @@index([orderId], map: "careport_rx_disp_order_idx")
+  @@index([skuId], map: "careport_rx_disp_sku_idx")
+}
+
+model CarePortRxPharmacyEvent {
+  id         String  @id @default(cuid())
+  orgId      String  @default("org-default")
+  orderId    String
+  pharmacyId String
+  kind       String  @db.VarChar(80)
+  payload    Json?
+  acknowledgedAt DateTime?
+  acknowledgedBy String? @db.VarChar(191)
+  createdAt  DateTime @default(now())
+
+  order    CarePortOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  pharmacy PharmacyPartner     @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+
+  @@index([pharmacyId, acknowledgedAt, createdAt], map: "careport_rx_event_pharmacy_ack_idx")
+  @@index([orderId, createdAt], map: "careport_rx_event_order_idx")
+  @@index([orgId, createdAt], map: "careport_rx_event_org_idx")
 }
 
 model CarePortRiderProfile {
@@ -6423,7 +6635,12 @@ enum CarePortRxProcurementStatus {
   BASKET_DRAFT
   PHARMACY_DISCOVERY
   PHARMACY_SELECTED
+  RESERVED
+  PAYMENT_PENDING
+  PHARMACIST_REVIEW
+  FULFILMENT_ACTIVE
   CONVERTED_TO_ORDER
+  COMPLETED
   CANCELLED
   EXPIRED
 }
@@ -6443,10 +6660,17 @@ enum CarePortOrderStatus {
   BROADCASTING
   OFFERS_OPEN
   PHARMACY_SELECTED
+  RESERVED
   PAYMENT_PENDING
+  PAYMENT_AUTHORIZED
   PAID
+  PAYMENT_CAPTURED
+  PHARMACIST_REVIEW
+  PHARMACIST_RELEASED
   PREPARING
+  PACKING_COMPLETE
   READY_FOR_PICKUP
+  READY_FOR_RIDER
   DISPATCHING
   RIDER_ASSIGNED
   EN_ROUTE_TO_PICKUP
@@ -6454,6 +6678,9 @@ enum CarePortOrderStatus {
   PICKED_UP
   EN_ROUTE_TO_CUSTOMER
   DELIVERED
+  DELIVERY_FAILED
+  RETURNING_TO_PHARMACY
+  RETURNED_TO_PHARMACY
   COMPLETED
   CANCELLED
   EXPIRED
@@ -6481,9 +6708,27 @@ enum CarePortPaymentMethod {
 enum CarePortPaymentStatus {
   CREATED
   REQUIRES_ACTION
+  AUTHORIZED
   SUCCEEDED
+  CAPTURED
+  REFUNDED
   FAILED
   CANCELLED
+}
+
+enum CarePortRxReservationStatus {
+  HELD
+  SECURED
+  CONSUMED
+  RELEASED
+  EXPIRED
+}
+
+enum CarePortRxPharmacistReviewStatus {
+  PENDING
+  RELEASED
+  CLARIFICATION_REQUIRED
+  REJECTED
 }
 
 enum CarePortAssignmentStatus {

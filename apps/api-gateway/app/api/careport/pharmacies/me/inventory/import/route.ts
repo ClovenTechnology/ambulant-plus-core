@@ -173,6 +173,18 @@ function parseCsv(text: string) {
     'taxcategory',
     'tax_category',
     'vat_category',
+    'rxpricebasis',
+    'pricebasis',
+    'rxdispenseunit',
+    'dispenseunit',
+    'rxunitsperpack',
+    'unitsperpack',
+    'rxtaxratebps',
+    'taxratebps',
+    'rxpriceincludestax',
+    'priceincludestax',
+    'medicalaidclaimable',
+    'claimable',
   ]);
 
   const hasHeader = normalizedHeaders.some((h) => knownHeaders.has(h));
@@ -286,6 +298,21 @@ function careportOptionalInt(value: unknown): number | null {
   return Math.max(0, Math.trunc(n));
 }
 
+function careportOptionalBps(value: unknown): number | null {
+  const n = careportOptionalInt(value);
+  if (n == null || n > 10000) return null;
+  return n;
+}
+
+function normalizeRxPriceBasis(value: unknown) {
+  const token = careportCleanToken(value, '');
+  return token === 'PACK' ? 'PACK' : null;
+}
+
+function hasAnyOwn(row: Record<string, any>, keys: string[]) {
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(row, key));
+}
+
 function careportJsonObject(value: unknown): Record<string, any> | null {
   if (value == null || value === '') return null;
   if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, any>;
@@ -338,12 +365,29 @@ function normalizeCarePortExtendedCsvSku(row: Record<string, any>) {
     variantAttributes: careportJsonObject(row.variantattributes ?? row.variant_attributes ?? row.variants ?? row.options),
     attributes: careportJsonObject(row.attributes ?? row.metadata),
     stockOnHand: careportOptionalInt(row.stockonhand ?? row.stock_on_hand ?? row.stock ?? row.quantity),
-    reservedStock: careportOptionalInt(row.reservedstock ?? row.reserved_stock) ?? 0,
     lowStockThreshold: careportOptionalInt(row.lowstockthreshold ?? row.low_stock_threshold ?? row.reorderlevel ?? row.reorder_level),
     maxOrderQty: careportOptionalInt(row.maxorderqty ?? row.max_order_qty ?? row.maxquantity ?? row.max_quantity),
     ageRestricted: asBool(row.agerestricted ?? row.age_restricted ?? row.adult_only, false),
     regulatedSchedule: clean(row.regulatedschedule ?? row.regulated_schedule ?? row.schedule ?? row.medicine_schedule, 80) || null,
     taxCategory: clean(row.taxcategory ?? row.tax_category ?? row.vat_category, 80) || null,
+    rxPriceBasis: hasAnyOwn(row, ['rxpricebasis','rx_price_basis','pricebasis','price_basis'])
+      ? normalizeRxPriceBasis(row.rxpricebasis ?? row.rx_price_basis ?? row.pricebasis ?? row.price_basis)
+      : undefined,
+    rxDispenseUnit: hasAnyOwn(row, ['rxdispenseunit','rx_dispense_unit','dispenseunit','dispense_unit'])
+      ? clean(row.rxdispenseunit ?? row.rx_dispense_unit ?? row.dispenseunit ?? row.dispense_unit, 80) || null
+      : undefined,
+    rxUnitsPerPack: hasAnyOwn(row, ['rxunitsperpack','rx_units_per_pack','unitsperpack','units_per_pack'])
+      ? careportOptionalInt(row.rxunitsperpack ?? row.rx_units_per_pack ?? row.unitsperpack ?? row.units_per_pack)
+      : undefined,
+    rxTaxRateBps: hasAnyOwn(row, ['rxtaxratebps','rx_tax_rate_bps','taxratebps','tax_rate_bps'])
+      ? careportOptionalBps(row.rxtaxratebps ?? row.rx_tax_rate_bps ?? row.taxratebps ?? row.tax_rate_bps)
+      : undefined,
+    rxPriceIncludesTax: hasAnyOwn(row, ['rxpriceincludestax','rx_price_includes_tax','priceincludestax','price_includes_tax'])
+      ? asBool(row.rxpriceincludestax ?? row.rx_price_includes_tax ?? row.priceincludestax ?? row.price_includes_tax, true)
+      : undefined,
+    medicalAidClaimable: hasAnyOwn(row, ['medicalaidclaimable','medical_aid_claimable','claimable'])
+      ? asBool(row.medicalaidclaimable ?? row.medical_aid_claimable ?? row.claimable, false)
+      : undefined,
   };
 }
 
@@ -369,6 +413,17 @@ export async function POST(req: NextRequest) {
         : parseCsv(clean(body?.csv ?? body?.text, 400_000));
 
     if (!rowsRaw.length) return json({ ok: false, error: 'no_inventory_rows' }, 400);
+
+    const reservedStockInputPresent = rowsRaw.some((row: any) =>
+      row && typeof row === 'object' && (
+        Object.prototype.hasOwnProperty.call(row, 'reservedStock') ||
+        Object.prototype.hasOwnProperty.call(row, 'reservedstock') ||
+        Object.prototype.hasOwnProperty.call(row, 'reserved_stock')
+      ),
+    );
+    if (reservedStockInputPresent) {
+      return json({ ok: false, error: 'reserved_stock_server_managed' }, 400);
+    }
 
     const errors: any[] = [];
     const valid: any[] = [];
@@ -478,12 +533,17 @@ export async function POST(req: NextRequest) {
           variantAttributes: row.variantAttributes,
           attributes: row.attributes,
           stockOnHand: row.stockOnHand,
-          reservedStock: row.reservedStock,
           lowStockThreshold: row.lowStockThreshold,
           maxOrderQty: row.maxOrderQty,
           ageRestricted: row.ageRestricted,
           regulatedSchedule: row.regulatedSchedule,
           taxCategory: row.taxCategory,
+          rxPriceBasis: row.rxPriceBasis,
+          rxDispenseUnit: row.rxDispenseUnit,
+          rxUnitsPerPack: row.rxUnitsPerPack,
+          rxTaxRateBps: row.rxTaxRateBps,
+          rxPriceIncludesTax: row.rxPriceIncludesTax,
+          medicalAidClaimable: row.medicalAidClaimable,
           catalogueSource: row.catalogueSource,
           normalisationStatus: row.normalisationStatus,
           normalisationConfidence: row.normalisationConfidence,

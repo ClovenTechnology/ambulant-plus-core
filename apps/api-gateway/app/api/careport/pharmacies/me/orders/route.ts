@@ -40,9 +40,15 @@ function normalizeStatusFilter(value: unknown) {
   const raw = clean(value, 40).toUpperCase();
   const allowed = new Set([
     'PAYMENT_PENDING',
+    'PAYMENT_AUTHORIZED',
+    'PAYMENT_CAPTURED',
+    'PHARMACIST_REVIEW',
+    'PHARMACIST_RELEASED',
     'PAID',
     'PREPARING',
+    'PACKING_COMPLETE',
     'READY_FOR_PICKUP',
+    'READY_FOR_RIDER',
     'DISPATCHING',
     'RIDER_ASSIGNED',
     'EN_ROUTE_TO_PICKUP',
@@ -82,8 +88,13 @@ export async function GET(req: NextRequest) {
     } else {
       where.status = {
         in: [
+          'PAYMENT_AUTHORIZED',
+          'PAYMENT_CAPTURED',
+          'PHARMACIST_REVIEW',
+          'PHARMACIST_RELEASED',
           'PAID',
           'PREPARING',
+          'PACKING_COMPLETE',
           'READY_FOR_PICKUP',
           'DISPATCHING',
           'RIDER_ASSIGNED',
@@ -114,14 +125,21 @@ export async function GET(req: NextRequest) {
         chosenPharmacy: true,
         items: true,
         selections: true,
-        payments: { orderBy: { createdAt: 'desc' }, take: 3 },
+        payments: { orderBy: { createdAt: 'desc' }, take: 5 },
         assignment: true,
+        rxReservation: { include: { lines: true } },
+        rxPharmacistReview: true,
+        rxPharmacyFulfilment: true,
+        rxDispenseLines: true,
       },
     });
 
     const metrics = {
-      paid: orders.filter((o: any) => o.status === 'PAID').length,
+      pharmacistReview: orders.filter((o: any) => o.status === 'PHARMACIST_REVIEW').length,
+      pharmacistReleased: orders.filter((o: any) => o.status === 'PHARMACIST_RELEASED').length,
+      paid: orders.filter((o: any) => ['PAID','PAYMENT_CAPTURED','PAYMENT_AUTHORIZED'].includes(o.status)).length,
       preparing: orders.filter((o: any) => o.status === 'PREPARING').length,
+      packingComplete: orders.filter((o: any) => o.status === 'PACKING_COMPLETE').length,
       readyForPickup: orders.filter((o: any) => o.status === 'READY_FOR_PICKUP').length,
       dispatching: orders.filter((o: any) => ['DISPATCHING', 'RIDER_ASSIGNED', 'EN_ROUTE_TO_PICKUP', 'AT_PHARMACY'].includes(o.status)).length,
       completed: orders.filter((o: any) => ['DELIVERED', 'COMPLETED'].includes(o.status)).length,

@@ -183,6 +183,19 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
 
     if (!order) return json({ ok: false, error: 'order_not_found', correlationId }, 404);
 
+    if (order.procurementSessionId) {
+      return json(
+        {
+          ok: false,
+          error: 'canonical_rx_order_requires_pharmacist_workflow',
+          currentStatus: order.status,
+          next: `/api/careport/pharmacies/me/orders/${encodeURIComponent(orderId)}/rx-review`,
+          correlationId,
+        },
+        409,
+      );
+    }
+
     const nextStatus = nextStatusFor(action, String(order.status), String(order.fulfillment));
     if (!nextStatus) {
       return json(

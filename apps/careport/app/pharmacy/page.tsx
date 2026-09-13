@@ -153,6 +153,9 @@ export default function PharmacyDashboardPage() {
             <Link href="/pharmacy/offers" className="rounded-full bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700">
               Review invitations
             </Link>
+            <Link href="/pharmacy/rx-settings" className="rounded-full border border-teal-200 bg-white px-4 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50">Rx availability</Link>
+            <Link href="/pharmacy/rx-catalogue" className="rounded-full border border-teal-200 bg-white px-4 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50">Rx checkout catalogue</Link>
+            <Link href="/pharmacy/rx-events" className="rounded-full border border-teal-200 bg-white px-4 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50">Rx live events</Link>
           </div>
         </div>
       </section>

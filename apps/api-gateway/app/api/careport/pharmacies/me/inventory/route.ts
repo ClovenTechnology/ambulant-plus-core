@@ -133,6 +133,18 @@ function careportOptionalInt(value: unknown): number | null {
   return Math.max(0, Math.trunc(n));
 }
 
+function careportOptionalBps(value: unknown): number | null {
+  const n = careportOptionalInt(value);
+  if (n == null) return null;
+  if (n > 10000) return null;
+  return n;
+}
+
+function normalizeRxPriceBasis(value: unknown) {
+  const token = careportCleanToken(value, '');
+  return token === 'PACK' ? 'PACK' : null;
+}
+
 function careportJsonObject(value: unknown): Record<string, any> | null {
   if (value == null || value === '') return null;
   if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, any>;
@@ -185,12 +197,35 @@ function normalizeCarePortExtendedSkuInput(body: any) {
     variantAttributes: careportJsonObject(body?.variantAttributes ?? body?.variants ?? body?.options),
     attributes: careportJsonObject(body?.attributes ?? body?.metadata),
     stockOnHand: careportOptionalInt(body?.stockOnHand ?? body?.stock ?? body?.quantityOnHand),
-    reservedStock: careportOptionalInt(body?.reservedStock) ?? 0,
     lowStockThreshold: careportOptionalInt(body?.lowStockThreshold ?? body?.reorderLevel),
     maxOrderQty: careportOptionalInt(body?.maxOrderQty ?? body?.maxQuantity),
     ageRestricted: asBool(body?.ageRestricted ?? body?.adultOnly, false),
     regulatedSchedule: clean(body?.regulatedSchedule ?? body?.schedule ?? body?.medicineSchedule, 80) || null,
     taxCategory: clean(body?.taxCategory ?? body?.vatCategory, 80) || null,
+    rxPriceBasis:
+      body?.rxPriceBasis !== undefined || body?.priceBasis !== undefined
+        ? normalizeRxPriceBasis(body?.rxPriceBasis ?? body?.priceBasis)
+        : undefined,
+    rxDispenseUnit:
+      body?.rxDispenseUnit !== undefined || body?.dispenseUnit !== undefined
+        ? clean(body?.rxDispenseUnit ?? body?.dispenseUnit, 80) || null
+        : undefined,
+    rxUnitsPerPack:
+      body?.rxUnitsPerPack !== undefined || body?.unitsPerPack !== undefined
+        ? careportOptionalInt(body?.rxUnitsPerPack ?? body?.unitsPerPack)
+        : undefined,
+    rxTaxRateBps:
+      body?.rxTaxRateBps !== undefined || body?.taxRateBps !== undefined
+        ? careportOptionalBps(body?.rxTaxRateBps ?? body?.taxRateBps)
+        : undefined,
+    rxPriceIncludesTax:
+      body?.rxPriceIncludesTax !== undefined || body?.priceIncludesTax !== undefined
+        ? asBool(body?.rxPriceIncludesTax ?? body?.priceIncludesTax, true)
+        : undefined,
+    medicalAidClaimable:
+      body?.medicalAidClaimable !== undefined || body?.claimable !== undefined
+        ? asBool(body?.medicalAidClaimable ?? body?.claimable, false)
+        : undefined,
   };
 }
 
@@ -218,12 +253,17 @@ function normalizeCarePortExtendedSkuPatch(body: any) {
   if (body.variantAttributes !== undefined || body.variants !== undefined || body.options !== undefined) data.variantAttributes = careportJsonObject(body.variantAttributes ?? body.variants ?? body.options);
   if (body.attributes !== undefined || body.metadata !== undefined) data.attributes = careportJsonObject(body.attributes ?? body.metadata);
   if (body.stockOnHand !== undefined || body.stock !== undefined || body.quantityOnHand !== undefined) data.stockOnHand = careportOptionalInt(body.stockOnHand ?? body.stock ?? body.quantityOnHand);
-  if (body.reservedStock !== undefined) data.reservedStock = careportOptionalInt(body.reservedStock) ?? 0;
   if (body.lowStockThreshold !== undefined || body.reorderLevel !== undefined) data.lowStockThreshold = careportOptionalInt(body.lowStockThreshold ?? body.reorderLevel);
   if (body.maxOrderQty !== undefined || body.maxQuantity !== undefined) data.maxOrderQty = careportOptionalInt(body.maxOrderQty ?? body.maxQuantity);
   if (body.ageRestricted !== undefined || body.adultOnly !== undefined) data.ageRestricted = asBool(body.ageRestricted ?? body.adultOnly, false);
   if (body.regulatedSchedule !== undefined || body.schedule !== undefined || body.medicineSchedule !== undefined) data.regulatedSchedule = clean(body.regulatedSchedule ?? body.schedule ?? body.medicineSchedule, 80) || null;
   if (body.taxCategory !== undefined || body.vatCategory !== undefined) data.taxCategory = clean(body.taxCategory ?? body.vatCategory, 80) || null;
+  if (body.rxPriceBasis !== undefined || body.priceBasis !== undefined) data.rxPriceBasis = normalizeRxPriceBasis(body.rxPriceBasis ?? body.priceBasis);
+  if (body.rxDispenseUnit !== undefined || body.dispenseUnit !== undefined) data.rxDispenseUnit = clean(body.rxDispenseUnit ?? body.dispenseUnit, 80) || null;
+  if (body.rxUnitsPerPack !== undefined || body.unitsPerPack !== undefined) data.rxUnitsPerPack = careportOptionalInt(body.rxUnitsPerPack ?? body.unitsPerPack);
+  if (body.rxTaxRateBps !== undefined || body.taxRateBps !== undefined) data.rxTaxRateBps = careportOptionalBps(body.rxTaxRateBps ?? body.taxRateBps);
+  if (body.rxPriceIncludesTax !== undefined || body.priceIncludesTax !== undefined) data.rxPriceIncludesTax = asBool(body.rxPriceIncludesTax ?? body.priceIncludesTax, true);
+  if (body.medicalAidClaimable !== undefined || body.claimable !== undefined) data.medicalAidClaimable = asBool(body.medicalAidClaimable ?? body.claimable, false);
 
   return data;
 }
@@ -304,6 +344,13 @@ export async function POST(req: NextRequest) {
     if (pharmacy.active === false) return json({ ok: false, error: 'pharmacy_inactive' }, 409);
 
     const body = await req.json().catch(() => ({}));
+    if (
+      Object.prototype.hasOwnProperty.call(body ?? {}, 'reservedStock') ||
+      Object.prototype.hasOwnProperty.call(body ?? {}, 'reservedstock') ||
+      Object.prototype.hasOwnProperty.call(body ?? {}, 'reserved_stock')
+    ) {
+      return json({ ok: false, error: 'reserved_stock_server_managed' }, 400);
+    }
     const input = normalizeSkuInput(body, pharmacy.currency || 'ZAR');
     const extended = normalizeCarePortExtendedSkuInput(body);
     const catalogueGovernance = normaliseCarePortSkuForCatalogue(

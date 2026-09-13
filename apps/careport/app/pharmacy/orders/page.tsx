@@ -72,11 +72,18 @@ type PharmacyOrder = {
   items?: OrderItem[];
   payments?: Array<{ id: string; status: string; method: string; amountCents: number }>;
   assignment?: { status?: string | null; riderUserId?: string | null } | null;
+  procurementSessionId?: string | null;
+  rxReservation?: { status?: string; totalCents?: number } | null;
+  rxPharmacistReview?: { status?: string } | null;
+  rxPharmacyFulfilment?: { preparationEtaMin?: number | null; expectedReadyAt?: string | null } | null;
 };
 
 const tabs = [
   { key: '', label: 'Active' },
-  { key: 'PAID', label: 'Paid' },
+  { key: 'PHARMACIST_REVIEW', label: 'Pharmacist review' },
+  { key: 'PHARMACIST_RELEASED', label: 'Released' },
+  { key: 'PACKING_COMPLETE', label: 'Packed' },
+  { key: 'PAID', label: 'Legacy paid' },
   { key: 'PREPARING', label: 'Preparing' },
   { key: 'READY_FOR_PICKUP', label: 'Ready for pickup' },
   { key: 'DISPATCHING', label: 'Dispatching' },
@@ -88,6 +95,9 @@ function money(cents: number, currency = 'ZAR') {
 }
 
 function statusClass(status: string) {
+  if (status === 'PHARMACIST_REVIEW') return 'border-amber-200 bg-amber-50 text-amber-800';
+  if (status === 'PHARMACIST_RELEASED') return 'border-teal-200 bg-teal-50 text-teal-800';
+  if (status === 'PACKING_COMPLETE') return 'border-indigo-200 bg-indigo-50 text-indigo-800';
   if (status === 'PAID') return 'border-blue-200 bg-blue-50 text-blue-800';
   if (status === 'PREPARING') return 'border-amber-200 bg-amber-50 text-amber-800';
   if (status === 'READY_FOR_PICKUP') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
@@ -138,10 +148,10 @@ export default function PharmacyOrdersPage() {
   }, [status]);
 
   const metrics = useMemo(() => ({
-    paid: orders.filter((o) => o.status === 'PAID').length,
-    preparing: orders.filter((o) => o.status === 'PREPARING').length,
-    ready: orders.filter((o) => o.status === 'READY_FOR_PICKUP').length,
-    dispatching: orders.filter((o) => ['DISPATCHING', 'RIDER_ASSIGNED', 'EN_ROUTE_TO_PICKUP', 'AT_PHARMACY'].includes(o.status)).length,
+    review: orders.filter((o) => o.status === 'PHARMACIST_REVIEW').length,
+    preparing: orders.filter((o) => ['PHARMACIST_RELEASED','PREPARING'].includes(o.status)).length,
+    ready: orders.filter((o) => ['PACKING_COMPLETE','READY_FOR_PICKUP'].includes(o.status)).length,
+    legacy: orders.filter((o) => !o.procurementSessionId).length,
   }), [orders]);
 
   async function action(orderId: string, workflowAction: string) {
@@ -172,7 +182,7 @@ export default function PharmacyOrdersPage() {
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Pharmacy fulfilment</p>
           <h1 className="text-2xl font-semibold text-slate-950">Orders to dispense</h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-600">
-            Process paid CarePort orders, prepare medicines, release pickup orders, and trigger dispatch for home delivery.
+            Canonical Rx orders require secured payment/coverage and pharmacist release before preparation. Legacy orders remain visible during migration; canonical medication delivery is deferred to Wave C.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
@@ -183,10 +193,10 @@ export default function PharmacyOrdersPage() {
       </header>
 
       <section className="grid gap-3 md:grid-cols-4">
-        <div className="rounded-2xl border bg-white p-4"><div className="text-xs text-slate-500">Paid</div><div className="text-2xl font-semibold">{metrics.paid}</div></div>
-        <div className="rounded-2xl border bg-white p-4"><div className="text-xs text-slate-500">Preparing</div><div className="text-2xl font-semibold">{metrics.preparing}</div></div>
-        <div className="rounded-2xl border bg-white p-4"><div className="text-xs text-slate-500">Ready</div><div className="text-2xl font-semibold">{metrics.ready}</div></div>
-        <div className="rounded-2xl border bg-white p-4"><div className="text-xs text-slate-500">Dispatching</div><div className="text-2xl font-semibold">{metrics.dispatching}</div></div>
+        <div className="rounded-2xl border bg-white p-4"><div className="text-xs text-slate-500">Pharmacist review</div><div className="text-2xl font-semibold">{metrics.review}</div></div>
+        <div className="rounded-2xl border bg-white p-4"><div className="text-xs text-slate-500">Released / preparing</div><div className="text-2xl font-semibold">{metrics.preparing}</div></div>
+        <div className="rounded-2xl border bg-white p-4"><div className="text-xs text-slate-500">Packed / ready</div><div className="text-2xl font-semibold">{metrics.ready}</div></div>
+        <div className="rounded-2xl border bg-white p-4"><div className="text-xs text-slate-500">Legacy orders</div><div className="text-2xl font-semibold">{metrics.legacy}</div></div>
       </section>
 
       {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{humanErrorMessage(error, "Unable to complete this request. Please try again.")}</div>}
@@ -215,17 +225,19 @@ export default function PharmacyOrdersPage() {
           {orders.map((order) => {
             const itemCount = order.items?.length || 0;
             const firstItems = (order.items || []).slice(0, 3).map((i) => `${i.name} ×${i.quantity}`).join(', ');
-            const canPrepare = order.status === 'PAID';
-            const canReady = ['PAID', 'PREPARING'].includes(order.status);
-            const canCollect = order.fulfillment === 'PICKUP' && order.status === 'READY_FOR_PICKUP';
+            const canonicalRx = Boolean(order.procurementSessionId);
+            const canPrepare = !canonicalRx && order.status === 'PAID';
+            const canReady = !canonicalRx && ['PAID', 'PREPARING'].includes(order.status);
+            const canCollect = !canonicalRx && order.fulfillment === 'PICKUP' && order.status === 'READY_FOR_PICKUP';
 
             return (
               <article key={order.id} className="rounded-2xl border p-4 transition hover:border-emerald-200 hover:bg-emerald-50/20">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <Link href={`/pharmacy/orders/${encodeURIComponent(order.id)}`} className="font-semibold text-slate-950 hover:underline">{order.id}</Link>
+                      <Link href={canonicalRx ? `/pharmacy/rx-orders/${encodeURIComponent(order.id)}` : `/pharmacy/orders/${encodeURIComponent(order.id)}`} className="font-semibold text-slate-950 hover:underline">{order.id}</Link>
                       <span className={`rounded-full border px-2 py-1 text-xs ${statusClass(order.status)}`}>{order.status.split('_').join(' ')}</span>
+                      {canonicalRx && <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-700">Canonical Rx</span>}
                       <span className="rounded-full border px-2 py-1 text-xs text-slate-600">{order.fulfillment === 'DELIVERY' ? 'Home delivery' : 'In-store pickup'}</span>
                     </div>
                     <p className="mt-2 text-sm text-slate-600">{itemCount} item{itemCount === 1 ? '' : 's'} · {firstItems || 'No item details'}</p>
@@ -238,7 +250,7 @@ export default function PharmacyOrdersPage() {
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Link href={`/pharmacy/orders/${encodeURIComponent(order.id)}`} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium hover:bg-slate-50">Open order</Link>
+                  <Link href={canonicalRx ? `/pharmacy/rx-orders/${encodeURIComponent(order.id)}` : `/pharmacy/orders/${encodeURIComponent(order.id)}`} className="rounded-xl border bg-white px-3 py-2 text-xs font-medium hover:bg-slate-50">{canonicalRx ? 'Open clinical workflow' : 'Open order'}</Link>
                   {canPrepare && <button disabled={busy === order.id + 'start_preparing'} onClick={() => void action(order.id, 'start_preparing')} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50">Start preparing</button>}
                   {canReady && <button disabled={busy === order.id + 'ready'} onClick={() => void action(order.id, 'ready')} className="rounded-xl bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">{order.fulfillment === 'DELIVERY' ? 'Ready for dispatch' : 'Ready for pickup'}</button>}
                   {canCollect && <button disabled={busy === order.id + 'mark_collected'} onClick={() => void action(order.id, 'mark_collected')} className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50">Mark collected</button>}
