@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/lab-reviews/[reviewId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { clean, proxyGateway } from '../../lab-networks/_proxy';
@@ -5,7 +6,7 @@ import { clean, proxyGateway } from '../../lab-networks/_proxy';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { reviewId: string } },
 ) {
@@ -22,7 +23,7 @@ export async function GET(
   );
 }
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { reviewId: string } },
 ) {
@@ -38,3 +39,5 @@ export async function PATCH(
     'PATCH',
   );
 }
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);

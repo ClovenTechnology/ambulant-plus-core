@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/careport/pharmacies/me/offers/[offerId]/decline/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -26,7 +27,7 @@ async function resolvePharmacyId(req: NextRequest, who: ReturnType<typeof readId
   return null;
 }
 
-export async function POST(req: NextRequest, { params }: { params: { offerId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { offerId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   const correlationId = correlationIdFromHeaders(req.headers);
@@ -89,3 +90,5 @@ export async function POST(req: NextRequest, { params }: { params: { offerId: st
     );
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/pharmacies/me/offers/[offerId]/decline');

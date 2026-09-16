@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
 
@@ -40,7 +41,7 @@ async function readJson(res: Response) {
   }
 }
 
-export async function POST(req: NextRequest, { params }: { params: { userId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { userId: string } }) {
   const userId = String(params.userId || '').trim();
   if (!userId) return NextResponse.json({ ok: false, error: 'userId_required' }, { status: 400 });
 
@@ -56,3 +57,5 @@ export async function POST(req: NextRequest, { params }: { params: { userId: str
     return NextResponse.json({ ok: false, error: error?.message || 'careport_admin_rider_decision_proxy_failed' }, { status: 502 });
   }
 }
+
+export const POST = withPartnerRoute(partnerOriginalPOST);

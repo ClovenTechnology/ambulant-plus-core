@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/labs/[labId]/panels/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -392,7 +393,7 @@ async function loadPanel(panelId: string) {
   });
 }
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { labId: string } },
 ) {
@@ -460,7 +461,7 @@ export async function GET(
   });
 }
 
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   { params }: { params: { labId: string } },
 ) {
@@ -626,7 +627,7 @@ export async function POST(
   );
 }
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { labId: string } },
 ) {
@@ -794,3 +795,6 @@ export async function PATCH(
     data: projected ? projectPanel(projected) : null,
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/labs/[labId]/panels');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/labs/[labId]/panels');
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/medreach/labs/[labId]/panels');

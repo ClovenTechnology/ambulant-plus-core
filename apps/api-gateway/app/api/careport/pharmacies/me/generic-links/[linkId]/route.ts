@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/pharmacies/me/generic-links/[linkId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -27,7 +28,7 @@ function json(data: any, status = 200) {
   });
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { linkId: string } }) {
+async function partnerOriginalDELETE(req: NextRequest, { params }: { params: { linkId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -60,3 +61,5 @@ export async function DELETE(req: NextRequest, { params }: { params: { linkId: s
     return json({ ok: false, error: error?.message || 'generic_link_delete_failed' }, error?.status || 500);
   }
 }
+
+export const DELETE = withPartnerBoundary(partnerOriginalDELETE, '/api/careport/pharmacies/me/generic-links/[linkId]');

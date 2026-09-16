@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/careport/assign/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -6,7 +7,7 @@ import { readIdentity } from '@/src/lib/identity';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   if (who.role !== 'admin') return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
@@ -82,3 +83,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(row, { headers: { 'access-control-allow-origin': '*' } });
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/assign');

@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/orders/[orderId]/checkout/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -435,7 +436,7 @@ async function notifyClinicianCarePortPurchased(args: {
 }
 
 
-export async function POST(req: NextRequest, { params }: { params: { orderId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { orderId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   const correlationId = correlationIdFromHeaders(req.headers);
@@ -752,3 +753,5 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
     return NextResponse.json({ ok: false, error: e?.message || "error", correlationId }, { status });
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/orders/[orderId]/checkout');

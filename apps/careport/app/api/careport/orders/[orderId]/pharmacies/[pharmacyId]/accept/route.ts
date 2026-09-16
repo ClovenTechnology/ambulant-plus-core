@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/careport/app/api/careport/orders/[orderId]/pharmacies/[pharmacyId]/accept/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
@@ -32,7 +33,7 @@ function forwardJsonHeaders(req: NextRequest) {
   return h;
 }
 
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   { params }: { params: { orderId: string; pharmacyId: string } },
 ) {
@@ -67,3 +68,5 @@ export async function POST(
     );
   }
 }
+
+export const POST = withPartnerRoute(partnerOriginalPOST);

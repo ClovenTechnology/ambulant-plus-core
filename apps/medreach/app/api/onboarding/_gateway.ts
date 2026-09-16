@@ -165,6 +165,7 @@ export async function postToGateway(
     actorRef?: string;
   },
 ) {
+  if (req.headers.get('origin') !== new URL(req.url).origin) return NextResponse.json({ error: 'same_origin_required' }, { status: 403 });
   const url = gatewayUrl(options.path);
 
   if (!url) {
@@ -199,10 +200,15 @@ export async function postToGateway(
       );
     }
 
-    return NextResponse.json(
-      json && typeof json === 'object' ? json : { ok: true },
-      { status: upstream.status },
-    );
+    const response = NextResponse.json(json && typeof json === 'object' ? json : { ok: true }, { status: upstream.status, headers: { 'cache-control': 'no-store' } });
+    const subjectId = String(json?.data?.id || '');
+    if (upstream.status === 201 && subjectId) {
+      const subjectType = options.path.endsWith('/labs') ? 'lab' : 'phleb';
+      const payload = Buffer.from(JSON.stringify({ subjectId, subjectType, exp: Date.now() + 24 * 3600000 })).toString('base64url');
+      const signature = crypto.createHmac('sha256', internalIdentitySecret()).update('onboarding-evidence:' + payload).digest('base64url');
+      response.cookies.set('medreach_onboarding_evidence', payload + '.' + signature, { httpOnly: true, secure: isProductionRuntime(), sameSite: 'strict', path: '/api/onboarding/evidence', maxAge: 86400 });
+    }
+    return response;
   } catch (error) {
     return NextResponse.json(
       {
@@ -212,4 +218,14 @@ export async function postToGateway(
       { status: 503 },
     );
   }
+}
+
+export function requireEvidenceOwner(req: NextRequest, subjectId: string, subjectType: string) {
+  const raw = req.cookies.get('medreach_onboarding_evidence')?.value || '';
+  const [payload, signature] = raw.split('.');
+  if (!payload || !signature || !internalIdentitySecret()) throw new Error('application_submission_session_required');
+  const expected = crypto.createHmac('sha256', internalIdentitySecret()).update('onboarding-evidence:' + payload).digest('base64url');
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) throw new Error('application_submission_session_required');
+  const proof = JSON.parse(Buffer.from(payload, 'base64url').toString());
+  if (proof.subjectId !== subjectId || proof.subjectType !== subjectType || !Number.isFinite(proof.exp) || proof.exp <= Date.now()) throw new Error('application_submission_session_required');
 }

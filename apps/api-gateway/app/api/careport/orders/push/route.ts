@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/careport/orders/push/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -118,7 +119,7 @@ function erxNonDispensableReason(erx: any): string | null {
   return null;
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   const correlationId = correlationIdFromHeaders(req.headers);
@@ -463,3 +464,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/orders/push');

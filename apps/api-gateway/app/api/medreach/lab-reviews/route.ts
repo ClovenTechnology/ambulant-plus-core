@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/lab-reviews/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -272,7 +273,7 @@ async function resolveReviewableOrder(req: NextRequest, orderId: string, who: an
   };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
   const url = new URL(req.url);
@@ -351,7 +352,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -474,3 +475,5 @@ export async function POST(req: NextRequest) {
     data: projectReview(review),
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/lab-reviews');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/lab-reviews');

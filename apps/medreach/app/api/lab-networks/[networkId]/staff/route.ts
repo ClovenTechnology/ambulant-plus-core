@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/lab-networks/[networkId]/staff/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { clean, proxyGateway } from '../../_proxy';
@@ -5,7 +6,7 @@ import { clean, proxyGateway } from '../../_proxy';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { networkId: string } },
 ) {
@@ -23,7 +24,7 @@ export async function GET(
   );
 }
 
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   { params }: { params: { networkId: string } },
 ) {
@@ -40,3 +41,5 @@ export async function POST(
     { 'x-network-id': req.headers.get('x-network-id') || networkId },
   );
 }
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const POST = withPartnerRoute(partnerOriginalPOST);

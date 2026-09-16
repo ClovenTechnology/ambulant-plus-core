@@ -1,10 +1,11 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/careport/app/api/pharmacies/[pharmacyId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(_req: NextRequest, { params }: { params: { pharmacyId: string } }) {
+async function partnerOriginalGET(_req: NextRequest, { params }: { params: { pharmacyId: string } }) {
   const pharmacyId = String(params.pharmacyId || '').trim();
 
   return NextResponse.json(
@@ -29,3 +30,5 @@ export async function GET(_req: NextRequest, { params }: { params: { pharmacyId:
     },
   );
 }
+
+export const GET = withPartnerRoute(partnerOriginalGET);

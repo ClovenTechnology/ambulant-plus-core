@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/pharmacies/me/generic-links/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -27,7 +28,7 @@ function json(data: any, status = 200) {
   });
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -61,7 +62,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -106,3 +107,6 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: error?.message || 'generic_link_create_failed' }, error?.status || 500);
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/pharmacies/me/generic-links');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/pharmacies/me/generic-links');

@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/lab-networks/[networkId]/branches/[labId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { clean, proxyGateway } from '../../../_proxy';
@@ -5,7 +6,7 @@ import { clean, proxyGateway } from '../../../_proxy';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { networkId: string; labId: string } },
 ) {
@@ -28,7 +29,7 @@ export async function PATCH(
   );
 }
 
-export async function DELETE(
+async function partnerOriginalDELETE(
   req: NextRequest,
   { params }: { params: { networkId: string; labId: string } },
 ) {
@@ -50,3 +51,5 @@ export async function DELETE(
     { 'x-network-id': req.headers.get('x-network-id') || networkId },
   );
 }
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);
+export const DELETE = withPartnerRoute(partnerOriginalDELETE);

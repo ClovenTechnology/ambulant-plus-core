@@ -1,3 +1,4 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -72,7 +73,7 @@ async function readPayload(res: Response) {
   }
 }
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { reviewId: string } },
 ) {
@@ -98,7 +99,7 @@ export async function GET(
   return json(payload ?? { ok: upstream.ok }, upstream.status);
 }
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { reviewId: string } },
 ) {
@@ -126,3 +127,6 @@ export async function PATCH(
   const payload = await readPayload(upstream);
   return json(payload ?? { ok: upstream.ok }, upstream.status);
 }
+
+export const GET = withPartnerAdminProxy(partnerOriginalGET);
+export const PATCH = withPartnerAdminProxy(partnerOriginalPATCH);

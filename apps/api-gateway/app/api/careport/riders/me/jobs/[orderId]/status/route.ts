@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
@@ -87,7 +88,7 @@ function riderReadinessError(profile: any) {
   return null;
 }
 
-export async function POST(req: NextRequest, { params }: { params: { orderId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { orderId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -216,3 +217,5 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
     return json({ ok: false, error: error?.message || 'rider_status_update_failed' }, error?.status || 500);
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/riders/me/jobs/[orderId]/status');

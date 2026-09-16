@@ -171,6 +171,7 @@ function MedReachHomeInner() {
 
   return (
     <main className="mx-auto max-w-7xl space-y-8 px-4 py-8">
+      <nav className="flex gap-4"><Link href="/auth/login" className="underline">Partner sign in</Link><Link href="/auth/account" className="underline">Account / sign out</Link></nav>
       <section className="rounded-2xl border bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>

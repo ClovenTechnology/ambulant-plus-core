@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/lab-panels/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -124,14 +125,17 @@ async function proxy(req: NextRequest, method: 'GET' | 'POST' | 'PATCH') {
   });
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   return proxy(req, 'GET');
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   return proxy(req, 'POST');
 }
 
-export async function PATCH(req: NextRequest) {
+async function partnerOriginalPATCH(req: NextRequest) {
   return proxy(req, 'PATCH');
 }
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const POST = withPartnerRoute(partnerOriginalPOST);
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);

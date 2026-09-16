@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/metrics/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -118,7 +119,7 @@ async function resolveMetricScope(req: NextRequest, who: any) {
   return { ok: false, role, labId: null, phlebIds: [] as string[] };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const scope = await resolveMetricScope(req, who);
 
@@ -293,3 +294,4 @@ export async function GET(req: NextRequest) {
     },
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/metrics');

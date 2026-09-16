@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { readIdentity } from "@/src/lib/identity";
 import { orgIdFromHeaders, requireRole } from "@/src/lib/careport";
@@ -12,7 +13,7 @@ function boundedInt(value: string | null, fallback: number) {
   return Math.min(250, Math.max(1, n));
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -40,3 +41,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/rx-procurement/reservations/expire');

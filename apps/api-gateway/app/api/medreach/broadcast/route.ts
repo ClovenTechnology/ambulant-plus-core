@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/broadcast/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -50,7 +51,7 @@ function isAllowedRole(role: string) {
   return ['admin', 'patient'].includes(role);
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = String(who.role || '').toLowerCase();
 
@@ -474,3 +475,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/broadcast');

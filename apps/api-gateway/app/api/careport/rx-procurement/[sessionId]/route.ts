@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { readIdentity } from "@/src/lib/identity";
 import {
@@ -25,7 +26,7 @@ function clean(value: unknown, max = 500) {
   return String(value ?? "").trim().slice(0, max);
 }
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { sessionId: string } },
 ) {
@@ -44,7 +45,7 @@ export async function GET(
   }
 }
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { sessionId: string } },
 ) {
@@ -82,3 +83,6 @@ export async function PATCH(
     );
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/rx-procurement/[sessionId]');
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/careport/rx-procurement/[sessionId]');

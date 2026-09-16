@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
@@ -40,7 +41,7 @@ function allowedAction(value: unknown) {
   return '';
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -129,7 +130,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function PATCH(req: NextRequest) {
+async function partnerOriginalPATCH(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -241,3 +242,6 @@ export async function PATCH(req: NextRequest) {
     return json({ ok: false, error: error?.message || 'catalogue_normalisation_update_failed' }, error?.status || 500);
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/admin/catalogue/normalisation');
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/careport/admin/catalogue/normalisation');

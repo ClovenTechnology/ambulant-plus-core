@@ -1,10 +1,11 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextResponse } from 'next/server';
 import { carePortCatalogueTaxonomy } from '@/src/careport/catalogue/taxonomy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+async function partnerOriginalGET() {
   return NextResponse.json(carePortCatalogueTaxonomy(), {
     status: 200,
     headers: {
@@ -13,3 +14,5 @@ export async function GET() {
     },
   });
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/catalogue/taxonomy');

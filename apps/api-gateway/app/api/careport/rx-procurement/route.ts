@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { readIdentity } from "@/src/lib/identity";
 import {
@@ -25,7 +26,7 @@ function clean(value: unknown, max = 500) {
   return String(value ?? "").trim().slice(0, max);
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   const correlationId = correlationIdFromHeaders(req.headers);
@@ -75,3 +76,6 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/rx-procurement');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/rx-procurement');

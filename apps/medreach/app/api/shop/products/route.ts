@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/shop/products/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -36,7 +37,7 @@ function forwardIdentityHeaders(req: NextRequest, json = false) {
 }
 
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
 
   url.searchParams.set('channel', 'medreach');
@@ -66,3 +67,4 @@ export async function GET(req: NextRequest) {
     },
   });
 }
+export const GET = withPartnerRoute(partnerOriginalGET);

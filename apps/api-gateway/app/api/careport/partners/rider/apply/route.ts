@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 
@@ -50,7 +51,7 @@ function splitCsv(value: unknown) {
 }
 
 function orgIdFromHeaders(req: NextRequest) {
-  return clean(req.headers.get('x-org-id') || process.env.DEFAULT_ORG_ID || 'org-default', 160) || 'org-default';
+  return clean(process.env.DEFAULT_ORG_ID || 'org-default', 160) || 'org-default';
 }
 
 function stableUserId(email: string, phone: string) {
@@ -183,7 +184,7 @@ function withAgreementSnapshot(value: unknown, agreementSnapshot: Record<string,
   return attachAgreementSnapshot({ ...base }, agreementSnapshot);
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   try {
     const orgId = orgIdFromHeaders(req);
     const body = await req.json().catch(() => ({}));
@@ -283,30 +284,9 @@ export async function POST(req: NextRequest) {
 
     attachAgreementSnapshot(kyiPayload, agreementSnapshot);
 
-    const existingRider = await (prisma as any).carePortRiderProfile
-      ?.findFirst?.({ where: { userId } })
-      .catch(() => null);
-
-    const rider = existingRider?.id
-      ? await (prisma as any).carePortRiderProfile.update({
-          where: { id: existingRider.id },
-          data: {
-            orgId,
-            country,
-            currency,
-            isActive: false,
-            isOnJob: false,
-            kyiStatus: 'PENDING_REVIEW',
-            kyiSchemaKey: 'ZA_RIDER_ENTERPRISE_PUBLIC_INTAKE_v1',
-            kyiPayload,
-            kyiSubmittedAt: new Date(),
-            kyiVerifiedAt: null,
-            kyiRejectedReason: null,
-            bankAccountMasked: normalizePayoutMask(accountNumber || body?.bankAccountMasked || body?.payoutAccountMask || body?.accountMask),
-            accountStatus: 'AWAITING_ACTIVATION',
-          } as any,
-        })
-      : await (prisma as any).carePortRiderProfile.create({
+    const existingRider = await prisma.carePortRiderProfile.findUnique({ where: { userId } });
+    if (existingRider) return json({ ok: true, message: 'Application received. Contact support for changes.' }, 202);
+    const rider = await (prisma as any).carePortRiderProfile.create({
           data: {
             orgId,
             userId,
@@ -349,3 +329,4 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: error?.message || 'careport_rider_application_failed' }, error?.status || 500);
   }
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/partners/rider/apply');

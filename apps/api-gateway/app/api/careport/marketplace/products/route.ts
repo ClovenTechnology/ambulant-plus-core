@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { orgIdFromHeaders } from '@/src/lib/careport';
@@ -150,7 +151,7 @@ function normaliseItem(sku: any, globalProduct: any) {
   };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   try {
     const orgId = orgIdFromHeaders(req.headers);
     const url = new URL(req.url);
@@ -320,3 +321,4 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/marketplace/products');

@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // FILE: apps/api-gateway/app/api/careport/riders/[userId]/kyi/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -16,7 +17,7 @@ function resolveOrgId(req: NextRequest, who: ReturnType<typeof readIdentity>) {
   ).trim();
 }
 
-export async function POST(req: NextRequest, { params }: { params: { userId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { userId: string } }) {
   const who = readIdentity(req.headers);
   if (who.role !== "admin" && who.role !== "rider") {
     return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -81,3 +82,4 @@ export async function POST(req: NextRequest, { params }: { params: { userId: str
 
   return NextResponse.json({ ok: true, rider: updated }, { status: 200 });
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/riders/[userId]/kyi');

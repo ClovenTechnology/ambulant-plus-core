@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest } from "next/server";
 import { prisma } from "@/src/lib/db";
 import { readIdentity } from "@/src/lib/identity";
@@ -7,7 +8,7 @@ import { resolveCarePortPharmacyId } from "@/src/lib/careport-rx-pharmacy-ops";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -103,3 +104,5 @@ export async function GET(req: NextRequest) {
     return new Response(error?.message || "rx_events_stream_failed", { status: error?.status || 500 });
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/pharmacies/me/rx-events/stream');

@@ -1,3 +1,4 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 import { NextRequest, NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
@@ -14,7 +15,7 @@ async function readJsonSafe(file:string){
   return JSON.parse(txt)
 }
 
-export async function POST(req: NextRequest){
+async function partnerOriginalPOST(req: NextRequest){
   await ensureUploads()
   const form = await req.formData()
   const file = form.get('file') as unknown as File | null
@@ -46,3 +47,5 @@ export async function POST(req: NextRequest){
   const previewUrl = `/api/medreach/reports/file?name=${encodeURIComponent(filename)}`
   return NextResponse.json({ id, previewUrl })
 }
+
+export const POST = withPartnerAdminProxy(partnerOriginalPOST);

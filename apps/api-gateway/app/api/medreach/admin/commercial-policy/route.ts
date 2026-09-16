@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
 import { orgIdFromHeaders, requireRole } from "@/src/lib/careport";
@@ -196,7 +197,7 @@ function json(data: any, status = 200) {
   });
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   try {
     const orgId = orgIdFromHeaders(req.headers);
     const who = whoFromHeaders(req.headers);
@@ -210,7 +211,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   try {
     const orgId = orgIdFromHeaders(req.headers);
     const who = whoFromHeaders(req.headers);
@@ -257,6 +258,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function OPTIONS() {
+async function partnerOriginalOPTIONS() {
   return json({ ok: true });
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/admin/commercial-policy');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/admin/commercial-policy');
+export const OPTIONS = withPartnerBoundary(partnerOriginalOPTIONS, '/api/medreach/admin/commercial-policy');

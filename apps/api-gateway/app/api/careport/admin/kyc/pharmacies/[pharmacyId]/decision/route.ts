@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // FILE: apps/api-gateway/app/api/careport/admin/kyc/pharmacies/[pharmacyId]/decision/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -26,7 +27,7 @@ function json(data: any, status = 200) {
   });
 }
 
-export async function POST(req: NextRequest, { params }: { params: { pharmacyId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { pharmacyId: string } }) {
   const who = readIdentity(req.headers);
 
   try {
@@ -194,3 +195,5 @@ export async function POST(req: NextRequest, { params }: { params: { pharmacyId:
     );
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/admin/kyc/pharmacies/[pharmacyId]/decision');

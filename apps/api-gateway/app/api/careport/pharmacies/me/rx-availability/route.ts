@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { readIdentity } from "@/src/lib/identity";
 import { orgIdFromHeaders, requireRole } from "@/src/lib/careport";
@@ -20,7 +21,7 @@ async function pharmacy(req: NextRequest, who: ReturnType<typeof readIdentity>, 
   return id;
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   try {
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function PATCH(req: NextRequest) {
+async function partnerOriginalPATCH(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   try {
@@ -46,3 +47,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ ok: false, error: error?.message || "rx_availability_update_failed", details: error?.details ?? null }, { status: error?.status || 500 });
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/pharmacies/me/rx-availability');
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/careport/pharmacies/me/rx-availability');

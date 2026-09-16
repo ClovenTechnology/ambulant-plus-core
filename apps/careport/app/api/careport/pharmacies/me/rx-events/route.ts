@@ -1,5 +1,9 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 import { NextRequest } from "next/server";
 import { proxyRx } from "@/app/api/careport/pharmacies/me/rx/_proxy";
 export const runtime="nodejs"; export const dynamic="force-dynamic";
-export async function GET(req: NextRequest){return proxyRx(req,"/api/careport/pharmacies/me/rx-events","GET");}
-export async function PATCH(req: NextRequest){return proxyRx(req,"/api/careport/pharmacies/me/rx-events","PATCH");}
+async function partnerOriginalGET(req: NextRequest){return proxyRx(req,"/api/careport/pharmacies/me/rx-events","GET");}
+async function partnerOriginalPATCH(req: NextRequest){return proxyRx(req,"/api/careport/pharmacies/me/rx-events","PATCH");}
+
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);

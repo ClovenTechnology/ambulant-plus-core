@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/metrics/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -213,7 +214,7 @@ function adaptMetrics(raw: any, scope: Scope, id: string | null) {
   };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
   const scope = (clean(url.searchParams.get('scope')) || 'admin') as Scope;
   const id = clean(url.searchParams.get('id'));
@@ -267,3 +268,4 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json(adaptMetrics(json, scope, id || null));
 }
+export const GET = withPartnerRoute(partnerOriginalGET);

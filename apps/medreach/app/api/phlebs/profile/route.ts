@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/phlebs/profile/route.ts
 import { NextRequest } from 'next/server';
 import {
@@ -20,7 +21,7 @@ function cleanString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
   const phlebId = cleanString(url.searchParams.get('phlebId'));
 
@@ -44,3 +45,4 @@ export async function GET(req: NextRequest) {
 
   return response;
 }
+export const GET = withPartnerRoute(partnerOriginalGET);

@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/pharmacies/me/kyc/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -24,7 +25,7 @@ async function resolvePharmacyId(req: NextRequest, who: ReturnType<typeof readId
   return null;
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
 
   try {
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ ok: true, pharmacy }, { status: 200 });
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
 
   try {
@@ -99,3 +100,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true, pharmacy: updated }, { status: 200 });
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/pharmacies/me/kyc');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/pharmacies/me/kyc');

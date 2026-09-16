@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/pharmacies/me/inventory/[skuId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -214,7 +215,7 @@ function json(data: any, status = 200) {
   });
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { skuId: string } }) {
+async function partnerOriginalPATCH(req: NextRequest, { params }: { params: { skuId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -298,7 +299,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { skuId: str
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { skuId: string } }) {
+async function partnerOriginalDELETE(req: NextRequest, { params }: { params: { skuId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -331,3 +332,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { skuId: st
     return json({ ok: false, error: error?.message || 'inventory_delete_failed' }, error?.status || 500);
   }
 }
+
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/careport/pharmacies/me/inventory/[skuId]');
+export const DELETE = withPartnerBoundary(partnerOriginalDELETE, '/api/careport/pharmacies/me/inventory/[skuId]');

@@ -1,10 +1,11 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/careport/app/api/timeline/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
   const orderId = String(url.searchParams.get('orderId') || url.searchParams.get('jobId') || '').trim();
 
@@ -29,3 +30,5 @@ export async function GET(req: NextRequest) {
     },
   );
 }
+
+export const GET = withPartnerRoute(partnerOriginalGET);

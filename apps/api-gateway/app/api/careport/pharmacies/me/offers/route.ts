@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/careport/pharmacies/me/offers/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -92,7 +93,7 @@ function estimateCoverage(items: any[], skus: any[]) {
   };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   requireRole(who, ["admin", "pharmacy", "pharmacy_staff"]);
 
@@ -210,3 +211,5 @@ export async function GET(req: NextRequest) {
     { status: 200, headers: { "access-control-allow-origin": "*" } },
   );
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/pharmacies/me/offers');

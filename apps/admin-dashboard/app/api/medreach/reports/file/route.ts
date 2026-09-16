@@ -1,10 +1,11 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
 
 const uploadsDir = path.join(process.cwd(), '../../packages/medreach/uploads');
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const name = searchParams.get('name') || '';
   const filePath = path.join(uploadsDir, name);
@@ -29,3 +30,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'not found' }, { status: 404 });
   }
 }
+
+export const GET = withPartnerAdminProxy(partnerOriginalGET);

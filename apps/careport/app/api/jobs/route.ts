@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/careport/app/api/jobs/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -26,10 +27,13 @@ function disabled() {
   );
 }
 
-export async function GET(_req: NextRequest) {
+async function partnerOriginalGET(_req: NextRequest) {
   return disabled();
 }
 
-export async function POST(_req: NextRequest) {
+async function partnerOriginalPOST(_req: NextRequest) {
   return disabled();
 }
+
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const POST = withPartnerRoute(partnerOriginalPOST);

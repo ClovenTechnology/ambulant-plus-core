@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
 import { readIdentity } from "@/src/lib/identity";
@@ -62,7 +63,7 @@ function carePortRiderPayoutReadiness(profile: any) {
   };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
 
   try {
@@ -140,3 +141,5 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: e?.message || "rider_payouts_load_failed", items: [] }, e?.status || 500);
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/riders/me/payouts');

@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/shop/checkout/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -36,7 +37,7 @@ function forwardIdentityHeaders(req: NextRequest, json = false) {
 }
 
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   let body: unknown;
 
   try {
@@ -79,3 +80,4 @@ export async function POST(req: NextRequest) {
     },
   });
 }
+export const POST = withPartnerRoute(partnerOriginalPOST);

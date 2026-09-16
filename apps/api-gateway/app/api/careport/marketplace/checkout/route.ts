@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -83,7 +84,7 @@ function marketplaceOrderRef() {
   return 'otc-marketplace-' + randomUUID();
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -455,3 +456,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/marketplace/checkout');

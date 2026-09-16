@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/bundles/[bundleId]/custody/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -73,7 +74,7 @@ function safeJson(value: unknown) {
   }
 }
 
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   { params }: { params: { bundleId: string } },
 ) {
@@ -120,8 +121,8 @@ export async function POST(
       bundleId,
       specimenId,
       action: action as any,
-      actorId: cleanNullableString(body.actorId) ?? who.uid ?? null,
-      actorRole: cleanNullableString(body.actorRole) ?? who.role,
+      actorId: who.uid ?? null,
+      actorRole: who.role,
       lat: cleanFiniteNumber(body.lat),
       lng: cleanFiniteNumber(body.lng),
       meta: safeJson(body.meta),
@@ -249,9 +250,10 @@ export async function POST(
     orderId: bundle.orderId ?? null,
     specimenId,
     action,
-    actorRole: cleanNullableString(body.actorRole) ?? who.role,
+    actorRole: who.role,
     at: new Date().toISOString(),
   });
 
   return NextResponse.json({ ok: true, event });
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/bundles/[bundleId]/custody');

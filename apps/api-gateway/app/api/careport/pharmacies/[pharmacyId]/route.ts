@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/pharmacies/[pharmacyId]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -5,7 +6,7 @@ import { prisma } from "@/src/lib/db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: NextRequest, { params }: { params: { pharmacyId: string } }) {
+async function partnerOriginalGET(_req: NextRequest, { params }: { params: { pharmacyId: string } }) {
   const pharmacyId = String(params.pharmacyId || "").trim();
   if (!pharmacyId) return NextResponse.json({ error: "pharmacyId_required" }, { status: 400 });
 
@@ -14,3 +15,4 @@ export async function GET(_req: NextRequest, { params }: { params: { pharmacyId:
 
   return NextResponse.json({ pharmacy }, { status: 200, headers: { "access-control-allow-origin": "*" } });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/pharmacies/[pharmacyId]');

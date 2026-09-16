@@ -1,3 +1,4 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -77,7 +78,7 @@ function proxyError(error: unknown) {
     { status: 500 },
   );
 }
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   { params }: { params: { pharmacyId: string } },
 ) {
@@ -111,3 +112,4 @@ export async function POST(
     return proxyError(error);
   }
 }
+export const POST = withPartnerAdminProxy(partnerOriginalPOST);

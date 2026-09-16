@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { readIdentity } from "@/src/lib/identity";
 import { correlationIdFromHeaders, orgIdFromHeaders, requireRole } from "@/src/lib/careport";
@@ -14,7 +15,7 @@ function json(data: any, status = 200) {
   return NextResponse.json(data, { status, headers: { "Cache-Control": "no-store" } });
 }
 
-export async function GET(req: NextRequest, { params }: { params: { sessionId: string } }) {
+async function partnerOriginalGET(req: NextRequest, { params }: { params: { sessionId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   try {
@@ -35,7 +36,7 @@ export async function GET(req: NextRequest, { params }: { params: { sessionId: s
   }
 }
 
-export async function POST(req: NextRequest, { params }: { params: { sessionId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { sessionId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   const correlationId = correlationIdFromHeaders(req.headers);
@@ -60,3 +61,6 @@ export async function POST(req: NextRequest, { params }: { params: { sessionId: 
     return json({ ok: false, error: error?.message || "rx_reservation_create_failed", details: error?.details ?? null, correlationId }, error?.status || 500);
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/rx-procurement/[sessionId]/reservation');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/rx-procurement/[sessionId]/reservation');

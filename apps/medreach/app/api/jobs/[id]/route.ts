@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/jobs/[id]/route.ts
 import { NextRequest } from 'next/server';
 import {
@@ -36,7 +37,7 @@ function mapDisplayStatusToLegacyStatus(status: string) {
   return map[value] || value;
 }
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
@@ -63,7 +64,7 @@ export async function GET(
   return response;
 }
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
@@ -107,3 +108,5 @@ export async function PATCH(
     },
   });
 }
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);

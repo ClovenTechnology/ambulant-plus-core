@@ -1,3 +1,4 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -77,7 +78,7 @@ function proxyError(error: unknown) {
     { status: 500 },
   );
 }
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const upstream =
@@ -94,3 +95,4 @@ export async function GET(req: NextRequest) {
     return proxyError(error);
   }
 }
+export const GET = withPartnerAdminProxy(partnerOriginalGET);

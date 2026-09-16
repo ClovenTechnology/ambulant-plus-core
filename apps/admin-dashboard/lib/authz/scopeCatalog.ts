@@ -120,6 +120,7 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
     description: 'Credentialing verification, audits, and exports.',
     items: [
       { scope: 'compliance.read', label: 'Read compliance', desc: 'View compliance dashboard and queues.' },
+      { scope: 'compliance.verify_partners', label: 'Verify partner access', desc: 'Review partner identity, issue password setup links and approve, suspend or revoke partner access.', danger: true },
       { scope: 'compliance.verify_clinicians', label: 'Verify clinicians', desc: 'Approve/reject clinicians & credentials.', danger: true },
       { scope: 'compliance.audit.read', label: 'Read audits', desc: 'View audit events and trails.' },
       { scope: 'compliance.audit.export', label: 'Export audits', desc: 'Export audit logs (sensitive).', danger: true },

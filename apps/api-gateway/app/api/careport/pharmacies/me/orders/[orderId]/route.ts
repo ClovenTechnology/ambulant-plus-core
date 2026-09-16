@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/pharmacies/me/orders/[orderId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -27,7 +28,7 @@ function json(data: any, status = 200) {
   });
 }
 
-export async function GET(req: NextRequest, { params }: { params: { orderId: string } }) {
+async function partnerOriginalGET(req: NextRequest, { params }: { params: { orderId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -63,3 +64,5 @@ export async function GET(req: NextRequest, { params }: { params: { orderId: str
     return json({ ok: false, error: error?.message || 'pharmacy_order_load_failed' }, error?.status || 500);
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/pharmacies/me/orders/[orderId]');

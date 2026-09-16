@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/phlebs/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -145,7 +146,7 @@ async function assertLabCanSeePhlebs(req: NextRequest, who: any) {
   return { ok: false, labId: null };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -307,7 +308,7 @@ function withAgreementSnapshot(value: unknown, agreementSnapshot: Record<string,
   return attachAgreementSnapshot({ ...base }, agreementSnapshot);
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -336,7 +337,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
   }
 
-  const isPrivilegedActor = role === 'admin' || role === 'system';
+  const isPublicOnboarding = role === 'system' && String(who.uid || '').startsWith('medreach-onboarding:');
+  const isPrivilegedActor = role === 'admin' || (role === 'system' && !isPublicOnboarding);
   const existingProfile = await prisma.medReachPhlebProfile.findUnique({
     where: { userId },
     select: {
@@ -345,6 +347,8 @@ export async function POST(req: NextRequest) {
       approvalStatus: true,
     },
   });
+
+  if (isPublicOnboarding && existingProfile) return NextResponse.json({ ok: false, error: 'application_already_exists_contact_support' }, { status: 409 });
 
   const requestedApproval = cleanString(body.approvalStatus || body.status).toUpperCase();
   const approvalStatus = isPrivilegedActor
@@ -468,3 +472,5 @@ export async function POST(req: NextRequest) {
     { status: 201 },
   );
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/phlebs');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/phlebs');

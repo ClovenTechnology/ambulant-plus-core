@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { buildMedReachBillableEventsFromOrder } from "@ambulant/client-core/src/medreach";
 import { prisma } from "@/src/lib/db";
@@ -733,7 +734,7 @@ async function ensureFinancialSnapshot(req: NextRequest, orderId: string) {
   };
 }
 
-export async function POST(req: NextRequest, { params }: { params: { orderId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { orderId: string } }) {
   try {
     const role = roleOf(req);
 
@@ -783,10 +784,14 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
   }
 }
 
-export async function GET(req: NextRequest, ctx: { params: { orderId: string } }) {
+async function partnerOriginalGET(req: NextRequest, ctx: { params: { orderId: string } }) {
   return POST(req, ctx);
 }
 
-export async function OPTIONS() {
+async function partnerOriginalOPTIONS() {
   return NextResponse.json({ ok: true });
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/orders/[orderId]/bill');
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/orders/[orderId]/bill');
+export const OPTIONS = withPartnerBoundary(partnerOriginalOPTIONS, '/api/medreach/orders/[orderId]/bill');

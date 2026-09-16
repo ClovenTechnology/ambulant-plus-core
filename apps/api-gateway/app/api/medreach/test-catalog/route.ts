@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/test-catalog/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -55,7 +56,7 @@ function projectCatalogTest(row: any) {
   };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -99,7 +100,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -178,7 +179,7 @@ export async function POST(req: NextRequest) {
   );
 }
 
-export async function PATCH(req: NextRequest) {
+async function partnerOriginalPATCH(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -274,3 +275,6 @@ export async function PATCH(req: NextRequest) {
     data: projectCatalogTest(row),
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/test-catalog');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/test-catalog');
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/medreach/test-catalog');

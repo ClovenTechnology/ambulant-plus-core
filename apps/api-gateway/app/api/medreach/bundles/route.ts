@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/bundles/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -132,7 +133,7 @@ function normalizeSpecimens(
   });
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
 
   if (!ALLOWED_ROLES.has(String(who.role || '').toLowerCase())) {
@@ -266,7 +267,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(finalBundle);
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
 
   if (!READ_ALLOWED_ROLES.has(String(who.role || '').toLowerCase())) {
@@ -333,3 +334,5 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({ items });
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/bundles');
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/bundles');

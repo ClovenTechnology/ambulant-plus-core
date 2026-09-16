@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/careport/pharmacies/me/orders/[orderId]/status/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -155,7 +156,7 @@ async function emitWorkflowEvent(args: {
   }
 }
 
-export async function POST(req: NextRequest, { params }: { params: { orderId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { orderId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   const correlationId = correlationIdFromHeaders(req.headers);
@@ -324,3 +325,5 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
     return json({ ok: false, error: error?.message || 'pharmacy_order_status_update_failed', correlationId }, error?.status || 500);
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/pharmacies/me/orders/[orderId]/status');

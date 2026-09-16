@@ -106,53 +106,14 @@ function normalizeIdentity(raw: any): User | null {
   };
 }
 
-function devIdentity(): User | null {
-  if (process.env.NODE_ENV === 'production') return null;
-
-  const role = normalizeRole(process.env.NEXT_PUBLIC_MEDREACH_DEV_ROLE);
-  if (role === 'guest') return null;
-
-  return {
-    role,
-    id: process.env.NEXT_PUBLIC_MEDREACH_DEV_USER_ID || undefined,
-    userId: process.env.NEXT_PUBLIC_MEDREACH_DEV_USER_ID || undefined,
-    email: process.env.NEXT_PUBLIC_MEDREACH_DEV_EMAIL || undefined,
-    name: process.env.NEXT_PUBLIC_MEDREACH_DEV_NAME || 'MedReach Operator',
-    labId: process.env.NEXT_PUBLIC_MEDREACH_DEV_LAB_ID || undefined,
-    staffLabId: process.env.NEXT_PUBLIC_MEDREACH_DEV_STAFF_LAB_ID || undefined,
-    phlebId: process.env.NEXT_PUBLIC_MEDREACH_DEV_PHLEB_ID || undefined,
-    isAuthenticated: true,
-  };
-}
-
 async function tryReadIdentity(): Promise<User> {
-  const endpoints = [
-    '/api/auth/me',
-    '/api/me',
-    '/api/session',
-    '/api/user',
-    '/api/identity',
-  ];
-
-  for (const endpoint of endpoints) {
-    try {
-      const res = await fetch(endpoint, {
-        cache: 'no-store',
-        headers: { accept: 'application/json' },
-      });
-
-      if (!res.ok) continue;
-
-      const json = await res.json().catch(() => null);
-      const user = normalizeIdentity(json);
-
-      if (user) return user;
-    } catch {
-      // Try next identity endpoint.
-    }
-  }
-
-  return devIdentity() || guestUser;
+  try {
+    const res = await fetch('/api/partner-auth/me', { cache: 'no-store' });
+    if (!res.ok) return guestUser;
+    const { account: a } = await res.json();
+    if (!a || !['lab', 'phleb'].includes(a.role)) return guestUser;
+    return { role: a.role, id: a.userId, userId: a.userId, email: a.email, labId: a.role === 'lab' ? a.actorRefId : undefined, phlebId: a.role === 'phleb' ? a.actorRefId : undefined, isAuthenticated: true };
+  } catch { return guestUser; }
 }
 
 export function UserProvider({ children }: { children: ReactNode }) {

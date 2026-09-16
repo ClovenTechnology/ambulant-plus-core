@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
@@ -152,7 +153,7 @@ function normalizeRow(row: any, labCurrency: string) {
   };
 }
 
-export async function POST(req: NextRequest, { params }: { params: { labId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { labId: string } }) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -325,3 +326,5 @@ export async function POST(req: NextRequest, { params }: { params: { labId: stri
     return json({ ok: false, error: error?.message || 'lab_tests_import_failed' }, error?.status || 500);
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/labs/[labId]/tests/import');

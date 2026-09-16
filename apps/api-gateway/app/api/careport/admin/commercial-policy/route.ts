@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
 import { readIdentity } from "@/src/lib/identity";
@@ -121,7 +122,7 @@ function json(data: any, status = 200) {
   return NextResponse.json(data, { status, headers: { "cache-control": "no-store", "access-control-allow-origin": "*" } });
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -134,7 +135,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -186,3 +187,5 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: e?.message || "commercial_policy_save_failed" }, e?.status || 500);
   }
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/admin/commercial-policy');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/admin/commercial-policy');

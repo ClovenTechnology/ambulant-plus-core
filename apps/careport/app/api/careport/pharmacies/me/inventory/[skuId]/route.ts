@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 //apps/careport/app/api/careport/pharmacies/me/inventory/[skuId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
@@ -21,7 +22,7 @@ async function readJson(res: Response) {
   try { return text ? JSON.parse(text) : {}; } catch { return { ok: false, error: 'invalid_gateway_json', raw: text.slice(0, 500) }; }
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { skuId: string } }) {
+async function partnerOriginalPATCH(req: NextRequest, { params }: { params: { skuId: string } }) {
   const skuId = String(params.skuId || '').trim();
   if (!skuId) return NextResponse.json({ ok: false, error: 'skuId_required' }, { status: 400 });
   try {
@@ -37,7 +38,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { skuId: str
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { skuId: string } }) {
+async function partnerOriginalDELETE(req: NextRequest, { params }: { params: { skuId: string } }) {
   const skuId = String(params.skuId || '').trim();
   if (!skuId) return NextResponse.json({ ok: false, error: 'skuId_required' }, { status: 400 });
   try {
@@ -51,3 +52,5 @@ export async function DELETE(req: NextRequest, { params }: { params: { skuId: st
     return NextResponse.json({ ok: false, error: error?.message || 'careport_inventory_delete_proxy_failed' }, { status: 502 });
   }
 }
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);
+export const DELETE = withPartnerRoute(partnerOriginalDELETE);

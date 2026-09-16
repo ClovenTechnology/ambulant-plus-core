@@ -54,6 +54,7 @@ export function CarePortRoleShell({
           </div>
 
           <nav aria-label={title} className="max-h-[68vh] space-y-2 overflow-y-auto p-3">
+            <Link href="/auth/account" className="block rounded border px-4 py-3">Account / sign out</Link>
             {navItems.map((item) => {
               const active = isActivePath(pathname, item.href);
 

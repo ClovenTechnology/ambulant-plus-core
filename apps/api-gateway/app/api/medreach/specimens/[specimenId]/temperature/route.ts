@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
@@ -12,7 +13,7 @@ type Body = {
   correlationId?: string;
 };
 
-export async function POST(req: NextRequest, { params }: { params: { specimenId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { specimenId: string } }) {
   const who = readIdentity(req.headers);
   if (!['admin', 'phleb', 'lab'].includes(who.role)) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
@@ -76,3 +77,4 @@ export async function POST(req: NextRequest, { params }: { params: { specimenId:
 
   return NextResponse.json(row);
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/specimens/[specimenId]/temperature');

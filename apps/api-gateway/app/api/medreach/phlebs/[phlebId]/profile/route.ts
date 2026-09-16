@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/phlebs/[phlebId]/profile/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -156,7 +157,7 @@ function canWriteProfile(phleb: any, who: any) {
   return false;
 }
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { phlebId: string } },
 ) {
@@ -185,7 +186,7 @@ export async function GET(
   });
 }
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { phlebId: string } },
 ) {
@@ -352,3 +353,6 @@ export async function PATCH(
     }),
   });
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/phlebs/[phlebId]/profile');
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/medreach/phlebs/[phlebId]/profile');

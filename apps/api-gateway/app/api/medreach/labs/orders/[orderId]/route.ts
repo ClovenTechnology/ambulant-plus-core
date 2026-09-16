@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/labs/orders/[orderId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -331,7 +332,7 @@ function buildEnvelope(params: {
 }
 
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { orderId: string } },
 ) {
@@ -413,7 +414,7 @@ export async function GET(
   });
 }
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { orderId: string } },
 ) {
@@ -1298,3 +1299,5 @@ export async function PATCH(
       return NextResponse.json({ ok: false, error: 'unsupported_action' }, { status: 400 });
   }
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/labs/orders/[orderId]');
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/medreach/labs/orders/[orderId]');

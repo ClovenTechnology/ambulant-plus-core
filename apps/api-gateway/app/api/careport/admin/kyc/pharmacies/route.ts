@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // FILE: apps/api-gateway/app/api/careport/admin/kyc/pharmacies/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -18,7 +19,7 @@ function json(data: any, status = 200) {
   });
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
 
   try {
@@ -76,3 +77,5 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/admin/kyc/pharmacies');

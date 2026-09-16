@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
@@ -27,7 +28,7 @@ function json(data: any, status = 200) {
   });
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -121,3 +122,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/marketplace/reservations/expire');

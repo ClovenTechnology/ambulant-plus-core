@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
 import { readIdentity } from "@/src/lib/identity";
@@ -530,7 +531,7 @@ async function loadExistingSettlementData(orgId: string, from: Date, to: Date) {
   return { batches: batches || [], lines: (batches || []).flatMap((b: any) => b.lines || []) };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -843,7 +844,7 @@ async function a5gfSendCarePortPaystackTransferForLine(db: any, line: any, orgId
   };
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -1069,3 +1070,6 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: e?.message || "careport_finance_settlement_failed" }, e?.status || 500);
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/admin/finance');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/admin/finance');

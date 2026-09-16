@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/labs/[labId]/staff/[staffId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -87,7 +88,7 @@ async function proxy(
   });
 }
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { labId: string; staffId: string } },
 ) {
@@ -105,7 +106,7 @@ export async function PATCH(
   return proxy(req, labId, staffId, 'PATCH');
 }
 
-export async function DELETE(
+async function partnerOriginalDELETE(
   req: NextRequest,
   { params }: { params: { labId: string; staffId: string } },
 ) {
@@ -122,3 +123,5 @@ export async function DELETE(
 
   return proxy(req, labId, staffId, 'DELETE');
 }
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);
+export const DELETE = withPartnerRoute(partnerOriginalDELETE);

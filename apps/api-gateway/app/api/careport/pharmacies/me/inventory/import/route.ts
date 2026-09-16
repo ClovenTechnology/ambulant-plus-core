@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
@@ -391,7 +392,7 @@ function normalizeCarePortExtendedCsvSku(row: Record<string, any>) {
   };
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -603,3 +604,5 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: error?.message || 'inventory_import_failed' }, error?.status || 500);
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/pharmacies/me/inventory/import');

@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/lab-reviews/route.ts
 import { NextRequest } from 'next/server';
 import { proxyGateway } from '../lab-networks/_proxy';
@@ -5,10 +6,12 @@ import { proxyGateway } from '../lab-networks/_proxy';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   return proxyGateway(req, '/api/medreach/lab-reviews', 'GET');
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   return proxyGateway(req, '/api/medreach/lab-reviews', 'POST');
 }
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const POST = withPartnerRoute(partnerOriginalPOST);

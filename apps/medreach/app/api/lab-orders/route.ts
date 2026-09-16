@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/lab-orders/route.ts
 import { NextRequest } from 'next/server';
 import {
@@ -86,7 +87,7 @@ function cleanLabIdFromBody(body: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
   const labId = url.searchParams.get('labId')?.trim();
 
@@ -108,7 +109,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-export async function PATCH(req: NextRequest) {
+async function partnerOriginalPATCH(req: NextRequest) {
   let body: PatchBody;
 
   try {
@@ -149,3 +150,5 @@ export async function PATCH(req: NextRequest) {
     },
   });
 }
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);

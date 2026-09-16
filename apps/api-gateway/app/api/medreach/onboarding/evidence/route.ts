@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/onboarding/evidence/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -102,7 +103,7 @@ function projectEvidence(row: any) {
   };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -149,7 +150,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -265,7 +266,7 @@ export async function POST(req: NextRequest) {
   );
 }
 
-export async function PATCH(req: NextRequest) {
+async function partnerOriginalPATCH(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -342,3 +343,6 @@ export async function PATCH(req: NextRequest) {
     data: projectEvidence(event),
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/onboarding/evidence');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/onboarding/evidence');
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/medreach/onboarding/evidence');

@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
@@ -427,17 +428,19 @@ async function verifyMarketplacePayment(
   }
 }
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   ctx: { params: { orderId: string } },
 ) {
   return verifyMarketplacePayment(req, ctx, {});
 }
 
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   ctx: { params: { orderId: string } },
 ) {
   const body = await req.json().catch(() => ({}));
   return verifyMarketplacePayment(req, ctx, body);
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/marketplace/orders/[orderId]/payment/verify');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/marketplace/orders/[orderId]/payment/verify');

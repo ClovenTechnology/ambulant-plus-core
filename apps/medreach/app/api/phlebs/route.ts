@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/phlebs/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -52,7 +53,7 @@ function normalizePhlebs(raw: any) {
   return Array.isArray(data) ? data : [];
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
   const upstreamUrl = gatewayUrl('/api/medreach/phlebs', url.search);
 
@@ -102,7 +103,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const upstreamUrl = gatewayUrl('/api/medreach/phlebs');
 
   if (!upstreamUrl) {
@@ -130,3 +131,5 @@ export async function POST(req: NextRequest) {
     status: upstream.status,
   });
 }
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const POST = withPartnerRoute(partnerOriginalPOST);

@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest } from 'next/server';
 import { addClient, sseKeys } from '@/src/lib/sse';
 import { readIdentity } from '@/src/lib/identity';
@@ -5,7 +6,7 @@ import { prisma } from '@/src/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const orderId = req.nextUrl.searchParams.get('orderId') || '';
   const drawId = req.nextUrl.searchParams.get('drawId') || '';
   const bundleId = req.nextUrl.searchParams.get('bundleId') || '';
@@ -78,3 +79,4 @@ export async function GET(req: NextRequest) {
     },
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/stream');

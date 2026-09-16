@@ -1,3 +1,4 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -68,7 +69,7 @@ async function readPayload(res: Response) {
   }
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const base = gatewayBase();
 
   if (!base) {
@@ -84,3 +85,5 @@ export async function GET(req: NextRequest) {
   const payload = await readPayload(upstream);
   return json(payload ?? { ok: upstream.ok }, upstream.status);
 }
+
+export const GET = withPartnerAdminProxy(partnerOriginalGET);

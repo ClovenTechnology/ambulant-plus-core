@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
 
@@ -40,7 +41,7 @@ async function readJson(res: Response) {
   }
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   try {
     const incoming = new URL(req.url);
     const upstream = new URL('/api/careport/pharmacies/me/inventory', apigwBase());
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   try {
     const res = await fetch(`${apigwBase()}/api/careport/pharmacies/me/inventory`, {
       method: 'POST',
@@ -65,3 +66,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: error?.message || 'careport_inventory_create_proxy_failed' }, { status: 502 });
   }
 }
+
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const POST = withPartnerRoute(partnerOriginalPOST);

@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { push, sseKeys } from '@/src/lib/sse';
@@ -5,7 +6,7 @@ import { readIdentity } from '@/src/lib/identity';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   if (who.role !== 'phleb' && who.role !== 'admin') {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
@@ -57,3 +58,4 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true });
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/location');

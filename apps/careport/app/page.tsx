@@ -37,6 +37,7 @@ const operatingPrinciples = [
 export default function CarePortHomePage() {
   return (
     <section data-a4p1="careport-shell-home" className="space-y-6">
+      <nav className="flex gap-4"><Link href="/auth/login" className="underline">Partner sign in</Link><Link href="/auth/account" className="underline">Account / sign out</Link></nav>
       <div className="overflow-hidden rounded-3xl border border-white/10 bg-white shadow-xl">
         <div className="grid gap-0 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="space-y-6 p-6 sm:p-8 lg:p-10">

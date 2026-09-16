@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 
@@ -401,7 +402,7 @@ async function activeLabs() {
   });
 }
 
-export async function GET(req: NextRequest, { params }: { params: { phlebId: string } }) {
+async function partnerOriginalGET(req: NextRequest, { params }: { params: { phlebId: string } }) {
   try {
     const who = whoFromRequest(req);
     const phlebId = cleanString(params.phlebId, 128);
@@ -436,7 +437,7 @@ export async function GET(req: NextRequest, { params }: { params: { phlebId: str
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { phlebId: string } }) {
+async function partnerOriginalPATCH(req: NextRequest, { params }: { params: { phlebId: string } }) {
   try {
     const who = whoFromRequest(req);
     const role = who.role;
@@ -589,10 +590,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { phlebId: s
   }
 }
 
-export async function POST(req: NextRequest, ctx: { params: { phlebId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, ctx: { params: { phlebId: string } }) {
   return PATCH(req, ctx);
 }
 
-export async function OPTIONS() {
+async function partnerOriginalOPTIONS() {
   return NextResponse.json({ ok: true });
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/phlebs/[phlebId]/preferences');
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/medreach/phlebs/[phlebId]/preferences');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/phlebs/[phlebId]/preferences');
+export const OPTIONS = withPartnerBoundary(partnerOriginalOPTIONS, '/api/medreach/phlebs/[phlebId]/preferences');

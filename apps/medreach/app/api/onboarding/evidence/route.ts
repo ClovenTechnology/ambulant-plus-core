@@ -1,6 +1,6 @@
 // apps/medreach/app/api/onboarding/evidence/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { gatewayErrorMessage, gatewayUrl, medreachHeaders, readJson } from '../_gateway';
+import { gatewayErrorMessage, gatewayUrl, medreachHeaders, readJson, requireEvidenceOwner } from '../_gateway';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,6 +24,8 @@ async function proxy(req: NextRequest, method: 'GET' | 'POST') {
     }
 
     const body = method === 'POST' ? await readJson(req) : undefined;
+    if (method === 'POST' && req.headers.get('origin') !== new URL(req.url).origin) return NextResponse.json({ error: 'same_origin_required' }, { status: 403 });
+    try { requireEvidenceOwner(req, String(body?.subjectId || url.searchParams.get('subjectId') || ''), String(body?.subjectType || url.searchParams.get('subjectType') || '')); } catch { return NextResponse.json({ error: 'application_submission_session_required' }, { status: 403 }); }
     const actorRef =
       typeof body?.subjectId === 'string' ? body.subjectId : 'medreach-onboarding-evidence';
 

@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/phlebs/[phlebId]/jobs/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -210,7 +211,7 @@ function projectJob(params: {
   };
 }
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { phlebId: string } },
 ) {
@@ -338,3 +339,4 @@ export async function GET(
     },
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/phlebs/[phlebId]/jobs');

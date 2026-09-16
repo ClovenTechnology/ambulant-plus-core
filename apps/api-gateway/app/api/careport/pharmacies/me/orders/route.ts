@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/pharmacies/me/orders/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -63,7 +64,7 @@ function normalizeStatusFilter(value: unknown) {
   return allowed.has(raw) ? raw : '';
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
 
@@ -150,3 +151,5 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: error?.message || 'pharmacy_orders_load_failed', orders: [] }, error?.status || 500);
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/pharmacies/me/orders');

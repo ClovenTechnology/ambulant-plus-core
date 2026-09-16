@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // FILE: apps/api-gateway/app/api/careport/orders/[orderId]/offers/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -13,7 +14,7 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest, { params }: { params: { orderId: string } }) {
+async function partnerOriginalGET(req: NextRequest, { params }: { params: { orderId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   const correlationId = correlationIdFromHeaders(req.headers);
@@ -153,3 +154,4 @@ export async function GET(req: NextRequest, { params }: { params: { orderId: str
     return NextResponse.json({ ok: false, error: e?.message || "error", correlationId }, { status });
   }
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/orders/[orderId]/offers');

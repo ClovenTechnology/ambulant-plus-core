@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { readIdentity } from "@/src/lib/identity";
 import { orgIdFromHeaders, requireRole } from "@/src/lib/careport";
@@ -28,7 +29,7 @@ async function run(req: NextRequest, params: { orderId: string }, incrementVersi
   });
 }
 
-export async function GET(req: NextRequest, { params }: { params: { orderId: string } }) {
+async function partnerOriginalGET(req: NextRequest, { params }: { params: { orderId: string } }) {
   try {
     return NextResponse.json({ ok: true, ...(await run(req, params, false)) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error: any) {
@@ -36,10 +37,13 @@ export async function GET(req: NextRequest, { params }: { params: { orderId: str
   }
 }
 
-export async function POST(req: NextRequest, { params }: { params: { orderId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { orderId: string } }) {
   try {
     return NextResponse.json({ ok: true, ...(await run(req, params, true)) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error: any) {
     return NextResponse.json({ ok: false, error: error?.message || "rx_labels_reprint_failed" }, { status: error?.status || 500 });
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/pharmacies/me/orders/[orderId]/rx-labels');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/pharmacies/me/orders/[orderId]/rx-labels');

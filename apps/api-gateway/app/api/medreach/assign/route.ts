@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/assign/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -26,7 +27,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
 
   if (who.role !== 'admin') {
@@ -218,3 +219,4 @@ export async function POST(req: NextRequest) {
     },
   });
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/assign');

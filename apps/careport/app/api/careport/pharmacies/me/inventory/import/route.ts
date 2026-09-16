@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 //apps/careport/app/api/careport/pharmacies/me/inventory/import/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
@@ -21,7 +22,7 @@ async function readJson(res: Response) {
   try { return text ? JSON.parse(text) : {}; } catch { return { ok: false, error: 'invalid_gateway_json', raw: text.slice(0, 500) }; }
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   try {
     const res = await fetch(`${apigwBase()}/api/careport/pharmacies/me/inventory/import`, {
       method: 'POST',
@@ -34,3 +35,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: error?.message || 'careport_inventory_import_proxy_failed' }, { status: 502 });
   }
 }
+export const POST = withPartnerRoute(partnerOriginalPOST);

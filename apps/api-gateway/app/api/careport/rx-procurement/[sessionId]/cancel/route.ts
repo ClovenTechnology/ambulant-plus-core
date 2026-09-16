@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { readIdentity } from "@/src/lib/identity";
 import { correlationIdFromHeaders, orgIdFromHeaders, requireRole } from "@/src/lib/careport";
@@ -6,7 +7,7 @@ import { cancelCarePortRxReservation, serializeCarePortRxReservation } from "@/s
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest, { params }: { params: { sessionId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { sessionId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   const correlationId = correlationIdFromHeaders(req.headers);
@@ -31,3 +32,5 @@ export async function POST(req: NextRequest, { params }: { params: { sessionId: 
     );
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/rx-procurement/[sessionId]/cancel');

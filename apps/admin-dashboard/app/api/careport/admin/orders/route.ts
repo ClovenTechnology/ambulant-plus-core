@@ -1,3 +1,4 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
 
@@ -27,7 +28,7 @@ function forwardHeaders(req: NextRequest) {
   return headers;
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const upstream = new URL(`${apigwBase()}/api/careport/admin/orders`);
   req.nextUrl.searchParams.forEach((value, key) => upstream.searchParams.set(key, value));
 
@@ -58,3 +59,4 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+export const GET = withPartnerAdminProxy(partnerOriginalGET);

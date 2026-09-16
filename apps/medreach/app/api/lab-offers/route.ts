@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/lab-offers/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -49,7 +50,7 @@ function copyHeaders(req: NextRequest, labId: string) {
   return headers;
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const bodyText = await req.text();
 
   let body: any;
@@ -90,3 +91,4 @@ export async function POST(req: NextRequest) {
     status: upstream.status,
   });
 }
+export const POST = withPartnerRoute(partnerOriginalPOST);

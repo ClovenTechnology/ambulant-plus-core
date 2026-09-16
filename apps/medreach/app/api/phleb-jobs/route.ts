@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/phleb-jobs/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -55,7 +56,7 @@ function normalizeJobs(raw: any) {
   return Array.isArray(data) ? data : [];
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
   const phlebId = clean(url.searchParams.get('phlebId') || url.searchParams.get('id'));
 
@@ -115,3 +116,4 @@ export async function GET(req: NextRequest) {
     upstream: json,
   });
 }
+export const GET = withPartnerRoute(partnerOriginalGET);

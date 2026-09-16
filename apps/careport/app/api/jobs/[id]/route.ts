@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/careport/app/api/jobs/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -27,14 +28,18 @@ function disabled(jobId: string) {
   );
 }
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+async function partnerOriginalGET(_req: NextRequest, { params }: { params: { id: string } }) {
   return disabled(String(params.id || '').trim());
 }
 
-export async function PATCH(_req: NextRequest, { params }: { params: { id: string } }) {
+async function partnerOriginalPATCH(_req: NextRequest, { params }: { params: { id: string } }) {
   return disabled(String(params.id || '').trim());
 }
 
-export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
+async function partnerOriginalPOST(_req: NextRequest, { params }: { params: { id: string } }) {
   return disabled(String(params.id || '').trim());
 }
+
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);
+export const POST = withPartnerRoute(partnerOriginalPOST);

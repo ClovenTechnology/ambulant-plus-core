@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/labs/[labId]/staff/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -187,7 +188,7 @@ async function emitStaffEvent(kind: string, labId: string, who: any, staff: any,
   await push(sseKeys.lab(labId), payload);
 }
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { labId: string } },
 ) {
@@ -236,7 +237,7 @@ export async function GET(
   });
 }
 
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   { params }: { params: { labId: string } },
 ) {
@@ -324,3 +325,5 @@ export async function POST(
     data: projectStaff(staff),
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/labs/[labId]/staff');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/labs/[labId]/staff');

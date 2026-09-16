@@ -1,3 +1,4 @@
+import { partnerIdentity } from './partner-access/context';
 // FILE: apps/api-gateway/src/lib/identity.ts
 import crypto from 'node:crypto';
 
@@ -253,6 +254,8 @@ function allowUnsafeHeaderIdentity() {
 export function readIdentity(
   h: Headers | Record<string, string | null | undefined>,
 ): Who {
+  const verifiedPartner = partnerIdentity.getStore();
+  if (verifiedPartner) return verifiedPartner;
   const session = readVerifiedSessionIdentity(h);
   if (session) return session;
   const bearer = readVerifiedBearerIdentity(h);
@@ -266,7 +269,7 @@ export function readIdentity(
 export function hasTrustedAuthCarrier(
   h: Headers | Record<string, string | null | undefined>,
 ): boolean {
-  return Boolean(readVerifiedSessionIdentity(h) || readVerifiedBearerIdentity(h) || readSignedInternalIdentity(h));
+  return Boolean(partnerIdentity.getStore() || readVerifiedSessionIdentity(h) || readVerifiedBearerIdentity(h) || readSignedInternalIdentity(h));
 }
 
 export function isAuthenticatedWho(who: Who): boolean {

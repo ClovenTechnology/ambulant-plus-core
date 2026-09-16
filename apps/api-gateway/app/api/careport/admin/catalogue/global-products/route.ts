@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 
@@ -42,7 +43,7 @@ function buildSearchWhere(params: {
   return where;
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const q = (url.searchParams.get('q') || '').trim();
@@ -140,3 +141,5 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/admin/catalogue/global-products');

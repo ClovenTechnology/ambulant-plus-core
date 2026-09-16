@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/orders/[orderId]/pharmacies/[pharmacyId]/accept/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -15,7 +16,7 @@ export const dynamic = "force-dynamic";
 
 type StockFlag = "AVAILABLE" | "PARTIAL" | "UNAVAILABLE";
 
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   { params }: { params: { orderId: string; pharmacyId: string } }
 ) {
@@ -207,3 +208,4 @@ export async function POST(
     return NextResponse.json({ ok: false, error: e?.message || "error", correlationId }, { status });
   }
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/orders/[orderId]/pharmacies/[pharmacyId]/accept');

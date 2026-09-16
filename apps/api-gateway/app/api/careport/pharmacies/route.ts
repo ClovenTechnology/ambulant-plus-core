@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/pharmacies/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -6,7 +7,7 @@ import { orgIdFromHeaders } from "@/src/lib/careport";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const orgId = orgIdFromHeaders(req.headers);
   const url = new URL(req.url);
 
@@ -25,3 +26,4 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({ pharmacies, orgId }, { status: 200, headers: { "access-control-allow-origin": "*" } });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/pharmacies');

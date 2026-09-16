@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/lab-networks/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -15,7 +16,7 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
   const url = new URL(req.url);
@@ -82,7 +83,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -156,3 +157,5 @@ export async function POST(req: NextRequest) {
     data: projectNetwork(network),
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/lab-networks');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/lab-networks');

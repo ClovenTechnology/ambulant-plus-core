@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/careport/app/api/shop/checkout/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
@@ -33,7 +34,7 @@ function forwardIdentityHeaders(req: NextRequest, json = false) {
 }
 
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
 
   // Force channel server-side (so client can’t spoof)
@@ -48,3 +49,4 @@ export async function POST(req: NextRequest) {
   const js = await res.json().catch(() => ({}));
   return NextResponse.json(js, { status: res.status });
 }
+export const POST = withPartnerRoute(partnerOriginalPOST);

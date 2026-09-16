@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/lab-networks/[networkId]/branches/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -30,7 +31,7 @@ const branchInclude = {
   },
 };
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { networkId: string } },
 ) {
@@ -74,7 +75,7 @@ export async function GET(
   });
 }
 
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   { params }: { params: { networkId: string } },
 ) {
@@ -157,3 +158,5 @@ export async function POST(
     data: projectBranch(branch),
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/lab-networks/[networkId]/branches');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/lab-networks/[networkId]/branches');

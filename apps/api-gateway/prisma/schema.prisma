@@ -2369,6 +2369,7 @@ model EhrIndex {
 }
 
 model PharmacyPartner {
+  orgId String @default("org-default")
   id                       String                        @id @default(cuid())
   name                     String
   contact                  String?
@@ -11038,4 +11039,38 @@ model LegalPublicationEvent {
   @@index([versionId, createdAt])
   @@index([eventType, createdAt])
   @@index([actorUserId, createdAt])
+}
+
+// Partner credentials are deliberately separate from patient and Admin accounts.
+model PartnerAccessAccount {
+  id String @id @default(cuid())
+  email String @db.VarChar(320)
+  actorType PresenceActorType
+  actorRefId String
+  userId String
+  orgId String @default("org-default")
+  status String @default("PENDING")
+  passwordHash String?
+  version Int @default(1)
+  inviteHash String? @unique
+  inviteExpiresAt DateTime?
+  lastLoginAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sessions PartnerAccessSession[]
+  @@unique([email, actorType])
+  @@unique([actorType, actorRefId])
+  @@index([status, updatedAt])
+}
+
+model PartnerAccessSession {
+  id String @id
+  accountId String
+  version Int
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  account PartnerAccessAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  @@index([accountId, revokedAt])
+  @@index([expiresAt])
 }

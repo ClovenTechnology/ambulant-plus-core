@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/lab-networks/[networkId]/branches/[labId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -28,7 +29,7 @@ const branchInclude = {
   },
 };
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { networkId: string; labId: string } },
 ) {
@@ -106,7 +107,7 @@ export async function PATCH(
   });
 }
 
-export async function DELETE(
+async function partnerOriginalDELETE(
   req: NextRequest,
   { params }: { params: { networkId: string; labId: string } },
 ) {
@@ -168,3 +169,5 @@ export async function DELETE(
     data: projectBranch(branch),
   });
 }
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/medreach/lab-networks/[networkId]/branches/[labId]');
+export const DELETE = withPartnerBoundary(partnerOriginalDELETE, '/api/medreach/lab-networks/[networkId]/branches/[labId]');

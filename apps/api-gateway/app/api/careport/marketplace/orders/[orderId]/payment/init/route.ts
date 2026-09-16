@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
@@ -58,7 +59,7 @@ function buildCallbackUrl(req: NextRequest, orderId: string, reference: string) 
   return url.toString();
 }
 
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   ctx: { params: { orderId: string } },
 ) {
@@ -280,3 +281,4 @@ export async function POST(
     );
   }
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/marketplace/orders/[orderId]/payment/init');

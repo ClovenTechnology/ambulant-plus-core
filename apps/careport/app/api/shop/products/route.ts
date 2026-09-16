@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/careport/app/api/shop/products/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
@@ -33,7 +34,7 @@ function forwardIdentityHeaders(req: NextRequest, json = false) {
 }
 
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
   // Allow passthrough filters later if you add them
   url.searchParams.set('channel', 'careport');
@@ -44,3 +45,4 @@ export async function GET(req: NextRequest) {
   const js = await res.json().catch(() => ({}));
   return NextResponse.json(js, { status: res.status });
 }
+export const GET = withPartnerRoute(partnerOriginalGET);

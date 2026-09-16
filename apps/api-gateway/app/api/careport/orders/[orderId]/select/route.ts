@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/orders/[orderId]/select/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -19,7 +20,7 @@ function asBool(v: unknown, fallback = false) {
   return typeof v === "boolean" ? v : fallback;
 }
 
-export async function POST(req: NextRequest, { params }: { params: { orderId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { orderId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   const correlationId = correlationIdFromHeaders(req.headers);
@@ -284,3 +285,4 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
     );
   }
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/orders/[orderId]/select');

@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/careport/orders/[orderId]/broadcast/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -251,7 +252,7 @@ function estimateCoverageForPharmacy(args: {
   };
 }
 
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   { params }: { params: { orderId: string } },
 ) {
@@ -465,3 +466,5 @@ export async function POST(
     );
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/orders/[orderId]/broadcast');

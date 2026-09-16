@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/riders/me/kyi/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -17,7 +18,7 @@ function resolveOrgId(req: NextRequest, who: ReturnType<typeof readIdentity>) {
   ).trim();
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   requireRole(who, ['admin', 'rider']);
 
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ ok: true, rider }, { status: 200 });
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   requireRole(who, ['admin', 'rider']);
 
@@ -89,3 +90,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true, rider: updated }, { status: 200 });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/riders/me/kyi');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/riders/me/kyi');

@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/labs/settings/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -91,7 +92,7 @@ function normalizeLab(raw: any): LabSettings | null {
   };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
   const labId = clean(url.searchParams.get('labId'));
 
@@ -133,7 +134,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-export async function PATCH(req: NextRequest) {
+async function partnerOriginalPATCH(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const labId = clean(body.labId);
 
@@ -178,3 +179,5 @@ export async function PATCH(req: NextRequest) {
     ...settings,
   });
 }
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);

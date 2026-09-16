@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/careport/location/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -6,7 +7,7 @@ import { readIdentity } from '@/src/lib/identity';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = String((who as any)?.role ?? 'anonymous');
 
@@ -38,3 +39,5 @@ export async function POST(req: NextRequest) {
   await push(orderId, { kind: 'rider_ping', riderId, lat, lng, status });
   return NextResponse.json({ ok: true }, { headers: { 'access-control-allow-origin': '*' } });
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/location');

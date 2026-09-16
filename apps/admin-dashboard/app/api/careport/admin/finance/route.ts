@@ -1,3 +1,4 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
 
@@ -33,7 +34,7 @@ function copySearchParams(req: NextRequest, upstream: URL) {
   req.nextUrl.searchParams.forEach((value, key) => upstream.searchParams.set(key, value));
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const upstream = new URL(`${apigwBase()}/api/careport/admin/finance`);
   copySearchParams(req, upstream);
 
@@ -64,7 +65,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const upstream = new URL(`${apigwBase()}/api/careport/admin/finance`);
   const body = await req.text();
 
@@ -95,3 +96,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+export const GET = withPartnerAdminProxy(partnerOriginalGET);
+export const POST = withPartnerAdminProxy(partnerOriginalPOST);

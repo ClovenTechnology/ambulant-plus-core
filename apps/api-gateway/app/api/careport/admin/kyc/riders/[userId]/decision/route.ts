@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 //apps/api-gateway/app/api/careport/admin/kyc/riders/[userId]/decision/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -18,7 +19,7 @@ function json(data: any, status = 200) {
   });
 }
 
-export async function POST(req: NextRequest, { params }: { params: { userId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { userId: string } }) {
   const who = readIdentity(req.headers);
 
   try {
@@ -64,3 +65,5 @@ export async function POST(req: NextRequest, { params }: { params: { userId: str
     return json({ ok: false, error: error?.message || 'careport_admin_rider_decision_failed' }, error?.status || 500);
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/admin/kyc/riders/[userId]/decision');

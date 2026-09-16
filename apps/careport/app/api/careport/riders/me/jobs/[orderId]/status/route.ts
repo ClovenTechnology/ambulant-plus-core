@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 //apps/careport/app/api/careport/riders/me/jobs/[orderId]/status/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
@@ -21,7 +22,7 @@ async function readJson(res: Response) {
   try { return text ? JSON.parse(text) : {}; } catch { return { ok: false, error: 'invalid_gateway_json', raw: text.slice(0, 500) }; }
 }
 
-export async function POST(req: NextRequest, { params }: { params: { orderId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { orderId: string } }) {
   const orderId = String(params.orderId || '').trim();
   if (!orderId) return NextResponse.json({ ok: false, error: 'orderId_required' }, { status: 400 });
 
@@ -37,3 +38,5 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
     return NextResponse.json({ ok: false, error: error?.message || 'careport_rider_status_proxy_failed' }, { status: 502 });
   }
 }
+
+export const POST = withPartnerRoute(partnerOriginalPOST);

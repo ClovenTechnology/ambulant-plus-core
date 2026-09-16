@@ -196,7 +196,7 @@ export default function AdminSidebar() {
     },
     {
       key: 'people', label: 'People & governance', icon: Users,
-      requires: ['hr','hr:read','hr:manage','staff.hr.read','staff.hr.manage','manageRoles','compliance','compliance:read','compliance:manage','communications.use','forms.read','opportunities.read','applications.read'],
+      requires: ['hr','hr:read','hr:manage','staff.hr.read','staff.hr.manage','manageRoles','compliance','compliance:read','compliance:manage','compliance.read','compliance.verify_partners','communications.use','forms.read','opportunities.read','applications.read'],
       items: [
         { href: '/admin/training', label: 'Training control', icon: CalendarDays, requires: ['medical','hr','manageRoles'] },
         { href: '/admin/calendar', label: 'Training calendar', icon: CalendarDays, requires: ['medical','hr','manageRoles'] },
@@ -209,6 +209,7 @@ export default function AdminSidebar() {
         { href: '/admin/forms', label: 'Enterprise forms', icon: ClipboardList, requires: ['forms.read','forms.design','forms.publish'] },
         { href: '/admin/opportunities', label: 'Opportunities', icon: Briefcase, requires: ['opportunities.read','opportunities.manage','opportunities.publish'] },
         { href: '/admin/applications', label: 'Applications', icon: ClipboardCheck, requires: ['applications.read','applications.review','applications.assign','applications.decision','applications.documents.read','applications.documents.request','applications.documents.review','applications.interviews.read','applications.interviews.schedule','applications.interviews.manage','applications.interviews.evaluate'] },
+        { href: '/admin/partner-access', label: 'Partner access', icon: Shield, requires: ['compliance.read','compliance.verify_partners'] },
         { href: '/admin/compliance/renewals', label: 'Compliance renewals', icon: Shield, requires: ['manageRoles','compliance','compliance:read','compliance:manage','compliance.read','compliance.manage'] },
         { href: '/admin/legal', label: 'Legal department', icon: Shield, requires: ['manageRoles','compliance','compliance:read','compliance:manage','compliance.read','compliance.manage'] },
         { href: '/admin/clinicians', label: 'Admin clinicians', icon: Stethoscope, requires: ['hr','manageRoles'] },

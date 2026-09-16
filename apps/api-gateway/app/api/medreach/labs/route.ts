@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/labs/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -84,7 +85,7 @@ function projectLab(lab: any) {
   };
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
 
@@ -277,7 +278,7 @@ function withAgreementSnapshot(value: unknown, agreementSnapshot: Record<string,
   return attachAgreementSnapshot({ ...base }, agreementSnapshot);
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
   const isAdmin = role === 'admin';
@@ -389,3 +390,5 @@ export async function POST(req: NextRequest) {
     { status: 201 },
   );
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/labs');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/labs');

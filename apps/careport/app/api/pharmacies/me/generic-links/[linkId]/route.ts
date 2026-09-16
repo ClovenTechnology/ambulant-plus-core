@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
 
@@ -23,7 +24,7 @@ async function readJson(res: Response) {
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { linkId: string } }) {
+async function partnerOriginalDELETE(req: NextRequest, { params }: { params: { linkId: string } }) {
   const linkId = String(params.linkId || '').trim();
   if (!linkId) return NextResponse.json({ ok: false, error: 'linkId_required' }, { status: 400 });
   try {
@@ -37,3 +38,5 @@ export async function DELETE(req: NextRequest, { params }: { params: { linkId: s
     return NextResponse.json({ ok: false, error: error?.message || 'careport_generic_link_delete_proxy_failed' }, { status: 502 });
   }
 }
+
+export const DELETE = withPartnerRoute(partnerOriginalDELETE);

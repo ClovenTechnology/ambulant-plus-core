@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { readIdentity } from "@/src/lib/identity";
 import { orgIdFromHeaders, requireRole } from "@/src/lib/careport";
@@ -9,7 +10,7 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest, { params }: { params: { orderId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { orderId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
   try {
@@ -33,3 +34,5 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
     return NextResponse.json({ ok: false, error: error?.message || "rx_fulfilment_update_failed", details: error?.details ?? null }, { status: error?.status || 500 });
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/pharmacies/me/orders/[orderId]/rx-fulfilment');

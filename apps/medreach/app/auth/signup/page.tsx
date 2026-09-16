@@ -351,7 +351,7 @@ export default function MedReachSignupPage() {
       setLabsLoading(true);
 
       try {
-        const res = await fetch('/api/labs?active=true&limit=200', { cache: 'no-store' });
+        const res = await fetch('/api/onboarding/labs', { cache: 'no-store' });
         const payload = await res.json().catch(() => null);
 
         if (active && res.ok) {

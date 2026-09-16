@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/careport/app/api/careport/pharmacies/me/offers/[offerId]/decline/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
@@ -32,7 +33,7 @@ function forwardJsonHeaders(req: NextRequest) {
   return h;
 }
 
-export async function POST(req: NextRequest, { params }: { params: { offerId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { offerId: string } }) {
   const offerId = String(params.offerId || '').trim();
   if (!offerId) {
     return NextResponse.json({ ok: false, error: 'offerId_required' }, { status: 400 });
@@ -67,3 +68,5 @@ export async function POST(req: NextRequest, { params }: { params: { offerId: st
     );
   }
 }
+
+export const POST = withPartnerRoute(partnerOriginalPOST);

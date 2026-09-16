@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
 
@@ -40,7 +41,7 @@ async function readJson(res: Response) {
   }
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   try {
     const incoming = new URL(req.url);
     const upstream = new URL('/api/careport/admin/kyc/riders', apigwBase());
@@ -51,3 +52,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: error?.message || 'careport_admin_riders_proxy_failed', riders: [] }, { status: 502 });
   }
 }
+
+export const GET = withPartnerRoute(partnerOriginalGET);

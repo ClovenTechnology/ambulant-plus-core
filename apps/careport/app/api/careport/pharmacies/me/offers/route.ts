@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/careport/app/api/careport/pharmacies/me/offers/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
@@ -31,7 +32,7 @@ function forwardHeaders(req: NextRequest) {
   return h;
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const incoming = new URL(req.url);
   const upstream = new URL('/api/careport/pharmacies/me/offers', apigwBase());
 
@@ -55,3 +56,5 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
+export const GET = withPartnerRoute(partnerOriginalGET);

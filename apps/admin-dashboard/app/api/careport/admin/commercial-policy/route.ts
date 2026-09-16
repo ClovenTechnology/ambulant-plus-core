@@ -1,3 +1,4 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
 
@@ -29,7 +30,7 @@ function forwardHeaders(req: NextRequest, hasBody = false) {
   return headers;
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const upstream = new URL(`${apigwBase()}/api/careport/admin/commercial-policy`);
 
   try {
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const upstream = new URL(`${apigwBase()}/api/careport/admin/commercial-policy`);
   const body = await req.text();
 
@@ -90,3 +91,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+export const GET = withPartnerAdminProxy(partnerOriginalGET);
+export const POST = withPartnerAdminProxy(partnerOriginalPOST);

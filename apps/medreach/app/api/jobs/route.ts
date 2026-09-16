@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/jobs/route.ts
 import { NextRequest } from 'next/server';
 import {
@@ -6,7 +7,7 @@ import {
   upstreamNotImplemented,
 } from '../_apigw';
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
   const phlebId = url.searchParams.get('phlebId')?.trim();
   const labId = url.searchParams.get('labId')?.trim();
@@ -46,3 +47,4 @@ export async function GET(req: NextRequest) {
 
   return badRequest('missing_phlebId_or_labId');
 }
+export const GET = withPartnerRoute(partnerOriginalGET);

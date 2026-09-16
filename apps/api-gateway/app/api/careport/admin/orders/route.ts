@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
@@ -17,7 +18,7 @@ function json(data: any, status = 200) {
   });
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const who = readIdentity(req.headers);
 
   try {
@@ -67,3 +68,5 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: error?.message || 'careport_admin_orders_failed', orders: [] }, error?.status || 500);
   }
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/careport/admin/orders');

@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/labs/[labId]/orders/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -366,7 +367,7 @@ async function projectLabOrder(
   };
 }
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { labId: string } },
 ) {
@@ -444,3 +445,4 @@ export async function GET(
     },
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/labs/[labId]/orders');

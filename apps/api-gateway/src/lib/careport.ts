@@ -1,3 +1,4 @@
+import { partnerIdentity } from './partner-access/context';
 // apps/api-gateway/src/lib/careport.ts
 import crypto from "node:crypto";
 import { prisma } from "@/src/lib/db";
@@ -405,6 +406,9 @@ export async function pharmacyIdForStaff(
   orgId: string,
   userId: string,
 ): Promise<string | null> {
+  const actor = partnerIdentity.getStore();
+  if (actor?.role === 'pharmacy' && actor.uid === userId && actor.orgId === orgId) return actor.actorRefId || null;
+
   const staff = await prisma.carePortPharmacyStaff.findUnique({
     where: { userId },
   });

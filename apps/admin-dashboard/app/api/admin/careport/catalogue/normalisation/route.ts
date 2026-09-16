@@ -1,3 +1,4 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -56,7 +57,7 @@ async function readJson(res: Response) {
   }
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const base = gatewayBase();
 
   if (!base) {
@@ -73,7 +74,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(await readJson(res), { status: res.status });
 }
 
-export async function PATCH(req: NextRequest) {
+async function partnerOriginalPATCH(req: NextRequest) {
   const base = gatewayBase();
 
   if (!base) {
@@ -90,3 +91,6 @@ export async function PATCH(req: NextRequest) {
 
   return NextResponse.json(await readJson(res), { status: res.status });
 }
+
+export const GET = withPartnerAdminProxy(partnerOriginalGET);
+export const PATCH = withPartnerAdminProxy(partnerOriginalPATCH);

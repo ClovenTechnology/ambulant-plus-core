@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import {
@@ -269,7 +270,7 @@ function withAgreementSnapshot(value: unknown, agreementSnapshot: Record<string,
   return attachAgreementSnapshot({ ...base }, agreementSnapshot);
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   try {
     const orgId = orgIdFromHeaders(req);
     const body = await req.json().catch(() => ({}));
@@ -430,3 +431,5 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: error?.message || 'careport_pharmacy_application_failed' }, error?.status || 500);
   }
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/partners/pharmacy/apply');

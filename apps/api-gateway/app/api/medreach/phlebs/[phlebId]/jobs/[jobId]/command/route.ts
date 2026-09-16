@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/phlebs/[phlebId]/jobs/[jobId]/command/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -291,7 +292,7 @@ async function applyCustodyPatch(params: {
   }
 }
 
-export async function POST(
+async function partnerOriginalPOST(
   req: NextRequest,
   { params }: { params: { phlebId: string; jobId: string } },
 ) {
@@ -532,3 +533,4 @@ export async function POST(
     },
   });
 }
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/phlebs/[phlebId]/jobs/[jobId]/command');

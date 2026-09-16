@@ -1,3 +1,4 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 // apps/admin-dashboard/app/api/admin/medreach/phlebs/[phlebId]/profile/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { clean, proxyJson, readJson } from '../../../_gateway';
@@ -5,7 +6,7 @@ import { clean, proxyJson, readJson } from '../../../_gateway';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { phlebId: string } },
 ) {
@@ -24,7 +25,7 @@ export async function GET(
   });
 }
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { phlebId: string } },
 ) {
@@ -45,3 +46,5 @@ export async function PATCH(
     },
   });
 }
+export const GET = withPartnerAdminProxy(partnerOriginalGET);
+export const PATCH = withPartnerAdminProxy(partnerOriginalPATCH);

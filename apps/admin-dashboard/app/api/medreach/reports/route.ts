@@ -1,3 +1,4 @@
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
 import { NextRequest, NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
@@ -9,12 +10,12 @@ async function readJsonSafe(file:string){
   try{ const txt = await fs.readFile(file,'utf-8'); return JSON.parse(txt.replace(/^\uFEFF/,'')) }catch{ return {reports:[]} }
 }
 
-export async function GET(){
+async function partnerOriginalGET(){
   const reg = await readJsonSafe(registry)
   return NextResponse.json(reg)
 }
 
-export async function POST(req: NextRequest){
+async function partnerOriginalPOST(req: NextRequest){
   const form = await req.formData()
   const file = form.get('file') as File | null
   const reportId = String(form.get('id')||'').trim()
@@ -36,3 +37,6 @@ export async function POST(req: NextRequest){
   await fs.writeFile(registry, JSON.stringify(reg,null,2), 'utf-8')
   return NextResponse.json({ok:true, saved: entry})
 }
+
+export const GET = withPartnerAdminProxy(partnerOriginalGET);
+export const POST = withPartnerAdminProxy(partnerOriginalPOST);

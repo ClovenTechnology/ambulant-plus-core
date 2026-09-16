@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
 // A5_G_C_MEDREACH_PAYSTACK_TRANSFER_ROUTE_IMPORTS
@@ -433,7 +434,7 @@ async function existingPayoutForLine(payoutDelegate: any, line: PayoutPreviewLin
     .catch(() => null);
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   try {
     const role = roleOf(req);
 
@@ -682,7 +683,7 @@ async function a5gSendMedReachPaystackTransferForPayout(row: any, orgId: string,
   };
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   try {
     const role = roleOf(req);
 
@@ -910,6 +911,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function OPTIONS() {
+async function partnerOriginalOPTIONS() {
   return NextResponse.json({ ok: true });
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/admin/finance');
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/medreach/admin/finance');
+export const OPTIONS = withPartnerBoundary(partnerOriginalOPTIONS, '/api/medreach/admin/finance');

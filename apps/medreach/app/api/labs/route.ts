@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/labs/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -52,7 +53,7 @@ function normalizeLabs(raw: any) {
   return Array.isArray(data) ? data : [];
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
   const upstreamUrl = gatewayUrl('/api/medreach/labs', url.search);
 
@@ -101,3 +102,4 @@ export async function GET(req: NextRequest) {
     upstream: json,
   });
 }
+export const GET = withPartnerRoute(partnerOriginalGET);

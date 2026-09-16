@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/phlebs/preferences/route.ts
 import { NextRequest } from 'next/server';
 import {
@@ -26,7 +27,7 @@ function cleanString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export async function GET(req: NextRequest) {
+async function partnerOriginalGET(req: NextRequest) {
   const url = new URL(req.url);
   const phlebId = cleanString(url.searchParams.get('phlebId'));
 
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
   return response;
 }
 
-export async function PATCH(req: NextRequest) {
+async function partnerOriginalPATCH(req: NextRequest) {
   let body: Partial<PhlebPreferences> & { phlebId?: string };
 
   try {
@@ -97,3 +98,5 @@ export async function PATCH(req: NextRequest) {
 
   return response;
 }
+export const GET = withPartnerRoute(partnerOriginalGET);
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);

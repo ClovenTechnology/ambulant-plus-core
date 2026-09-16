@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/labs/[labId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -165,7 +166,7 @@ async function assertLabWriteAccess(req: NextRequest, labId: string, who: any) {
   return false;
 }
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { labId: string } },
 ) {
@@ -215,7 +216,7 @@ export async function GET(
   });
 }
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { labId: string } },
 ) {
@@ -385,3 +386,6 @@ export async function PATCH(
     }),
   });
 }
+
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/labs/[labId]');
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/medreach/labs/[labId]');

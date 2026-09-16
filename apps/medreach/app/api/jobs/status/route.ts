@@ -1,3 +1,4 @@
+import { withPartnerRoute } from '@/lib/partner-route';
 // apps/medreach/app/api/jobs/status/route.ts
 import { NextRequest } from 'next/server';
 import {
@@ -71,7 +72,7 @@ function shouldUseCustody(status: string) {
   return Boolean(custodyActionForStatus(status));
 }
 
-export async function PATCH(req: NextRequest) {
+async function partnerOriginalPATCH(req: NextRequest) {
   let body: Body;
 
   try {
@@ -153,3 +154,4 @@ export async function PATCH(req: NextRequest) {
     },
   });
 }
+export const PATCH = withPartnerRoute(partnerOriginalPATCH);

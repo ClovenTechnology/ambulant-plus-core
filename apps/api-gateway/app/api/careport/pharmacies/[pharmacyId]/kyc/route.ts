@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // FILE: apps/api-gateway/app/api/careport/pharmacies/[pharmacyId]/kyc/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
@@ -8,7 +9,7 @@ import { normalizeCarePortPharmacyCompliance } from "@/src/lib/careport-pharmacy
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest, { params }: { params: { pharmacyId: string } }) {
+async function partnerOriginalPOST(req: NextRequest, { params }: { params: { pharmacyId: string } }) {
   const who = readIdentity(req.headers);
   if (who.role !== "admin" && who.role !== "pharmacy" && who.role !== "pharmacy_staff") {
     return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -50,3 +51,5 @@ export async function POST(req: NextRequest, { params }: { params: { pharmacyId:
 
   return NextResponse.json({ ok: true, pharmacy: updated }, { status: 200 });
 }
+
+export const POST = withPartnerBoundary(partnerOriginalPOST, '/api/careport/pharmacies/[pharmacyId]/kyc');

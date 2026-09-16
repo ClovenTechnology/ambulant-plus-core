@@ -1,3 +1,4 @@
+import { withPartnerBoundary } from '@/src/lib/partner-access/boundary';
 // apps/api-gateway/app/api/medreach/lab-reviews/[reviewId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
@@ -119,7 +120,7 @@ async function canModerateReview(_req: NextRequest, _review: any, who: any) {
   return ['admin', 'system'].includes(role);
 }
 
-export async function GET(
+async function partnerOriginalGET(
   req: NextRequest,
   { params }: { params: { reviewId: string } },
 ) {
@@ -154,7 +155,7 @@ export async function GET(
   });
 }
 
-export async function PATCH(
+async function partnerOriginalPATCH(
   req: NextRequest,
   { params }: { params: { reviewId: string } },
 ) {
@@ -255,3 +256,5 @@ export async function PATCH(
     data: projectReview(updated),
   });
 }
+export const GET = withPartnerBoundary(partnerOriginalGET, '/api/medreach/lab-reviews/[reviewId]');
+export const PATCH = withPartnerBoundary(partnerOriginalPATCH, '/api/medreach/lab-reviews/[reviewId]');

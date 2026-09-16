@@ -1,4 +1,5 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { withPartnerAdminProxy } from '@/lib/partner-admin-proxy';
+import { NextRequest, NextResponse } from 'next/server';
 
 function apiGatewayBase() {
   return (
@@ -43,7 +44,7 @@ async function readJson(res: Response) {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function partnerOriginalPOST(req: NextRequest) {
   const base = apiGatewayBase();
 
   if (!base) {
@@ -64,3 +65,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(await readJson(res), { status: res.status });
 }
+
+export const POST = withPartnerAdminProxy(partnerOriginalPOST);
