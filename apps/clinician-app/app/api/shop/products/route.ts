@@ -1,5 +1,7 @@
 // apps/clinician-app/app/api/shop/products/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 import { apigwBase } from '@/app/api/_apigw';
 
 export const runtime = 'nodejs';
@@ -16,6 +18,8 @@ async function safeReadJson(res: Response) {
 }
 
 export async function GET(req: NextRequest) {
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+  if (!auth.ok) return authErrorResponse(auth);
   try {
     const base = apigwBase();
     if (!base) {
@@ -32,10 +36,7 @@ export async function GET(req: NextRequest) {
 
     const upstream = `${base}/api/shop?${url.searchParams.toString()}`;
 
-    const uid = String(req.headers.get('x-uid') || req.headers.get('x-user-id') || req.headers.get('x-ambulant-user-id') || '').trim();
-    if (!uid) {
-      return NextResponse.json({ ok: false, error: 'Clinician identity required.' }, { status: 401 });
-    }
+    const uid = String(auth.clinicianId || auth.session.sub || '').trim();
 
     const res = await fetch(upstream, {
       cache: 'no-store',
@@ -43,6 +44,7 @@ export async function GET(req: NextRequest) {
         accept: 'application/json',
         'x-role': 'clinician',
         'x-uid': uid,
+        'x-ambulant-identity': createTrustedClinicianIdentityHeader(req),
       },
     });
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clientGatewaySessionCookieHeader } from "@/src/lib/client-session-token";
 
 type SessionPayload = {
   uid?: string | null;
@@ -55,11 +56,11 @@ function identityHeaders(req: NextRequest, session: SessionPayload | null) {
     "x-idempotency-key":
       req.headers.get("x-idempotency-key") ||
       `client-auth-approve:${Date.now()}`,
-    "x-ambulant-user-id": actorUserId || "dev-client-console-actor",
+    "x-ambulant-user-id": actorUserId || "",
     "x-ambulant-org-id": session?.orgId || "",
     "x-ambulant-role": session?.role || "ORG_OWNER",
     "x-ambulant-workspace": session?.workspace || "payer_ops",
-    "x-ambulant-trusted": "true",
+    cookie: clientGatewaySessionCookieHeader(),
   };
 }
 

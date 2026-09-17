@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
 
     const json = await res.json().catch(() => null);
 
-    if (!res.ok || !json?.ok || !json?.session) {
+    if (!res.ok || !json?.ok || !json?.session || !json?.sessionToken) {
       return NextResponse.json(
         {
           ok: false,
@@ -51,6 +51,14 @@ export async function POST(req: NextRequest) {
     });
 
     response.cookies.set("ambulant_client_session", JSON.stringify(json.session), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 12,
+    });
+
+    response.cookies.set("ambulant_client_session_token", String(json.sessionToken), {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",

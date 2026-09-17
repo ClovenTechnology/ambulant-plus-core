@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scryptSync, timingSafeEqual } from "crypto";
 import { prisma } from "@/src/lib/db";
+import { signClientSessionToken } from "@/src/lib/client-session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -141,12 +142,14 @@ export async function POST(req: NextRequest) {
     }
 
     const session = sessionForUser(binding);
+    const sessionToken = signClientSessionToken(session);
     const redirectTo = landingPathForWorkspace(session.workspace);
 
     return NextResponse.json({
       ok: true,
       redirectTo,
       session,
+      sessionToken,
       user: {
         id: binding.id,
         email: binding.email,

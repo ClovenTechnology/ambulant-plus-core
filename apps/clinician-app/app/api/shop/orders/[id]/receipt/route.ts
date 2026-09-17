@@ -1,11 +1,15 @@
 // apps/clinician-app/app/api/shop/orders/[id]/receipt/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 import { apigwBase } from '@/app/api/_apigw';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+  if (!auth.ok) return authErrorResponse(auth);
   try {
     const base = apigwBase();
     if (!base) {
@@ -20,7 +24,10 @@ export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
 
     const upstream = `${base}/api/shop/orders/${id}/receipt?${url.searchParams.toString()}`;
 
-    const res = await fetch(upstream, { cache: 'no-store' });
+    const res = await fetch(upstream, {
+      cache: 'no-store',
+      headers: { 'x-ambulant-identity': createTrustedClinicianIdentityHeader(req) },
+    });
     const body = await res.text();
 
     // Even if upstream returns HTML/PDF, we pass it through

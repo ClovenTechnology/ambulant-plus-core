@@ -1,5 +1,7 @@
 // apps/clinician-app/app/api/clinicians/me/admin-staff/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,23 +23,18 @@ function missingGateway() {
   );
 }
 
-// Dev stub identity – replace with real auth later
-function clinicianHeaders() {
-  return {
-    'x-uid': 'clinician-local-001',
-    'x-role': 'clinician',
-  };
-}
 
 // GET /api/clinicians/me/admin-staff  -> proxy to gateway
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
   if (!GW) return missingGateway();
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+  if (!auth.ok) return authErrorResponse(auth);
 
   try {
     const res = await fetch(`${GW}/api/clinicians/me/admin-staff`, {
       method: 'GET',
       headers: {
-        ...clinicianHeaders(),
+        'x-ambulant-identity': createTrustedClinicianIdentityHeader(req),
       },
       cache: 'no-store',
     });
@@ -66,6 +63,8 @@ export async function GET(_req: NextRequest) {
 // POST /api/clinicians/me/admin-staff  -> proxy to gateway
 export async function POST(req: NextRequest) {
   if (!GW) return missingGateway();
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+  if (!auth.ok) return authErrorResponse(auth);
 
   try {
     const body = await req.json().catch(() => ({} as any));
@@ -74,7 +73,7 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        ...clinicianHeaders(),
+        'x-ambulant-identity': createTrustedClinicianIdentityHeader(req),
       },
       body: JSON.stringify(body),
     });

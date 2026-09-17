@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { canAccessClientPath } from "@/src/lib/client-rbac";
+import { clientGatewaySessionCookieHeader } from "@/src/lib/client-session-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,7 +57,7 @@ function authHeaders(session: SessionPayload, identity: { userId: string; orgId:
     "x-ambulant-org-id": identity.orgId,
     "x-ambulant-role": String(session.role || "READ_ONLY"),
     "x-ambulant-workspace": String(session.workspace || "payer_ops"),
-    "x-ambulant-trusted": "client-app-proxy",
+    cookie: clientGatewaySessionCookieHeader(),
   };
 }
 

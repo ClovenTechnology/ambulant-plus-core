@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/src/lib/db";
-import { readIdentity } from "@/src/lib/identity";
+import { requireApiClientRole } from "@/src/lib/client-rbac";
+
+const INVITE_ROLES = ["ORG_OWNER", "ORG_ADMIN"] as const;
 
 function defaultExpiry() {
   const d = new Date();
@@ -9,9 +11,12 @@ function defaultExpiry() {
   return d;
 }
 
-export async function GET(_: NextRequest, { params }: { params: { orgId: string } }) {
+export async function GET(req: NextRequest, { params }: { params: { orgId: string } }) {
+  const auth = requireApiClientRole(req, [...INVITE_ROLES], { orgId: params.orgId });
+  if (!auth.ok) return auth.response;
+
   const items = await prisma.clientOrgInvitation.findMany({
-    where: { orgId: params.orgId },
+    where: { orgId: auth.actor.orgId! },
     orderBy: { createdAt: "desc" },
     take: 100,
   });
@@ -21,30 +26,21 @@ export async function GET(_: NextRequest, { params }: { params: { orgId: string 
 
 export async function POST(req: NextRequest, { params }: { params: { orgId: string } }) {
   try {
-    const who = readIdentity(req.headers);
-    const body = await req.json().catch(() => ({}));
+    const auth = requireApiClientRole(req, [...INVITE_ROLES], { orgId: params.orgId });
+    if (!auth.ok) return auth.response;
 
+    const body = await req.json().catch(() => ({}));
     const email = String(body.email || "").trim().toLowerCase();
-    if (!email) {
-      return NextResponse.json({ ok: false, error: "email_required" }, { status: 400 });
-    }
+    if (!email) return NextResponse.json({ ok: false, error: "email_required" }, { status: 400 });
 
     const org = await prisma.clientOrg.findUnique({
-      where: { id: params.orgId },
+      where: { id: auth.actor.orgId! },
       include: { workspaces: true },
     });
+    if (!org) return NextResponse.json({ ok: false, error: "org_not_found" }, { status: 404 });
 
-    if (!org) {
-      return NextResponse.json({ ok: false, error: "org_not_found" }, { status: 404 });
-    }
-
-    const workspace =
-      body.defaultWorkspace ||
-      org.workspaces[0]?.workspace ||
-      "PAYER_OPS";
-
+    const workspace = body.defaultWorkspace || org.workspaces[0]?.workspace || "PAYER_OPS";
     const token = crypto.randomBytes(24).toString("hex");
-
     const invite = await prisma.clientOrgInvitation.create({
       data: {
         orgId: org.id,
@@ -54,7 +50,7 @@ export async function POST(req: NextRequest, { params }: { params: { orgId: stri
         role: body.role || "READ_ONLY_ANALYST",
         scopes: Array.isArray(body.scopes) ? body.scopes : [],
         defaultWorkspace: workspace as any,
-        invitedByUserId: who.uid || null,
+        invitedByUserId: auth.actor.uid,
         expiresAt: body.expiresAt ? new Date(body.expiresAt) : defaultExpiry(),
       },
     });

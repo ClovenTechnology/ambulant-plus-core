@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clientGatewaySessionCookieHeader } from "@/src/lib/client-session-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +54,7 @@ function headersFor(session: ClientSession, req: NextRequest) {
 
   headers.set("accept", "application/json");
   headers.set("content-type", "application/json");
-  headers.set("x-ambulant-trusted", "client-app-proxy");
+  headers.set("cookie", clientGatewaySessionCookieHeader());
   headers.set("x-ambulant-user-id", session.uid);
   headers.set("x-ambulant-org-id", session.orgId);
   headers.set("x-ambulant-role", session.role || "READ_ONLY");

@@ -5,7 +5,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { prisma } from '@/src/lib/prisma';
-import { authorizeAdminFromHeaders } from '@/src/lib/auth';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
 
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
@@ -45,8 +45,8 @@ function runClamScan(filePath: string): Promise<{ exitCode: number; stdout: stri
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await authorizeAdminFromHeaders(req.headers);
-    if (!auth.ok) return NextResponse.json({ ok: false, error: 'admin_required' }, { status: 403 });
+    const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+    if (!auth.ok) return authErrorResponse(auth);
 
     const body = await req.json().catch(() => ({} as any));
     const key = body?.key ?? body?.s3Key;

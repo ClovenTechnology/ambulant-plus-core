@@ -132,10 +132,13 @@ export function middleware(req: NextRequest) {
   const session = safeParseSession(
     req.cookies.get("ambulant_client_session")?.value
   );
+  const signedSessionPresent = Boolean(
+    req.cookies.get("ambulant_client_session_token")?.value,
+  );
   const workspace = normalizeWorkspace(session?.workspace);
 
   if (isAuthRoute(pathname)) {
-    if (session?.uid && workspace) {
+    if (session?.uid && workspace && signedSessionPresent) {
       const url = req.nextUrl.clone();
       url.pathname = defaultLandingForWorkspace(workspace);
       return NextResponse.redirect(url);
@@ -143,7 +146,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  if (!session?.uid || !workspace) {
+  if (!session?.uid || !workspace || !signedSessionPresent) {
     const url = req.nextUrl.clone();
     url.pathname = "/auth/login";
     return NextResponse.redirect(url);

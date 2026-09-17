@@ -1,5 +1,7 @@
 // apps/clinician-app/app/api/clinicians/me/admin-staff/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,20 +23,15 @@ function missingGateway() {
   );
 }
 
-// Dev stub identity – replace with real auth later
-function clinicianHeaders() {
-  return {
-    'x-uid': 'clinician-local-001',
-    'x-role': 'clinician',
-  };
-}
 
 // DELETE /api/clinicians/me/admin-staff/[id] -> gateway proxy
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: { id: string } },
 ) {
   if (!GW) return missingGateway();
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+  if (!auth.ok) return authErrorResponse(auth);
 
   const id = ctx.params.id;
 
@@ -44,7 +41,7 @@ export async function DELETE(
       {
         method: 'DELETE',
         headers: {
-          ...clinicianHeaders(),
+          'x-ambulant-identity': createTrustedClinicianIdentityHeader(req),
         },
       },
     );

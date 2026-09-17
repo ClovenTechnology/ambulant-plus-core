@@ -1,11 +1,14 @@
 // apps/patient-app/app/api/shop/orders/[id]/receipt/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { resolvePatientAppSession } from '@/app/api/_session';
 import { apigwBase } from '@/app/api/_apigw';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
+  const session = resolvePatientAppSession();
+  if (!session || session.role !== 'patient') return NextResponse.json({ ok: false, error: 'patient_identity_required' }, { status: 401 });
   try {
     const base = apigwBase();
     if (!base) {
@@ -16,9 +19,7 @@ export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
     const url = new URL(req.url);
 
     // Optional auth: allow uid query/header if your upstream requires it
-    const uid =
-      String(url.searchParams.get('uid') || '').trim() ||
-      String(req.headers.get('x-uid') || '').trim();
+    const uid = session.userId;
 
     // Do NOT forward uid as query param upstream
     url.searchParams.delete('uid');
@@ -29,6 +30,7 @@ export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
       headers: {
         ...(uid ? { 'x-uid': uid } : {}),
         'x-role': 'patient',
+        cookie: req.headers.get('cookie') || '',
       },
     });
 

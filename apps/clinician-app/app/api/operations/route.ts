@@ -6,7 +6,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { prisma } from '../../../../api-gateway/src/lib/db';
 import { writeEhrIndex } from '../../../../api-gateway/src/lib/chain';
-import { readIdentity } from '../../../../api-gateway/src/lib/identity';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -105,7 +105,9 @@ function fileExtension(fileName: string): string {
   return fileName.slice(lastDot);
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+  if (!auth.ok) return authErrorResponse(auth);
   try {
     const items = await prisma.operation.findMany({
       orderBy: { createdAt: 'desc' },
@@ -146,8 +148,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const identity = readIdentity(req.headers);
-
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+  if (!auth.ok) return authErrorResponse(auth);
+  const identity = { uid: auth.clinicianId || auth.session.sub, role: auth.role };
   try {
     const form = await req.formData();
 
@@ -209,9 +212,7 @@ export async function POST(req: NextRequest) {
         source:
           identity.role === 'clinician'
             ? 'clinician'
-            : identity.role === 'patient'
-              ? 'patient'
-              : 'unknown',
+            : 'unknown',
       },
     });
 

@@ -6,6 +6,7 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { prisma } from '@/src/lib/db';
+import { resolvePatientAppSession } from '@/app/api/_session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,31 +16,11 @@ const REGION = process.env.AWS_REGION || 'eu-west-1';
 const PUBLIC_URL = process.env.PUBLIC_URL || '';
 const PRESIGN_EXPIRES = Number(process.env.PRESIGN_EXPIRES || 900);
 
-type RequestIdentity = {
-  uid: string | null;
-  userId: string | null;
-  orgId: string | null;
-  role: string | null;
-};
 
 function json(data: any, status = 200) {
   return NextResponse.json(data, { status });
 }
 
-function readIdentity(headers: Headers): RequestIdentity {
-  const uid =
-    headers.get('x-ambulant-user-id') ||
-    headers.get('x-user-id') ||
-    headers.get('x-uid') ||
-    null;
-
-  return {
-    uid,
-    userId: uid,
-    orgId: headers.get('x-ambulant-org-id') || headers.get('x-org-id') || null,
-    role: headers.get('x-ambulant-role') || headers.get('x-role') || null,
-  };
-}
 
 function cleanStr(value: unknown): string {
   return String(value ?? '').trim();
@@ -123,6 +104,8 @@ function operationDelegate() {
 }
 
 export async function GET() {
+  const session = resolvePatientAppSession();
+  if (!session || session.role !== 'patient') return json({ ok: false, error: 'patient_identity_required', data: [] }, 401);
   try {
     const operation = operationDelegate();
 
@@ -138,7 +121,7 @@ export async function GET() {
     }
 
     const items = await operation.findMany({
-      where: { source: 'patient' },
+      where: { source: 'patient', recordedBy: session.userId },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
@@ -159,8 +142,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const identity = readIdentity(req.headers);
-
+  const session = resolvePatientAppSession();
+  if (!session || session.role !== 'patient') return json({ ok: false, error: 'patient_identity_required' }, 401);
   try {
     const operation = operationDelegate();
 
@@ -237,7 +220,7 @@ export async function POST(req: NextRequest) {
       notes,
       fileKey,
       fileName,
-      recordedBy: identity.uid ?? 'patient',
+      recordedBy: session.userId,
       source: 'patient',
     };
 

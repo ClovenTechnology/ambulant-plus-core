@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runCoveragePreflight } from "@ambulant/client-core/src/preflight";
+import { ALL_API_CLIENT_ROLES, requireApiClientRole } from "@/src/lib/client-rbac";
 
 type Body = {
   orgId?: string;
@@ -36,6 +37,8 @@ function isValidBody(body: unknown): body is Body {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = requireApiClientRole(req, ALL_API_CLIENT_ROLES, { allowReadOnly: true });
+    if (!auth.ok) return auth.response;
     const body = (await req.json()) as unknown;
 
     if (!isValidBody(body)) {
@@ -48,7 +51,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await runCoveragePreflight(body);
+    const requested = body as Body;
+    if (requested.orgId && requested.orgId !== auth.actor.orgId) {
+      return NextResponse.json({ ok: false, error: "cross_org_access_denied" }, { status: 403 });
+    }
+    const result = await runCoveragePreflight({ ...requested, orgId: auth.actor.orgId! });
 
     return NextResponse.json(result, { status: 200 });
   } catch (error) {

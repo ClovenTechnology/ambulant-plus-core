@@ -8,6 +8,21 @@ const CLINICIAN_SESSION_COOKIE =
 const SESSION_ISSUER = 'ambulant-clinician-app';
 const SESSION_AUDIENCE = 'ambulant-clinician-app';
 
+const API_IDENTITY_HEADERS = [
+  'x-uid',
+  'x-user-id',
+  'x-ambulant-user-id',
+  'x-role',
+  'x-user-role',
+  'x-ambulant-role',
+  'x-org-id',
+  'x-org',
+  'x-ambulant-org-id',
+  'x-clinician-id',
+  'x-clinician-origin',
+  'x-ambulant-trusted',
+];
+
 const PUBLIC_PATHS = new Set([
   '/favicon.ico',
   '/favicon.svg',
@@ -268,31 +283,25 @@ function canUseFullWorkspace(
   );
 }
 
-function corsResponse(request: NextRequest) {
-  const allowOrigin =
-    process.env.CORS_ALLOW_ORIGIN ?? '*';
-  const response = NextResponse.next();
+function corsResponse(
+  request: NextRequest,
+  requestHeaders?: Headers,
+) {
+  const allowOrigin = process.env.CORS_ALLOW_ORIGIN ?? '*';
+  const response = request.method === 'OPTIONS'
+    ? new NextResponse(null, { status: 204 })
+    : NextResponse.next(
+        requestHeaders
+          ? { request: { headers: requestHeaders } }
+          : undefined,
+      );
 
-  response.headers.set(
-    'Access-Control-Allow-Origin',
-    allowOrigin,
-  );
-  response.headers.set(
-    'Access-Control-Allow-Methods',
-    'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-  );
+  response.headers.set('Access-Control-Allow-Origin', allowOrigin);
+  response.headers.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   response.headers.set(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Request-Id, X-Correlation-Id, X-Idempotency-Key',
+    'Content-Type, Authorization, X-Request-Id, X-Correlation-Id, X-Idempotency-Key, X-Ambulant-Identity',
   );
-
-  if (request.method === 'OPTIONS') {
-    return new NextResponse(null, {
-      status: 204,
-      headers: response.headers,
-    });
-  }
-
   return response;
 }
 
@@ -302,7 +311,33 @@ export async function middleware(
   const { pathname, search } = request.nextUrl;
 
   if (pathname.startsWith('/api/')) {
-    return corsResponse(request);
+    if (request.method === 'OPTIONS') return corsResponse(request);
+
+    const headers = new Headers(request.headers);
+    for (const name of API_IDENTITY_HEADERS) headers.delete(name);
+
+    const session = await verifyClinicianSession(request);
+    if (session) {
+      const uid = String(session.clinicianId || session.sub || '').trim();
+      if (uid) {
+        headers.set('x-uid', uid);
+        headers.set('x-ambulant-user-id', uid);
+        headers.set('x-clinician-id', uid);
+      }
+      if (session.sub) headers.set('x-user-id', String(session.sub));
+      if (session.role) {
+        headers.set('x-role', String(session.role));
+        headers.set('x-ambulant-role', String(session.role));
+      }
+      if (session.orgId) {
+        headers.set('x-org-id', String(session.orgId));
+        headers.set('x-ambulant-org-id', String(session.orgId));
+      }
+      headers.set('x-ambulant-trusted', 'verified-clinician-session');
+      headers.set('x-clinician-origin', 'verified-clinician-session');
+    }
+
+    return corsResponse(request, headers);
   }
 
   if (isPublicPath(pathname)) {

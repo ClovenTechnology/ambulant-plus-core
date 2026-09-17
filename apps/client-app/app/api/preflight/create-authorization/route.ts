@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clientGatewaySessionCookieHeader } from "@/src/lib/client-session-token";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -113,6 +114,7 @@ export async function POST(req: NextRequest) {
           .replace(/\s+/g, "-"),
         "x-ambulant-user-id": actorUserId,
         "x-ambulant-org-id": orgId,
+        cookie: clientGatewaySessionCookieHeader(),
       },
       body: JSON.stringify({
         orgId,

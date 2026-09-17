@@ -1,6 +1,7 @@
 // apps/clinician-app/app/api/settings/schedule/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,7 @@ async function proxy(req: NextRequest, method: 'GET' | 'PUT') {
       'x-uid': uid,
       'x-clinician-id': auth.clinicianId,
       'x-role': auth.role,
+      'x-ambulant-identity': createTrustedClinicianIdentityHeader(req),
     },
   };
 

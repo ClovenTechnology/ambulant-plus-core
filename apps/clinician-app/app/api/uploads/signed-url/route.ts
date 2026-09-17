@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { authorizeAdminFromHeaders } from '@/src/lib/auth';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
 
 
 export const dynamic = 'force-dynamic';
@@ -19,10 +19,8 @@ const s3 = new S3Client({
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await authorizeAdminFromHeaders(req.headers);
-    if (!auth.ok) {
-      return NextResponse.json({ ok: false, error: 'admin_required' }, { status: 403 });
-    }
+    const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+    if (!auth.ok) return authErrorResponse(auth);
 
     const url = new URL(req.url);
     const key = url.searchParams.get('key');

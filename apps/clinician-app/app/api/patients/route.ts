@@ -4,6 +4,7 @@ import {
   authErrorResponse,
   requireClinicianAuth,
 } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -54,6 +55,7 @@ export async function GET(req: NextRequest) {
       headers: {
         accept: 'application/json',
         'x-role': auth.role,
+      'x-ambulant-identity': createTrustedClinicianIdentityHeader(req),
         'x-uid': auth.clinicianId || '',
         'x-clinician-id': auth.clinicianId || '',
       },

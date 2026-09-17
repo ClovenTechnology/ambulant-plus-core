@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
+import { readIdentity, requireTrustedAuthenticatedIdentity } from "@/src/lib/identity";
 
-function who(h: Headers) {
-  return { uid: h.get("x-uid"), role: h.get("x-role") };
-}
 
 export async function POST(req: NextRequest) {
-  const { uid, role } = who(req.headers);
-  if (!uid || !role) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const identity = readIdentity(req.headers);
+  try { requireTrustedAuthenticatedIdentity(identity); }
+  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }
+  const uid = identity.uid!;
+  const role = identity.role;
 
   const b = await req.json();
   const deviceId = String(b.device_id || "");
@@ -16,7 +17,7 @@ export async function POST(req: NextRequest) {
   const row = await prisma.device.findUnique({ where: { deviceId } });
   if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  if (role === "patient" && row.patientId !== uid) {
+  if (role === "patient" && ![identity.actorRefId, uid].filter(Boolean).includes(row.patientId)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

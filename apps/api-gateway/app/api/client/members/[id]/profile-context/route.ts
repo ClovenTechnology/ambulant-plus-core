@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
+import { requireApiClientRole } from "@/src/lib/client-rbac";
 
 const prisma = new PrismaClient();
 
@@ -580,7 +581,14 @@ type Params = {
 export async function GET(req: NextRequest, { params }: Params) {
   try {
     const { searchParams } = new URL(req.url);
-    const orgId = searchParams.get("orgId") ?? "org-default";
+    const requestedOrgId = searchParams.get("orgId");
+    const auth = requireApiClientRole(
+      req,
+      ["ORG_OWNER", "ORG_ADMIN", "CLAIMS_MANAGER", "CARE_COORDINATOR", "DEVICE_REVIEWER", "READ_ONLY"],
+      { orgId: requestedOrgId, allowReadOnly: true },
+    );
+    if (!auth.ok) return auth.response;
+    const orgId = requestedOrgId || auth.actor.orgId!;
     const days = parseIntSafe(searchParams.get("days"), 30);
 
     const member = await prisma.clientMember.findFirst({

@@ -1,5 +1,6 @@
 ﻿// apps/patient-app/app/api/orders/route.ts
 import { NextResponse } from 'next/server';
+import { resolvePatientAppSession } from '@/app/api/_session';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -23,6 +24,10 @@ async function readBody(req: Request) {
 }
 
 async function proxy(req: Request, path: string, init?: RequestInit) {
+  const session = resolvePatientAppSession();
+  if (!session || session.role !== 'patient') {
+    return NextResponse.json({ ok: false, error: 'patient_identity_required' }, { status: 401 });
+  }
   const gateway = getGatewayBase();
 
   if (!gateway) {
@@ -35,6 +40,8 @@ async function proxy(req: Request, path: string, init?: RequestInit) {
     headers: {
       'content-type': 'application/json',
       'x-role': 'patient',
+      'x-uid': session.userId,
+      cookie: req.headers.get('cookie') || '',
       ...(init?.headers || {}),
     },
   });

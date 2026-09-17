@@ -8,6 +8,8 @@ export type PatientAppSession = {
   orgId: string | null;
   actorRefId: string | null;
   sid: string | null;
+  email: string | null;
+  name: string | null;
 };
 
 const COOKIE_CANDIDATES = [
@@ -39,6 +41,9 @@ function verifyJwtHs256(token: string, secret: string): any | null {
     if (parts.length !== 3) return null;
 
     const [h, p, sig] = parts;
+    const header = safeJsonParse(base64urlToBuffer(h));
+    if (!header || String(header.alg || "").toUpperCase() !== "HS256") return null;
+
     const data = `${h}.${p}`;
 
     const expected = crypto.createHmac("sha256", secret).update(data).digest();
@@ -82,14 +87,21 @@ export function resolvePatientAppSession(): PatientAppSession | null {
   const userId = String(payload.sub || payload.userId || payload.uid || "").trim();
   if (!userId) return null;
 
-  const actorType = payload.actorType ? String(payload.actorType) : null;
-  const role =
-    String(actorType || payload.role || "")
-      .trim()
-      .toLowerCase() === "patient" ||
-    String(actorType || "").trim().toUpperCase() === "PATIENT"
-      ? "patient"
-      : String(payload.role || "patient").trim().toLowerCase();
+  const actorType = payload.actorType
+    ? String(payload.actorType)
+    : payload.actor_type
+      ? String(payload.actor_type)
+      : null;
+
+  const rawRole = String(actorType || payload.role || "")
+    .trim()
+    .toLowerCase();
+
+  if (!["patient", "patient_user", "pat"].includes(rawRole)) {
+    return null;
+  }
+
+  const role = "patient";
 
   return {
     userId,
@@ -98,6 +110,8 @@ export function resolvePatientAppSession(): PatientAppSession | null {
     orgId: payload.orgId ? String(payload.orgId) : null,
     actorRefId: payload.actorRefId ? String(payload.actorRefId) : null,
     sid: payload.sid ? String(payload.sid) : null,
+    email: payload.email ? String(payload.email) : null,
+    name: payload.name ? String(payload.name) : null,
   };
 }
 
@@ -105,18 +119,18 @@ export function applyPatientSessionHeaders(headers: Headers, session: PatientApp
   if (!session) return headers;
 
   if (session.userId) {
-    if (!headers.get("x-uid")) headers.set("x-uid", session.userId);
-    if (!headers.get("x-user-id")) headers.set("x-user-id", session.userId);
-    if (!headers.get("x-ambulant-user-id")) headers.set("x-ambulant-user-id", session.userId);
+    headers.set("x-uid", session.userId);
+    headers.set("x-user-id", session.userId);
+    headers.set("x-ambulant-user-id", session.userId);
   }
 
   if (session.orgId) {
-    if (!headers.get("x-org-id")) headers.set("x-org-id", session.orgId);
-    if (!headers.get("x-ambulant-org-id")) headers.set("x-ambulant-org-id", session.orgId);
+    headers.set("x-org-id", session.orgId);
+    headers.set("x-ambulant-org-id", session.orgId);
   }
 
-  if (!headers.get("x-role")) headers.set("x-role", session.role || "patient");
-  if (!headers.get("x-ambulant-role")) headers.set("x-ambulant-role", session.role || "patient");
+  headers.set("x-role", session.role || "patient");
+  headers.set("x-ambulant-role", session.role || "patient");
 
   return headers;
 }

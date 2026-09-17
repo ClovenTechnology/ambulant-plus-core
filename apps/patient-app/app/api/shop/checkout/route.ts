@@ -1,5 +1,6 @@
 // apps/patient-app/app/api/shop/checkout/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { resolvePatientAppSession } from '@/app/api/_session';
 import { apigwBase } from '@/app/api/_apigw';
 import crypto from 'crypto';
 import { prisma } from '@/lib/prisma';
@@ -12,12 +13,6 @@ export const dynamic = 'force-dynamic';
 /* ==============================
    UID
 ============================== */
-function getUidFromReq(req: NextRequest) {
-  const h = req.headers.get('x-uid');
-  if (h) return String(h).trim();
-  if (process.env.NODE_ENV !== 'production') return 'demo-patient';
-  return '';
-}
 
 /* ==============================
    Promo Lucky Draw (IoMT)
@@ -142,8 +137,10 @@ function clampInt(n: any, def = 0) {
    POST
 ============================== */
 export async function POST(req: NextRequest) {
+  const session = resolvePatientAppSession();
+  if (!session || session.role !== 'patient') return NextResponse.json({ ok: false, error: 'patient_identity_required' }, { status: 401 });
   const body = await req.json().catch(() => ({} as any));
-  const uid = getUidFromReq(req);
+  const uid = session.userId;
 
   const payMethod = String(body?.paymentMethod || body?.payMethod || '').toLowerCase();
   const useWallet = payMethod === 'wallet' || Boolean(body?.useWallet);
@@ -177,6 +174,7 @@ export async function POST(req: NextRequest) {
       headers: {
         accept: 'application/json',
         'x-uid': uid,
+        cookie: req.headers.get('cookie') || '',
       },
     });
     const catalog = await catalogResponse.json().catch(() => null);
@@ -356,6 +354,7 @@ export async function POST(req: NextRequest) {
     headers: {
       'content-type': 'application/json',
       ...(uid ? { 'x-uid': uid } : {}),
+      cookie: req.headers.get('cookie') || '',
     },
     body: JSON.stringify(payload),
   });

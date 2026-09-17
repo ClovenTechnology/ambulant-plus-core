@@ -1,5 +1,7 @@
 // apps/clinician-app/app/api/shop/orders/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 import { apigwBase } from '@/app/api/_apigw';
 
 export const runtime = 'nodejs';
@@ -16,6 +18,8 @@ async function safeReadJson(res: Response) {
 }
 
 export async function GET(req: NextRequest) {
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+  if (!auth.ok) return authErrorResponse(auth);
   try {
     const base = apigwBase();
     if (!base) {
@@ -27,10 +31,9 @@ export async function GET(req: NextRequest) {
 
     const url = new URL(req.url);
 
-    const uid = String(url.searchParams.get('uid') || '').trim();
-    if (!uid) return NextResponse.json({ ok: false, error: 'Missing uid' }, { status: 400 });
+    const uid = String(auth.clinicianId || auth.session.sub || '').trim();
 
-    // Do NOT forward uid as a query param upstream (we scope via header)
+    // Caller-supplied uid is never authoritative.
     url.searchParams.delete('uid');
 
     // Normalize channel
@@ -44,6 +47,7 @@ export async function GET(req: NextRequest) {
         accept: 'application/json',
         'x-uid': uid,
         'x-role': 'clinician',
+        'x-ambulant-identity': createTrustedClinicianIdentityHeader(req),
       },
     });
 

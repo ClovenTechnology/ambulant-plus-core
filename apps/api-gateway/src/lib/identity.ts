@@ -178,7 +178,14 @@ function whoFromPayload(
   const uid = stringOrNull(payload.sub || payload.uid || payload.userId || payload.user_id);
   const role = roleFromSessionPayload(payload);
   const orgId = stringOrNull(payload.orgId || payload.org_id || payload.tenantId || payload.tenant_id);
-  const actorRefId = stringOrNull(payload.actorRefId || payload.actor_ref_id || payload.patientId || payload.patient_id);
+  const actorRefId = stringOrNull(
+    payload.actorRefId ||
+      payload.actor_ref_id ||
+      payload.clinicianId ||
+      payload.clinician_id ||
+      payload.patientId ||
+      payload.patient_id,
+  );
   const sid = stringOrNull(payload.sid || payload.sessionId || payload.session_id);
   if (!uid || role === 'anonymous') return null;
   return { role, uid, orgId, actorRefId, sid, source, trusted: true };
@@ -244,10 +251,14 @@ function unsafeHeaderIdentity(
 }
 
 function allowUnsafeHeaderIdentity() {
-  return (
-    process.env.NODE_ENV !== 'production' ||
+  const explicitlyEnabled =
     process.env.ALLOW_UNSAFE_IDENTITY_HEADERS === '1' ||
-    process.env.ALLOW_UNSAFE_IDENTITY_HEADERS === 'true'
+    process.env.ALLOW_UNSAFE_IDENTITY_HEADERS === 'true';
+
+  return (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.VERCEL_ENV !== 'production' &&
+    explicitlyEnabled
   );
 }
 
@@ -286,4 +297,8 @@ export function requireTrustedIdentityInProduction(
 
 export function requireAuthenticatedIdentity(who: Who) {
   if (!isAuthenticatedWho(who)) throw new Error('Unauthorized');
+}
+
+export function requireTrustedAuthenticatedIdentity(who: Who) {
+  if (!who.trusted || !isAuthenticatedWho(who)) throw new Error('Unauthorized');
 }

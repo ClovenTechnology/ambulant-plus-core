@@ -9,12 +9,26 @@ export async function GET(req: Request) {
     path: "/",
     maxAge: 0,
   });
+  res.cookies.set("ambulant_client_session_token", "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
   return res;
 }
 
 export async function POST() {
   const res = NextResponse.json({ ok: true, redirectTo: "/auth/login" });
   res.cookies.set("ambulant_client_session", "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
+  res.cookies.set("ambulant_client_session_token", "", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

@@ -24,6 +24,24 @@ const PUBLIC_PREFIXES = [
   '/icons',
 ];
 
+const IDENTITY_HEADERS = [
+  'x-uid',
+  'x-user-id',
+  'x-ambulant-user-id',
+  'x-role',
+  'x-user-role',
+  'x-ambulant-role',
+  'x-org-id',
+  'x-org',
+  'x-ambulant-org-id',
+  'x-actor-ref-id',
+  'x-patient-id',
+  'x-current-patient-id',
+  'x-patient-origin',
+  'x-ambulant-trusted',
+  'x-ambulant-identity',
+];
+
 function isStaticAsset(pathname: string) {
   return /\.(?:png|jpg|jpeg|gif|webp|svg|ico|css|js|map|txt|xml|json|webmanifest|woff|woff2|ttf|otf)$/i.test(
     pathname,
@@ -39,72 +57,182 @@ function isPublicPath(pathname: string) {
   );
 }
 
-function base64UrlDecode(value: string) {
+function decodeBase64Url(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized.padEnd(
+    normalized.length + ((4 - (normalized.length % 4)) % 4),
+    '=',
+  );
+
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return bytes;
+}
+
+function decodeJson(value: string) {
   try {
-    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
-    return atob(padded);
+    return JSON.parse(
+      new TextDecoder().decode(decodeBase64Url(value)),
+    ) as Record<string, any>;
   } catch {
-    return '';
+    return null;
   }
 }
 
-function sessionLooksActive(token: string) {
-  const raw = String(token || '').trim();
-  if (!raw) return false;
+async function verifyPatientSession(request: NextRequest) {
+  const secret = String(process.env.AUTH_SESSION_SECRET || '').trim();
+  if (!secret) return null;
 
-  const parts = raw.split('.');
-
-  // Patient app login issues a signed JWT. Do not accept opaque fallback cookies.
-  if (parts.length !== 3) return false;
+  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  if (!token) return null;
 
   try {
-    const payload = JSON.parse(base64UrlDecode(parts[1])) as {
-      exp?: unknown;
-      sub?: unknown;
-      uid?: unknown;
-      actorType?: unknown;
-    };
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
 
-    if (!payload.sub && !payload.uid) return false;
+    const [encodedHeader, encodedPayload, signature] = parts;
+    const header = decodeJson(encodedHeader);
+    const payload = decodeJson(encodedPayload);
 
-    if (typeof payload.actorType === 'string' && payload.actorType !== 'PATIENT') {
-      return false;
+    if (
+      !header ||
+      !payload ||
+      String(header.alg || '').toUpperCase() !== 'HS256'
+    ) {
+      return null;
     }
 
-    if (typeof payload.exp !== 'number') return false;
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify'],
+    );
 
-    return payload.exp > Math.floor(Date.now() / 1000);
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      key,
+      decodeBase64Url(signature),
+      new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
+    );
+
+    if (!valid) return null;
+
+    const now = Math.floor(Date.now() / 1000);
+
+    if (typeof payload.exp !== 'number' || payload.exp <= now) {
+      return null;
+    }
+
+    if (typeof payload.nbf === 'number' && payload.nbf > now + 30) {
+      return null;
+    }
+
+    if (typeof payload.iat === 'number' && payload.iat > now + 60) {
+      return null;
+    }
+
+    const actorType = String(
+      payload.actorType || payload.actor_type || payload.role || '',
+    )
+      .trim()
+      .toLowerCase();
+
+    if (!["patient", "patient_user", "pat"].includes(actorType)) {
+      return null;
+    }
+
+    const uid = String(
+      payload.sub || payload.uid || payload.userId || '',
+    ).trim();
+
+    if (!uid) return null;
+
+    return {
+      uid,
+      orgId:
+        String(payload.orgId || payload.org_id || '').trim() || null,
+      patientId:
+        String(
+          payload.actorRefId ||
+            payload.actor_ref_id ||
+            payload.patientId ||
+            '',
+        ).trim() || null,
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
-function hasActivePatientSession(req: NextRequest) {
-  const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
-  return Boolean(token && sessionLooksActive(token));
+function applyVerifiedPatientIdentity(
+  headers: Headers,
+  session: {
+    uid: string;
+    orgId: string | null;
+    patientId: string | null;
+  },
+) {
+  headers.set('x-uid', session.uid);
+  headers.set('x-user-id', session.uid);
+  headers.set('x-ambulant-user-id', session.uid);
+  headers.set('x-role', 'patient');
+  headers.set('x-ambulant-role', 'patient');
+  headers.set('x-ambulant-trusted', 'verified-patient-session');
+  headers.set('x-patient-origin', 'verified-patient-session');
+
+  if (session.orgId) {
+    headers.set('x-org-id', session.orgId);
+    headers.set('x-ambulant-org-id', session.orgId);
+  }
+
+  if (session.patientId) {
+    headers.set('x-actor-ref-id', session.patientId);
+    headers.set('x-patient-id', session.patientId);
+    headers.set('x-current-patient-id', session.patientId);
+  }
 }
 
-export function middleware(req: NextRequest) {
-  const { pathname, search } = req.nextUrl;
+export async function middleware(request: NextRequest) {
+  const { pathname, search } = request.nextUrl;
+  const headers = new Headers(request.headers);
 
+  // Caller-supplied identity is never authoritative inside patient-app.
+  for (const name of IDENTITY_HEADERS) headers.delete(name);
+
+  const session = await verifyPatientSession(request);
+
+  if (session) {
+    applyVerifiedPatientIdentity(headers, session);
+  }
+
+  // Preserve the established public-route contract, but forward only the
+  // sanitised/reconstructed request headers.
   if (isPublicPath(pathname)) {
-    return NextResponse.next();
+    return NextResponse.next({ request: { headers } });
   }
 
-  if (hasActivePatientSession(req)) {
-    return NextResponse.next();
+  // Preserve the existing protected-app gate, now using cryptographic
+  // session verification rather than payload-only JWT inspection.
+  if (session) {
+    return NextResponse.next({ request: { headers } });
   }
 
-  const loginUrl = req.nextUrl.clone();
+  const loginUrl = request.nextUrl.clone();
   loginUrl.pathname = '/auth/login';
   loginUrl.search = '';
   loginUrl.searchParams.set('next', `${pathname}${search}` || '/');
 
-  const res = NextResponse.redirect(loginUrl);
-  res.headers.set('cache-control', 'no-store, max-age=0');
+  const response = NextResponse.redirect(loginUrl);
+  response.headers.set('cache-control', 'no-store, max-age=0');
 
-  return res;
+  return response;
 }
 
 export const config = {

@@ -1,5 +1,6 @@
 // apps/patient-app/app/api/shop/orders/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { resolvePatientAppSession } from '@/app/api/_session';
 import { apigwBase } from '@/app/api/_apigw';
 
 export const runtime = 'nodejs';
@@ -18,6 +19,8 @@ async function safeReadJson(res: Response) {
 }
 
 export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
+  const session = resolvePatientAppSession();
+  if (!session || session.role !== 'patient') return NextResponse.json({ ok: false, error: 'patient_identity_required' }, { status: 401 });
   try {
     const base = apigwBase();
     if (!base) {
@@ -27,9 +30,7 @@ export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
     const url = new URL(req.url);
 
     // Prefer uid query param (demo-friendly); fallback to header for internal calls
-    const uid =
-      String(url.searchParams.get('uid') || '').trim() ||
-      String(req.headers.get('x-uid') || '').trim();
+    const uid = session.userId;
 
     if (!uid) return NextResponse.json({ ok: false, error: 'Missing uid' }, { status: 400 });
 
@@ -45,6 +46,7 @@ export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
       headers: {
         accept: 'application/json',
         'x-role': 'patient',
+        cookie: req.headers.get('cookie') || '',
         'x-uid': uid,
       },
     });

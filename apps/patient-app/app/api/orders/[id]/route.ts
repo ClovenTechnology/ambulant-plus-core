@@ -1,5 +1,6 @@
 // apps/patient-app/app/api/orders/[id]/route.ts
 import { NextResponse } from 'next/server';
+import { resolvePatientAppSession } from '@/app/api/_session';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -18,9 +19,13 @@ function getGatewayBase() {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: { id: string } },
 ) {
+  const session = resolvePatientAppSession();
+  if (!session || session.role !== 'patient') {
+    return NextResponse.json({ ok: false, error: 'patient_identity_required' }, { status: 401 });
+  }
   const gateway = getGatewayBase();
 
   if (!gateway) {
@@ -30,7 +35,7 @@ export async function GET(
   const id = encodeURIComponent(params.id);
   const res = await fetch(`${gateway}/api/orders/${id}`, {
     cache: 'no-store',
-    headers: { 'x-role': 'patient' },
+    headers: { 'x-role': 'patient', 'x-uid': session.userId, cookie: req.headers.get('cookie') || '' },
   });
 
   const data = await res.json().catch(() => null);

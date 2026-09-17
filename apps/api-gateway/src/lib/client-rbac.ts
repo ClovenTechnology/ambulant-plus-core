@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { readVerifiedClientSession } from "@/src/lib/client-session";
 
 export type ApiClientRole =
   | "ORG_OWNER"
@@ -11,12 +12,25 @@ export type ApiClientRole =
   | "EXPORT_MANAGER"
   | "READ_ONLY";
 
+export const ALL_API_CLIENT_ROLES: ApiClientRole[] = [
+  "ORG_OWNER",
+  "ORG_ADMIN",
+  "FINANCE_MANAGER",
+  "CLAIMS_MANAGER",
+  "CARE_COORDINATOR",
+  "PROVIDER_MANAGER",
+  "DEVICE_REVIEWER",
+  "EXPORT_MANAGER",
+  "READ_ONLY",
+];
+
 export type ApiClientActor = {
   uid: string | null;
   orgId: string | null;
   role: ApiClientRole;
   workspace: string | null;
   trusted: boolean;
+  source: "signed_client_session" | "unsafe_dev_header" | "none";
 };
 
 function header(req: NextRequest, name: string) {
@@ -41,39 +55,61 @@ export function normalizeApiClientRole(value?: string | null): ApiClientRole {
   return "READ_ONLY";
 }
 
-export function readApiClientActor(req: NextRequest): ApiClientActor {
-  const uid =
-    header(req, "x-ambulant-user-id") ||
-    header(req, "x-uid") ||
-    null;
-
-  const orgId =
-    header(req, "x-ambulant-org-id") ||
-    header(req, "x-org-id") ||
-    null;
-
-  const role = normalizeApiClientRole(
-    header(req, "x-ambulant-role") ||
-      header(req, "x-role") ||
-      "READ_ONLY"
+function allowUnsafeClientHeaders() {
+  return (
+    process.env.NODE_ENV !== "production" &&
+    (process.env.ALLOW_UNSAFE_CLIENT_IDENTITY_HEADERS === "1" ||
+      process.env.ALLOW_UNSAFE_CLIENT_IDENTITY_HEADERS === "true")
   );
+}
 
-  const workspace =
-    header(req, "x-ambulant-workspace") ||
-    header(req, "x-workspace") ||
-    null;
+export function readApiClientActor(req: NextRequest): ApiClientActor {
+  const session = readVerifiedClientSession(req);
 
-  const trusted =
-    header(req, "x-ambulant-trusted") === "client-app-proxy" ||
-    header(req, "x-ambulant-trusted") === "internal" ||
-    process.env.NODE_ENV !== "production";
+  if (session) {
+    return {
+      uid: session.uid,
+      orgId: session.orgId,
+      role: normalizeApiClientRole(session.role),
+      workspace: session.workspace || null,
+      trusted: true,
+      source: "signed_client_session",
+    };
+  }
+
+  if (allowUnsafeClientHeaders()) {
+    const uid =
+      header(req, "x-ambulant-user-id") ||
+      header(req, "x-uid") ||
+      null;
+
+    const orgId =
+      header(req, "x-ambulant-org-id") ||
+      header(req, "x-org-id") ||
+      null;
+
+    return {
+      uid,
+      orgId,
+      role: normalizeApiClientRole(
+        header(req, "x-ambulant-role") || header(req, "x-role") || "READ_ONLY",
+      ),
+      workspace:
+        header(req, "x-ambulant-workspace") ||
+        header(req, "x-workspace") ||
+        null,
+      trusted: false,
+      source: "unsafe_dev_header",
+    };
+  }
 
   return {
-    uid,
-    orgId,
-    role,
-    workspace,
-    trusted,
+    uid: null,
+    orgId: null,
+    role: "READ_ONLY",
+    workspace: null,
+    trusted: false,
+    source: "none",
   };
 }
 
@@ -83,7 +119,7 @@ export function forbiddenJson(error: string, status = 403) {
       ok: false,
       error,
     },
-    { status }
+    { status },
   );
 }
 
@@ -93,13 +129,13 @@ export function requireApiClientRole(
   options?: {
     orgId?: string | null;
     allowReadOnly?: boolean;
-  }
+  },
 ):
   | { ok: true; actor: ApiClientActor }
   | { ok: false; response: NextResponse } {
   const actor = readApiClientActor(req);
 
-  if (!actor.uid) {
+  if (!actor.uid || !actor.orgId) {
     return {
       ok: false,
       response: forbiddenJson("unauthenticated_client_api", 401),
@@ -113,9 +149,9 @@ export function requireApiClientRole(
     };
   }
 
-  const requestedOrgId = options?.orgId || null;
+  const requestedOrgId = String(options?.orgId || "").trim() || null;
 
-  if (requestedOrgId && actor.orgId && requestedOrgId !== actor.orgId) {
+  if (requestedOrgId && requestedOrgId !== actor.orgId) {
     return {
       ok: false,
       response: forbiddenJson("cross_org_access_denied", 403),

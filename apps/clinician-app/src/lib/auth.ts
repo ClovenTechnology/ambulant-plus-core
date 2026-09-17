@@ -1,32 +1,23 @@
-﻿import { NextRequest } from 'next/server';
+import { CLINICIAN_SESSION_COOKIE, verifyClinicianSessionToken } from '@/src/lib/clinician-session';
 
-export type AuthorizedActor = {
-  ok: boolean;
-  uid: string;
-  role: string;
-  orgId?: string | null;
-};
+export type AuthorizedActor = { ok: boolean; uid: string; role: string; orgId?: string | null };
 
-export function authorizeAdminFromHeaders(input: NextRequest | Request | Headers): AuthorizedActor {
+function cookieValue(headers: Headers, name: string) {
+  const cookie = String(headers.get('cookie') || '');
+  for (const part of cookie.split(';')) {
+    const index = part.indexOf('=');
+    if (index < 0 || part.slice(0, index).trim() !== name) continue;
+    const raw = part.slice(index + 1).trim();
+    try { return decodeURIComponent(raw); } catch { return raw; }
+  }
+  return '';
+}
+
+export function authorizeAdminFromHeaders(input: Request | Headers): AuthorizedActor {
   const headers = input instanceof Headers ? input : input.headers;
-
-  const uid =
-    headers.get('x-uid') ||
-    headers.get('x-user-id') ||
-    headers.get('x-admin-id') ||
-    'admin-local';
-
-  const role =
-    headers.get('x-role') ||
-    headers.get('x-actor-role') ||
-    'admin';
-
-  const orgId = headers.get('x-org-id') || headers.get('x-org') || null;
-
-  return {
-    ok: role === 'admin' || role === 'owner' || role === 'ops',
-    uid,
-    role,
-    orgId,
-  };
+  const session = verifyClinicianSessionToken(cookieValue(headers, CLINICIAN_SESSION_COOKIE));
+  if (!session || !['admin', 'admin_staff'].includes(session.role)) {
+    return { ok: false, uid: '', role: '', orgId: null };
+  }
+  return { ok: true, uid: session.sub, role: session.role, orgId: typeof session.orgId === 'string' ? session.orgId : null };
 }

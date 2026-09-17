@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { prisma } from '../../../../api-gateway/src/lib/db';
-import { readIdentity } from '../../../../api-gateway/src/lib/identity';
+import { resolvePatientAppSession } from '@/app/api/_session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,18 +19,6 @@ function cleanStr(value: unknown): string {
   return String(value ?? '').trim();
 }
 
-function readPatientId(req: NextRequest, identity: any) {
-  return (
-    req.headers.get('x-ambulant-patient-id') ||
-    req.headers.get('x-patient-id') ||
-    req.headers.get('x-ambulant-user-id') ||
-    req.headers.get('x-user-id') ||
-    req.headers.get('x-uid') ||
-    identity?.patientId ||
-    identity?.uid ||
-    ''
-  ).trim();
-}
 
 function parseDate(value: string | null) {
   if (!value) return null;
@@ -43,8 +31,9 @@ function parseDate(value: string | null) {
 
 export async function GET(req: NextRequest) {
   try {
-    const identity = readIdentity(req.headers);
-    const patientId = readPatientId(req, identity);
+    const session = resolvePatientAppSession();
+    if (!session || session.role !== 'patient') return json({ ok: false, error: 'patient_identity_required' }, 401);
+    const patientId = session.actorRefId || session.userId;
     const condition = conditionDelegate();
 
     if (!condition?.findMany) {
@@ -105,8 +94,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const identity = readIdentity(req.headers);
-    const patientId = readPatientId(req, identity);
+    const session = resolvePatientAppSession();
+    if (!session || session.role !== 'patient') return json({ ok: false, error: 'patient_identity_required' }, 401);
+    const patientId = session.actorRefId || session.userId;
     const condition = conditionDelegate();
 
     if (!patientId) {
@@ -161,7 +151,7 @@ export async function POST(req: NextRequest) {
         clinician,
         location,
         patientId,
-        recordedBy: identity?.uid ?? patientId,
+        recordedBy: session.userId,
         source: 'patient',
       },
     });

@@ -1,24 +1,20 @@
-import { NextRequest } from 'next/server';
+import { CLINICIAN_SESSION_COOKIE, verifyClinicianSessionToken } from '@/src/lib/clinician-session';
 
-function clean(value: string | null | undefined) {
-  return String(value || '').trim();
+function cookieValue(headers: Headers, name: string) {
+  const cookie = String(headers.get('cookie') || '');
+  for (const part of cookie.split(';')) {
+    const index = part.indexOf('=');
+    if (index < 0 || part.slice(0, index).trim() !== name) continue;
+    const raw = part.slice(index + 1).trim();
+    try { return decodeURIComponent(raw); } catch { return raw; }
+  }
+  return '';
 }
 
-export function readIdentity(input?: NextRequest | Request | Headers | null) {
+export function readIdentity(input?: Request | Headers | null) {
   const headers = input instanceof Headers ? input : input?.headers;
-
-  return {
-    uid:
-      clean(headers?.get('x-uid')) ||
-      clean(headers?.get('x-user-id')) ||
-      clean(headers?.get('x-ambulant-user-id')),
-    role:
-      clean(headers?.get('x-role')) ||
-      clean(headers?.get('x-ambulant-role')) ||
-      'clinician',
-    orgId:
-      clean(headers?.get('x-org-id')) ||
-      clean(headers?.get('x-ambulant-org-id')) ||
-      clean(headers?.get('x-org')),
-  };
+  if (!headers) return { uid: '', role: '', orgId: '' };
+  const session = verifyClinicianSessionToken(cookieValue(headers, CLINICIAN_SESSION_COOKIE));
+  if (!session) return { uid: '', role: '', orgId: '' };
+  return { uid: session.clinicianId || session.sub, role: session.role, orgId: typeof session.orgId === 'string' ? session.orgId : '' };
 }

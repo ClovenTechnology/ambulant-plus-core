@@ -1,6 +1,7 @@
 // apps/clinician-app/src/lib/consultation-session-proxy.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,16 +53,14 @@ export async function proxyConsultationSession(
   }
 
   const clinicianId = String(auth.clinicianId || uid).trim();
+  let trustedIdentity: string;
+  try { trustedIdentity = createTrustedClinicianIdentityHeader(req); }
+  catch (error: any) { return json({ ok: false, error: String(error?.message || 'identity_bridge_failed') }, Number(error?.status || 500)); }
 
   const init: RequestInit = {
     method,
     cache: 'no-store',
-    headers: {
-      accept: 'application/json',
-      'x-uid': uid,
-      'x-clinician-id': clinicianId,
-      'x-role': auth.role,
-    },
+    headers: { accept: 'application/json', 'x-ambulant-identity': trustedIdentity },
   };
 
   if (method === 'POST') {

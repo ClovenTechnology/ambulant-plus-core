@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { prisma } from '@/src/lib/prisma'; // optional - logs metadata in DB
-import { authorizeAdminFromHeaders } from '@/src/lib/auth'; // optional use
+import { authErrorResponse, ensureClinicianSelfOrPrivileged, requireClinicianAuth } from '@/src/lib/clinician-auth';
 
 export const runtime = 'nodejs';
 
@@ -16,9 +16,14 @@ const s3 = new S3Client({
 });
 
 export async function POST(req: NextRequest) {
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+  if (!auth.ok) return authErrorResponse(auth);
   try {
     const body = await req.json().catch(() => ({} as any));
     const { fileName, contentType, purpose = 'upload', clinicianId } = body || {};
+    const denied = ensureClinicianSelfOrPrivileged(auth, clinicianId || null);
+    if (denied) return authErrorResponse(denied);
+    const resolvedClinicianId = clinicianId || auth.clinicianId;
 
     if (!fileName || !contentType) {
       return NextResponse.json({ ok: false, error: 'fileName and contentType required' }, { status: 400 });
@@ -44,7 +49,7 @@ export async function POST(req: NextRequest) {
       if (db.clinicianFile?.create) {
         await db.clinicianFile.create({
           data: {
-            clinicianId: clinicianId ?? null,
+            clinicianId: resolvedClinicianId ?? null,
             purpose,
             s3Key: key,
             fileName,

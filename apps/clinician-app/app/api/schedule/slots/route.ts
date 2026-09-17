@@ -1,6 +1,7 @@
 // apps/clinician-app/app/api/schedule/slots/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

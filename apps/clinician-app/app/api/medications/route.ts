@@ -1,6 +1,7 @@
 // apps/clinician-app/app/api/medications/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,6 +53,7 @@ export async function GET(req: NextRequest) {
         'x-uid': uid,
         'x-clinician-id': clinicianId,
         'x-role': auth.role,
+      'x-ambulant-identity': createTrustedClinicianIdentityHeader(req),
       },
     });
 

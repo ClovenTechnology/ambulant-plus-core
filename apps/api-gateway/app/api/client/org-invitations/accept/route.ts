@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "crypto";
 import { prisma } from "@/src/lib/db";
+import { signClientSessionToken } from "@/src/lib/client-session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -172,6 +173,7 @@ export async function POST(req: NextRequest) {
     });
 
     const session = sessionForUser(accepted, invite.org);
+    const sessionToken = signClientSessionToken(session);
     const redirectTo = landingPathForWorkspace(session.workspace);
 
     return NextResponse.json({
@@ -191,6 +193,7 @@ export async function POST(req: NextRequest) {
         status: invite.org.status,
       },
       session,
+      sessionToken,
       redirectTo,
       message: "Invitation accepted. Password has been set.",
     });

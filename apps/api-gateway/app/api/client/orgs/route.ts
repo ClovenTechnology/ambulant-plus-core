@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { prisma } from "@/src/lib/db";
-import { readIdentity } from "@/src/lib/identity";
+import { ALL_API_CLIENT_ROLES, requireApiClientRole } from "@/src/lib/client-rbac";
 
 function workspaceForOrgType(orgType: string) {
   if (orgType === "GYM" || orgType === "WELLNESS_PARTNER") return "WELLNESS_PARTNER";
@@ -10,8 +10,10 @@ function workspaceForOrgType(orgType: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const who = readIdentity(req.headers);
-  const orgId = who.orgId || req.nextUrl.searchParams.get("orgId");
+  const requestedOrgId = req.nextUrl.searchParams.get("orgId");
+  const auth = requireApiClientRole(req, ALL_API_CLIENT_ROLES, { orgId: requestedOrgId, allowReadOnly: true });
+  if (!auth.ok) return auth.response;
+  const orgId = auth.actor.orgId;
 
   const items = await prisma.clientOrg.findMany({
     where: orgId ? { id: orgId } : undefined,
@@ -29,7 +31,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const who = readIdentity(req.headers);
+    const auth = requireApiClientRole(req, ["ORG_OWNER", "ORG_ADMIN"]);
+    if (!auth.ok) return auth.response;
     const body = await req.json().catch(() => ({}));
 
     const name = String(body.name || "").trim();
@@ -50,7 +53,7 @@ export async function POST(req: NextRequest) {
     }
 
     const workspace = workspaceForOrgType(orgType);
-    const ownerUserId = String(body.ownerUserId || who.uid || ownerEmail);
+    const ownerUserId = String(body.ownerUserId || auth.actor.uid || ownerEmail);
 
     const created = await prisma.$transaction(async (tx) => {
       const org = await tx.clientOrg.create({
@@ -68,7 +71,7 @@ export async function POST(req: NextRequest) {
           status: "PENDING_REVIEW",
           metadata: {
             source: "client_org_onboarding",
-            createdByUserId: who.uid || null,
+            createdByUserId: auth.actor.uid,
             externalReference: body.externalReference || null,
           },
         },
@@ -102,7 +105,7 @@ export async function POST(req: NextRequest) {
             "rewards.read",
             "wellness.read",
           ],
-          invitedByUserId: who.uid || null,
+          invitedByUserId: auth.actor.uid,
           invitedAt: new Date(),
           acceptedAt: new Date(),
         },

@@ -1,6 +1,7 @@
 // apps/clinician-app/app/api/schedule/slots/batch/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,6 +43,7 @@ async function resolveClinician(req: NextRequest, rawClinicianId: string) {
     headers: {
       'x-uid': clinicianUid(auth),
       'x-role': auth.role,
+      'x-ambulant-identity': createTrustedClinicianIdentityHeader(req),
     },
     error: null,
   };

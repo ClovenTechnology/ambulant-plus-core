@@ -1,6 +1,7 @@
 // apps/clinician-app/app/api/availability/[clinicianId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,13 +28,14 @@ export async function GET(req: NextRequest, ctx: { params: { clinicianId: string
     let clinicianId = decodeURIComponent(String(ctx.params.clinicianId || '')).trim();
     const headers: Record<string, string> = {};
 
-    if (!clinicianId || clinicianId === 'me' || clinicianId === 'clinician-local-001') {
+    if (!clinicianId || clinicianId === 'me') {
       const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
       if (!auth.ok) return authErrorResponse(auth);
       clinicianId = auth.clinicianId;
       headers['x-uid'] = clinicianUid(auth);
       headers['x-clinician-id'] = auth.clinicianId;
       headers['x-role'] = auth.role;
+      headers['x-ambulant-identity'] = createTrustedClinicianIdentityHeader(req);
     }
 
     const url = new URL(req.url);
