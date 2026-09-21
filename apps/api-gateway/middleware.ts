@@ -531,7 +531,213 @@ async function hasInsightCoreStudioAccess(req: NextRequest) {
   }
 }
 
+const INSIGHTCORE_STUDIO_ALLOWED_SCOPE_OR_ROLE =
+  new Set<string>(["admin","compliance","manageroles","owner","reports","rnd","super_admin","superadmin","tech"]);
+
+type InsightCoreStudioGatewayMe = {
+  authenticated?: boolean;
+  user?: {
+    roles?: string[];
+    scopes?: string[];
+  } | null;
+};
+
+type InsightCoreStudioAccess = {
+  authenticated: boolean;
+  allowed: boolean;
+  unavailable: boolean;
+};
+
+function isInsightCoreStudioApiPath(pathname: string) {
+  return (
+    pathname === "/api/insightcore/studio" ||
+    pathname.startsWith("/api/insightcore/studio/")
+  );
+}
+
+async function resolveInsightCoreStudioAccess(
+  request: NextRequest,
+): Promise<InsightCoreStudioAccess> {
+  try {
+    const headers = new Headers({
+      accept: "application/json",
+    });
+
+    const cookie =
+      request.headers.get("cookie") || "";
+
+    const authorization =
+      request.headers.get("authorization") || "";
+
+    if (cookie) {
+      headers.set("cookie", cookie);
+    }
+
+    if (authorization) {
+      headers.set(
+        "authorization",
+        authorization,
+      );
+    }
+
+    /*
+     * /api/auth/me is the canonical Gateway authority
+     * for effective Admin roles and scopes.
+     *
+     * This is a same-Gateway request. The middleware guard
+     * below only applies to /api/insightcore/studio/*, so
+     * /api/auth/me does not recurse through this gate.
+     */
+    const response =
+      await fetch(
+        new URL(
+          "/api/auth/me",
+          request.url,
+        ),
+        {
+          method: "GET",
+          headers,
+          cache: "no-store",
+        },
+      );
+
+    if (!response.ok) {
+      return {
+        authenticated: false,
+        allowed: false,
+        unavailable: true,
+      };
+    }
+
+    const me =
+      (await response
+        .json()
+        .catch(() => null)) as
+        InsightCoreStudioGatewayMe | null;
+
+    if (!me?.authenticated || !me.user) {
+      return {
+        authenticated: false,
+        allowed: false,
+        unavailable: false,
+      };
+    }
+
+    const values = [
+      ...(
+        Array.isArray(me.user.scopes)
+          ? me.user.scopes
+          : []
+      ),
+      ...(
+        Array.isArray(me.user.roles)
+          ? me.user.roles
+          : []
+      ),
+    ]
+      .map((value) =>
+        String(value || "")
+          .trim()
+          .toLowerCase(),
+      )
+      .filter(Boolean);
+
+    return {
+      authenticated: true,
+      allowed:
+        values.some((value) =>
+          INSIGHTCORE_STUDIO_ALLOWED_SCOPE_OR_ROLE
+            .has(value),
+        ),
+      unavailable: false,
+    };
+  }
+  catch {
+    return {
+      authenticated: false,
+      allowed: false,
+      unavailable: true,
+    };
+  }
+}
+
 export async function middleware(req: NextRequest) {
+  /*
+   * InsightCore Studio is privileged operational,
+   * research and governance surface area.
+   *
+   * Frontend middleware is not a security boundary for
+   * direct API Gateway callers, so enforce the same
+   * canonical role/scope authority here.
+   */
+  if (
+    req.method !== "OPTIONS" &&
+    isInsightCoreStudioApiPath(
+      req.nextUrl.pathname,
+    )
+  ) {
+    const access =
+      await resolveInsightCoreStudioAccess(
+        req,
+      );
+
+    if (access.unavailable) {
+      return applyCors(
+        req,
+        NextResponse.json(
+          {
+            ok: false,
+            error:
+              "insightcore_auth_authority_unavailable",
+          },
+          {
+            status: 503,
+            headers: {
+              "cache-control": "no-store",
+            },
+          },
+        ),
+      );
+    }
+
+    if (!access.authenticated) {
+      return applyCors(
+        req,
+        NextResponse.json(
+          {
+            ok: false,
+            error:
+              "insightcore_authentication_required",
+          },
+          {
+            status: 401,
+            headers: {
+              "cache-control": "no-store",
+            },
+          },
+        ),
+      );
+    }
+
+    if (!access.allowed) {
+      return applyCors(
+        req,
+        NextResponse.json(
+          {
+            ok: false,
+            error:
+              "insightcore_access_denied",
+          },
+          {
+            status: 403,
+            headers: {
+              "cache-control": "no-store",
+            },
+          },
+        ),
+      );
+    }
+  }
   const { pathname } = req.nextUrl;
 
   if (!pathname.startsWith("/api/")) {
