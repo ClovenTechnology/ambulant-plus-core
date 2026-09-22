@@ -1,134 +1,103 @@
-// apps/patient-app/app/api/devices/list/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  patientGatewayHeaders,
+  readPatientGatewayIdentity,
+} from '@/src/lib/gateway-identity';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-type DeviceCatalogItem = {
-  id: string;
-  slug: string;
-  vendor: string;
-  name: string;
-  model: string;
-  category: 'iomt' | 'wearable';
-  kind: 'monitor' | 'stethoscope' | 'otoscope' | 'ring';
-  summary: string;
-  href: string;
-  status: 'supported';
-  capabilities: string[];
-};
+const CANONICAL_API_GATEWAY =
+  'https://api-gateway.ambulantplus.co.za';
 
-const CATALOG: DeviceCatalogItem[] = [
-  {
-    id: 'duecare-health-monitor',
-    slug: 'health-monitor',
-    vendor: 'DueCare',
-    name: 'Health Monitor',
-    model: 'Health Monitor',
-    category: 'iomt',
-    kind: 'monitor',
-    summary:
-      'Multi-parameter health monitor for body temperature, blood oxygen, blood pressure, blood glucose, heart rate and ECG workflows.',
-    href: '/myCare/devices/health-monitor',
-    status: 'supported',
-    capabilities: [
-      'Body temperature',
-      'Blood oxygen',
-      'Blood pressure',
-      'Blood glucose',
-      'Heart rate',
-      'ECG',
-    ],
-  },
-  {
-    id: 'duecare-stethoscope',
-    slug: 'digital-stethoscope',
-    vendor: 'DueCare',
-    name: 'Digital Stethoscope',
-    model: 'Stethoscope',
-    category: 'iomt',
-    kind: 'stethoscope',
-    summary:
-      'Digital auscultation workflow for heart and lung sounds, playback, session review and clinician sharing.',
-    href: '/myCare/devices/stethoscope',
-    status: 'supported',
-    capabilities: [
-      'Heart auscultation',
-      'Lung auscultation',
-      'Audio playback',
-      'Session history',
-    ],
-  },
-  {
-    id: 'duecare-otoscope',
-    slug: 'hd-otoscope',
-    vendor: 'DueCare',
-    name: 'HD Otoscope',
-    model: 'HD Otoscope',
-    category: 'iomt',
-    kind: 'otoscope',
-    summary:
-      'High-definition otoscope workflow for ear imaging, capture review and care-team sharing.',
-    href: '/myCare/devices/otoscope',
-    status: 'supported',
-    capabilities: [
-      'HD ear imaging',
-      'Image capture',
-      'Review workflow',
-      'Care-team sharing',
-    ],
-  },
-  {
-    id: 'duecare-nexring',
-    slug: 'nexring',
-    vendor: 'DueCare',
-    name: 'NexRing',
-    model: 'NexRing',
-    category: 'wearable',
-    kind: 'ring',
-    summary:
-      'NexRing wearable insights for pulse, SpO₂, HRV, sleep, recovery and longitudinal wellness signals.',
-    href: '/myCare/devices/nexring',
-    status: 'supported',
-    capabilities: [
-      'Pulse',
-      'SpO₂',
-      'HRV',
-      'Sleep insights',
-      'Recovery trends',
-      'Wearable analytics',
-    ],
-  },
-];
-
-function getPairedIds(): Set<string> {
-  /**
-   * Production-safe default:
-   * this endpoint exposes the supported device catalogue.
-   * Pairing state should be attached later from authenticated patient/device persistence.
-   */
-  return new Set<string>();
+function clean(value: unknown): string {
+  return String(value ?? '').trim();
 }
 
-export async function GET() {
-  const paired = getPairedIds();
+function isProductionRuntime(): boolean {
+  return (
+    process.env.NODE_ENV === 'production' ||
+    process.env.VERCEL_ENV === 'production'
+  );
+}
 
-  const devices = CATALOG.map((device) => ({
-    ...device,
-    connected: paired.has(device.id),
-    paired: paired.has(device.id),
-    lastSeenAt: paired.has(device.id) ? new Date().toISOString() : null,
-    lastSeenHuman: paired.has(device.id) ? 'Recently synced' : null,
-    battery: null,
-    recent: [],
-  }));
+function gatewayBase(): string {
+  const configured = clean(
+    process.env.APIGW_BASE ||
+      process.env.APIGW_ORIGIN ||
+      process.env.API_GATEWAY_ORIGIN ||
+      process.env.NEXT_PUBLIC_APIGW_BASE ||
+      process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+      process.env.NEXT_PUBLIC_API_GATEWAY_BASE,
+  ).replace(/\/+$/, '');
 
-  return NextResponse.json(
-    { devices },
-    {
+  if (configured) return configured;
+
+  if (isProductionRuntime()) {
+    return CANONICAL_API_GATEWAY;
+  }
+
+  return 'http://localhost:3010';
+}
+
+export async function GET(req: NextRequest) {
+  const identity =
+    await readPatientGatewayIdentity(req);
+
+  if (!identity) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'patient_authentication_required',
+      },
+      { status: 401 },
+    );
+  }
+
+  try {
+    const headers =
+      patientGatewayHeaders({
+        req,
+        identity,
+      });
+
+    const response =
+      await fetch(
+        `${gatewayBase()}/api/devices/list`,
+        {
+          method: 'GET',
+          cache: 'no-store',
+          headers: {
+            ...headers,
+            accept: 'application/json',
+          },
+        },
+      );
+
+    const text =
+      await response.text();
+
+    return new NextResponse(text, {
+      status: response.status,
       headers: {
+        'content-type':
+          response.headers.get('content-type') ||
+          'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
       },
-    },
-  );
+    });
+  } catch {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'device_list_unavailable',
+      },
+      {
+        status: 503,
+        headers: {
+          'Cache-Control': 'no-store',
+        },
+      },
+    );
+  }
 }
