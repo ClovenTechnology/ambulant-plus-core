@@ -27,8 +27,8 @@ const CARDS: Array<{ key: string; label: string; unit?: string; color: string }>
 ];
 
 export default function DeviceDock({
-  patientId, roomId, patientUid = 'patient-local-001',
-}: { patientId?: string|null; roomId?: string|null; patientUid?: string }) {
+  patientId, roomId,
+}: { patientId?: string|null; roomId?: string|null }) {
 
   const [devices, setDevices] = useState<DeviceRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,17 +49,15 @@ export default function DeviceDock({
     }
 
     setLoading(true);
-    const qs = new URLSearchParams();
-    qs.set('patient_id', String(patientId));
-    fetch(`/api/devices/list?${qs}`, {
+    fetch('/api/devices/list', {
       cache: 'no-store',
-      headers: { 'x-uid': patientUid, 'x-role': 'patient' },
+      credentials: 'include',
     })
       .then((r) => r.json())
       .then((d) => setDevices(d.items || d.devices || []))
       .catch(() => setDevices([]))
       .finally(() => setLoading(false));
-  }, [patientId, patientUid]);
+  }, [patientId]);
 
   const attached = useMemo(
     () => devices.filter((d) => d.roomId === roomId),

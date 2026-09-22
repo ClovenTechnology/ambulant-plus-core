@@ -29,7 +29,10 @@ export default function PairDevicePage() {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/devices/catalog', { cache: 'no-store' })
+    fetch('/api/devices/catalog', {
+      cache: 'no-store',
+      credentials: 'include',
+    })
       .then(r => r.json())
       .then(setCatalog)
       .catch(() => setCatalog(null));
@@ -56,10 +59,8 @@ export default function PairDevicePage() {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          // TEMP auth: until next-auth is wired, forward identity like the rest of the repo
-          'x-uid': 'patient-local-001',
-          'x-role': 'patient',
         },
+        credentials: 'include',
         body: JSON.stringify(body)
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
