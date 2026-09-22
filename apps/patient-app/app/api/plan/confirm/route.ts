@@ -1,87 +1,209 @@
 // apps/patient-app/app/api/plan/confirm/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import type { Plan } from '../../../../lib/plans';
-import { normalizePlan, PLAN_COOKIE } from '../../../../lib/plans';
+import { normalizePlan } from '../../../../lib/plans';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 type BillingCycle = 'monthly' | 'annual';
-type Credits = { premiumDays: number; familyDays: number };
 
-const PLAN_CREDITS_COOKIE = 'ambulant.planCredits';
-const PLAN_CYCLE_COOKIE = 'ambulant.planCycle';
+type PatientSession = {
+  userId: string;
+  patientId: string;
+};
 
-function clampInt(n: any, fallback = 0) {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return fallback;
-  return Math.max(0, Math.floor(x));
-}
-
-function readCredits(req: NextRequest): Credits {
-  const raw = req.cookies.get(PLAN_CREDITS_COOKIE)?.value;
-  if (!raw) return { premiumDays: 0, familyDays: 0 };
-  try {
-    const decoded = decodeURIComponent(raw);
-    const js = JSON.parse(decoded);
-    return {
-      premiumDays: clampInt(js?.premiumDays, 0),
-      familyDays: clampInt(js?.familyDays, 0),
-    };
-  } catch {
-    return { premiumDays: 0, familyDays: 0 };
-  }
-}
-
-function writeCredits(res: NextResponse, credits: Credits) {
-  res.cookies.set(PLAN_CREDITS_COOKIE, encodeURIComponent(JSON.stringify(credits)), {
-    path: '/',
-    maxAge: 60 * 60 * 24 * 365,
-    sameSite: 'lax',
+function json(
+  data: unknown,
+  status = 200,
+) {
+  return NextResponse.json(data, {
+    status,
+    headers: {
+      'cache-control': 'no-store',
+    },
   });
 }
 
-function normalizeCycle(x: any): BillingCycle {
-  const s = String(x ?? '').toLowerCase().trim();
-  return s === 'annual' ? 'annual' : 'monthly';
+async function authenticatedPatient(
+  req: NextRequest,
+): Promise<PatientSession | null> {
+  const url =
+    new URL('/api/auth/me', req.url);
+
+  const response =
+    await fetch(url, {
+      method: 'GET',
+      headers: {
+        cookie:
+          req.headers.get('cookie') || '',
+        authorization:
+          req.headers.get('authorization') || '',
+        accept: 'application/json',
+      },
+      cache: 'no-store',
+    }).catch(() => null);
+
+  if (!response?.ok) return null;
+
+  const payload =
+    await response.json().catch(() => null);
+
+  if (!payload || payload.ok === false) {
+    return null;
+  }
+
+  const actorType =
+    String(
+      payload.actorType ??
+        payload.user?.actorType ??
+        '',
+    )
+      .trim()
+      .toUpperCase();
+
+  if (
+    actorType &&
+    actorType !== 'PATIENT'
+  ) {
+    return null;
+  }
+
+  const userId =
+    String(
+      payload.userId ??
+        payload.uid ??
+        payload.id ??
+        payload.user?.userId ??
+        payload.user?.uid ??
+        payload.user?.id ??
+        '',
+    ).trim();
+
+  const patientId =
+    String(
+      payload.patientId ??
+        payload.profile?.patientId ??
+        payload.profile?.id ??
+        payload.user?.patientId ??
+        '',
+    ).trim();
+
+  if (!userId || !patientId) {
+    return null;
+  }
+
+  return {
+    userId,
+    patientId,
+  };
 }
 
-export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => ({} as any));
-  const plan = normalizePlan(body?.plan) as Plan;
-  const tx = String(body?.tx ?? '').trim();
-  const cycle = normalizeCycle(body?.cycle);
+function normalizeCycle(
+  value: unknown,
+): BillingCycle {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase() === 'annual'
+    ? 'annual'
+    : 'monthly';
+}
+
+function paymentSimulatorEnabled() {
+  return (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.ENABLE_PATIENT_PAYMENT_SIMULATOR === 'true'
+  );
+}
+
+export async function POST(
+  req: NextRequest,
+) {
+  const subject =
+    await authenticatedPatient(req);
+
+  if (!subject) {
+    return json(
+      {
+        ok: false,
+        error:
+          'patient_authentication_required',
+      },
+      401,
+    );
+  }
+
+  const body =
+    await req.json().catch(
+      () => ({} as any),
+    );
+
+  const plan =
+    normalizePlan(
+      body?.plan,
+    ) as Plan | null;
+
+  const tx =
+    String(body?.tx ?? '')
+      .trim()
+      .slice(0, 180);
+
+  const cycle =
+    normalizeCycle(
+      body?.cycle,
+    );
 
   if (!tx) {
-    return NextResponse.json({ ok: false, error: 'Missing transaction id.' }, { status: 400 });
-  }
-  if (!plan) {
-    return NextResponse.json({ ok: false, error: 'Invalid plan.' }, { status: 400 });
+    return json(
+      {
+        ok: false,
+        error:
+          'missing_transaction_id',
+      },
+      400,
+    );
   }
 
-  const credits = readCredits(req);
+  if (!plan || plan === 'free') {
+    return json(
+      {
+        ok: false,
+        error: 'invalid_paid_plan',
+      },
+      400,
+    );
+  }
 
-  const res = NextResponse.json({
+  if (!paymentSimulatorEnabled()) {
+    return json(
+      {
+        ok: false,
+        error:
+          'verified_payment_required',
+        code:
+          'verified_payment_required',
+        message:
+          'Paid-plan activation requires verified server-side payment evidence.',
+      },
+      409,
+    );
+  }
+
+  // Explicit non-production compatibility only.
+  // This does not persist entitlement state and does not set plan cookies.
+  return json({
     ok: true,
-    entitlement: {
+    simulated: true,
+    authoritative: false,
+    subject: {
+      patientId: subject.patientId,
+    },
+    transaction: {
+      reference: tx,
       plan,
       cycle,
-      credits,
     },
-    message: `Payment confirmed. You’re now on ${String(plan)} (${cycle}).`,
+    message:
+      'Non-production payment simulation accepted. No durable entitlement was written.',
   });
-
-  res.cookies.set(PLAN_COOKIE, plan, {
-    path: '/',
-    maxAge: 60 * 60 * 24 * 365,
-    sameSite: 'lax',
-  });
-
-  res.cookies.set(PLAN_CYCLE_COOKIE, cycle, {
-    path: '/',
-    maxAge: 60 * 60 * 24 * 365,
-    sameSite: 'lax',
-  });
-
-  // keep credits stable
-  writeCredits(res, credits);
-
-  return res;
 }
