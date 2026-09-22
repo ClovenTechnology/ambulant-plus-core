@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/plan/upgrade/page.tsx
+// apps/patient-app/app/plan/upgrade/page.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState, Suspense } from 'react';
@@ -8,7 +8,6 @@ import type { Plan } from '../../../lib/plans';
 import { PATIENT_PLANS as STATIC_PATIENT_PLANS, type PatientPlanDef, planMeta } from '../../../lib/plans';
 import { usePlan } from '../../../components/context/PlanContext';
 import RedeemCodeModal from '../../../components/plan/RedeemCodeModal';
-import { applyRedemption, loadEntitlements, pruneExpired } from '../../../lib/entitlements';
 
 
 // A5-P-C-D dynamic patient plan pricing
@@ -141,7 +140,7 @@ function UpgradePlanPageContent() {
     [sp],
   );
 
-  const { plan, effectivePlan, setPlan, refreshEntitlements } = usePlan() as any;
+  const { plan, effectivePlan, entitlement, refreshEntitlements } = usePlan();
 
   
   const [patientPlans, setPatientPlans] = useState<ConfiguredPatientPlanDef[]>(() => mergeConfiguredPatientPlans(undefined));
@@ -199,37 +198,82 @@ function UpgradePlanPageContent() {
     return (pick?.key as Plan) ?? null;
   }, [patientPlans]);
 
-  // Payment confirm
+  // Payment confirmation never grants browser authority.
   useEffect(() => {
     if (status !== 'success' || !paidPlan) return;
 
     let cancelled = false;
+
     (async () => {
       setBusy(true);
-      setMsg('Finishing upâ€¦ securing your new plan and syncing your access.');
+      setMsg('Checking verified payment status and syncing your plan.');
 
       const res = await fetch('/api/plan/confirm', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ plan: paidPlan, tx, cycle: cycleFromReturn }),
+        body: JSON.stringify({
+          plan: paidPlan,
+          tx,
+          cycle: cycleFromReturn,
+        }),
       }).catch(() => null);
 
-      const data = (await res?.json().catch(() => null)) as any;
+      const data =
+        (await res?.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              authoritative?: boolean;
+              simulated?: boolean;
+              message?: string;
+              error?: string;
+            }
+          | null;
 
       if (cancelled) return;
 
       if (!res?.ok || !data?.ok) {
-        setMsg('We couldnâ€™t confirm that payment. Nothing changed â€” please try again.');
+        setMsg(
+          data?.message ||
+            data?.error ||
+            'We could not verify that payment. Your plan has not changed.',
+        );
         setBusy(false);
         return;
       }
 
-      setPlan(paidPlan);
-      try {
-        refreshEntitlements?.();
-      } catch {}
+      if (data.authoritative !== true) {
+        await refreshEntitlements();
 
-      setMsg(`Youâ€™re in. ${planMeta(paidPlan).name} is now active. Redirectingâ€¦`);
+        if (cancelled) return;
+
+        setMsg(
+          data.message ||
+            'Payment simulation completed. No verified plan entitlement was written.',
+        );
+        setBusy(false);
+        return;
+      }
+
+      const refreshed = await refreshEntitlements();
+
+      if (cancelled) return;
+
+      const activePlan = refreshed?.plan ?? 'free';
+      const accessMatches =
+        activePlan === paidPlan ||
+        (paidPlan === 'premium' && activePlan === 'family');
+
+      if (!accessMatches) {
+        setMsg(
+          'Payment was verified, but your plan access is still syncing. Refresh shortly before retrying.',
+        );
+        setBusy(false);
+        return;
+      }
+
+      setMsg(
+        `${planMeta(activePlan).name} is active on your account. Redirecting...`,
+      );
 
       setTimeout(() => {
         if (back) router.push(back);
@@ -240,10 +284,18 @@ function UpgradePlanPageContent() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, paidPlan, tx, cycleFromReturn]);
+  }, [
+    status,
+    paidPlan,
+    tx,
+    cycleFromReturn,
+    back,
+    router,
+    refreshEntitlements,
+  ]);
 
   async function startCheckout() {
+
     setMsg(null);
     setBusy(true);
 
@@ -272,62 +324,62 @@ function UpgradePlanPageContent() {
     window.location.href = data.checkoutUrl;
   }
 
-  function onRedeemedServer(data: {
-    redeemed: { plan: 'premium' | 'family'; days: number; label: string };
+  async function onRedeemedServer(data: {
+    redeemed?: {
+      code?: string;
+      valueZar?: number;
+      plan?: string;
+    };
     effect: 'upgraded' | 'credit_saved';
     message: string;
     allowShopSpend?: boolean;
   }) {
-    // Apply entitlements locally (demo): Family+Premium => credit
-    const result = applyRedemption({
-      basePlan: plan,
-      redeemedPlan: data.redeemed.plan,
-      days: data.redeemed.days,
-      source: 'promo',
-    });
+    const refreshed = await refreshEntitlements();
 
-    // If it truly upgraded, reflect base plan immediately for feature gating
-    if (data.effect === 'upgraded') {
-      const next = data.redeemed.plan === 'family' ? ('family' as Plan) : ('premium' as Plan);
-      setPlan(next);
-      if (data.redeemed.plan === 'family') setSelected('family');
-      if (data.redeemed.plan === 'premium') setSelected((prev) => (prev === 'family' ? prev : 'premium'));
+    if (
+      data.effect === 'upgraded' &&
+      refreshed?.plan &&
+      refreshed.plan !== 'free'
+    ) {
+      setSelected(refreshed.plan);
     }
 
-    try {
-      refreshEntitlements?.();
-    } catch {}
-
-    // After applying, compute remaining credit and surface it in the message.
-    const s = pruneExpired(loadEntitlements());
-    const prem = s.credits?.premiumDays ?? 0;
-    const fam = (s.credits as { premiumDays?: number; familyDays?: number } | undefined)?.familyDays ?? 0;
+    const premiumCredit = refreshed?.premiumCreditDays ?? 0;
+    const familyCredit = refreshed?.familyCreditDays ?? 0;
 
     const creditLine =
-      prem > 0 || fam > 0
-        ? ` Remaining credit â€” Premium: ${prem} days, Family: ${fam} days.`
+      premiumCredit > 0 || familyCredit > 0
+        ? ` Remaining credit - Premium: ${premiumCredit} days, Family: ${familyCredit} days.`
         : '';
 
-    // Prefer server message (world-class copy), but still respect local computed rule message.
-    const primary = data.message || result.message;
     const shopLine =
-      (data.allowShopSpend ?? true) && (prem > 0 || fam > 0)
+      (data.allowShopSpend ?? true) &&
+      (premiumCredit > 0 || familyCredit > 0)
         ? ' You can also use credit in the Shop.'
         : '';
 
-    setMsg(primary + creditLine + shopLine);
+    setMsg((data.message || 'Code redeemed.') + creditLine + shopLine);
   }
 
   const annualSavePct = useMemo(() => pctOffAnnual(), []);
   const canCheckout = !busy && selected !== 'free' && selected !== plan;
 
   const entitlementSummary = useMemo(() => {
-    const s = pruneExpired(loadEntitlements());
-    const premiumCredit = s.credits?.premiumDays ?? 0;
-    const familyCredit = (s.credits as { premiumDays?: number; familyDays?: number } | undefined)?.familyDays ?? 0;
-    const active = s.active && s.active.endsAtISO ? s.active : null;
+    const premiumCredit = entitlement?.premiumCreditDays ?? 0;
+    const familyCredit = entitlement?.familyCreditDays ?? 0;
+
+    const active =
+      entitlement &&
+      entitlement.plan !== 'free' &&
+      entitlement.endsAt
+        ? {
+            plan: entitlement.plan,
+            endsAtISO: entitlement.endsAt,
+          }
+        : null;
+
     return { premiumCredit, familyCredit, active };
-  }, [effectivePlan, plan, msg]);
+  }, [entitlement]);
 
   const planCards = useMemo(() => {
     return patientPlans.map((p) => {
@@ -385,22 +437,9 @@ function UpgradePlanPageContent() {
       <RedeemCodeModal
         open={redeemOpen}
         onClose={() => setRedeemOpen(false)}
-        onRedeemed={(data: {
-          effect: 'upgraded' | 'credit_saved';
-          message: string;
-          redeemed: {
-            plan: 'premium' | 'family';
-            days: number;
-            label: string;
-          };
-          allowShopSpend?: boolean;
-        }) => {
-          onRedeemedServer({
-            redeemed: data.redeemed,
-            effect: data.effect,
-            message: data.message,
-            allowShopSpend: data.allowShopSpend,
-          });
+        currentPlan={effectivePlan}
+        onRedeemed={(data) => {
+          void onRedeemedServer(data);
         }}
       />
 
@@ -668,7 +707,7 @@ function UpgradePlanPageContent() {
           </div>
 
           <div className="mt-3 text-xs text-slate-500">
-            Test checkout redirects back with <code className="text-slate-700">status=success</code>.
+            Test checkout can simulate a payment result, but plan access changes only after server-verified entitlement.
           </div>
         </div>
 

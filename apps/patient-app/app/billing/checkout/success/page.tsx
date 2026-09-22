@@ -4,7 +4,9 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Crown, Package, ArrowRight } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Crown, Package } from 'lucide-react';
+import { usePlan } from '@/components/context/PlanContext';
+import { planMeta } from '@/lib/plans';
 
 type PremiumOffer = 'bundle_40_free_year' | 'annual_premium_raffle';
 
@@ -14,74 +16,56 @@ function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
 }
 
-function addOneYearISO(from = new Date()) {
-  const d = new Date(from);
-  d.setFullYear(d.getFullYear() + 1);
-  return d.toISOString();
-}
-
 function CheckoutSuccessPageContent() {
   const sp = useSearchParams();
   const orderId = sp?.get('orderId') || '';
   const offer = (sp?.get('offer') || 'bundle_40_free_year') as PremiumOffer;
-
   const [summary, setSummary] = useState<any | null>(null);
 
+  const {
+    effectivePlan,
+    entitlement,
+    loading,
+    refreshEntitlements,
+  } = usePlan();
+
   useEffect(() => {
-    // 1) Load local summary for nice confirmation UI
+    // Non-authoritative receipt snapshot only.
     try {
       const raw = localStorage.getItem(LS_LAST_CHECKOUT);
       if (raw) setSummary(JSON.parse(raw));
     } catch {
-      // ignore
+      // Ignore malformed local presentation cache.
     }
 
-    // 2) Unlock premium locally (PlanContext uses ambulant.plan in your repo)
-    try {
-      localStorage.setItem('ambulant.plan', 'premium');
-      localStorage.setItem('ambulant.premiumUntil', addOneYearISO());
-    } catch {
-      // ignore
-    }
+    void refreshEntitlements();
+  }, [refreshEntitlements]);
 
-    // 3) Update local profile for UI/feature gates
-    try {
-      const raw = localStorage.getItem('ambulant.profile');
-      const p = raw ? JSON.parse(raw) : {};
-      const updated = {
-        ...p,
-        plan: 'premium',
-        premiumUntil: addOneYearISO(),
-        premiumActivatedAt: new Date().toISOString(),
-      };
-      localStorage.setItem('ambulant.profile', JSON.stringify(updated));
-    } catch {
-      // ignore
-    }
-
-    // 4) If bundle offer, store a “bundle order confirmed” record locally too
-    if (offer === 'bundle_40_free_year') {
-      try {
-        const bundle = {
-          orderId,
-          confirmedAt: new Date().toISOString(),
-          status: 'confirmed',
-          items: ['DueCare Health Monitor', 'Digital Stethoscope', 'HD Otoscope', 'NexRing', 'Consumables pack'],
-        };
-        localStorage.setItem('ambulant.bundle.order', JSON.stringify(bundle));
-      } catch {
-        // ignore
-      }
-    }
-  }, [offer, orderId]);
+  const hasPaidAccess =
+    effectivePlan === 'premium' || effectivePlan === 'family';
 
   const title = useMemo(() => {
-    if (offer === 'bundle_40_free_year') return 'Payment successful — Bundle confirmed';
-    return 'Payment successful — Premium unlocked';
-  }, [offer]);
+    if (loading) return 'Checkout complete - checking account status';
+    if (hasPaidAccess) {
+      return `Checkout complete - ${planMeta(effectivePlan).name} access is active`;
+    }
+    return 'Checkout complete - payment verification pending';
+  }, [effectivePlan, hasPaidAccess, loading]);
+
+  const entitlementCopy = loading
+    ? 'Checking your server-verified plan entitlement.'
+    : hasPaidAccess
+      ? `${planMeta(effectivePlan).name} access is active on your Ambulant+ account.`
+      : 'No verified paid-plan entitlement was found. This browser page cannot unlock Premium or Family access.';
+
+  const bundleCopy =
+    offer === 'bundle_40_free_year'
+      ? 'Bundle fulfilment is not confirmed by this browser page. It requires server-side verified order and payment evidence.'
+      : 'Not applicable for this offer.';
 
   return (
-    <main data-p-ui="patient-billing-checkout-success-page"
+    <main
+      data-p-ui="patient-billing-checkout-success-page"
       className={cx(
         'min-h-screen bg-slate-50',
         'bg-[radial-gradient(1000px_circle_at_18%_-12%,rgba(16,185,129,0.18),transparent_58%),radial-gradient(820px_circle_at_102%_0%,rgba(99,102,241,0.16),transparent_55%),radial-gradient(900px_circle_at_55%_105%,rgba(2,132,199,0.12),transparent_52%),linear-gradient(to_bottom,rgba(255,255,255,0.88),rgba(248,250,252,1))]',
@@ -91,13 +75,13 @@ function CheckoutSuccessPageContent() {
         <div className="rounded-[28px] border border-slate-200 bg-white/80 p-6 shadow-sm shadow-black/[0.06] backdrop-blur">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-xs font-black text-slate-500">Success</div>
+              <div className="text-xs font-black text-slate-500">Checkout status</div>
               <div className="mt-1 text-2xl font-black tracking-tight text-slate-950">{title}</div>
               <div className="mt-1 text-sm text-slate-600">
-                Order: <span className="font-black text-slate-900">{orderId || '—'}</span>
+                Order: <span className="font-black text-slate-900">{orderId || '-'}</span>
               </div>
             </div>
-            <div className="h-12 w-12 rounded-2xl border border-slate-200 bg-white flex items-center justify-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white">
               <CheckCircle2 className="h-6 w-6 text-emerald-700" />
             </div>
           </div>
@@ -106,11 +90,18 @@ function CheckoutSuccessPageContent() {
             <div className="rounded-3xl border border-slate-200 bg-white p-4">
               <div className="flex items-center gap-2 text-xs font-black text-slate-700">
                 <Crown className="h-4 w-4 text-indigo-700" />
-                Premium status
+                Plan status
               </div>
-              <div className="mt-2 text-[12px] text-slate-600">
-                Premium has been unlocked on this device/account session. Your dashboard should now show Premium features.
-              </div>
+              <div className="mt-2 text-[12px] text-slate-600">{entitlementCopy}</div>
+              {entitlement?.endsAt ? (
+                <div className="mt-2 text-[11px] text-slate-500">
+                  Current entitlement ends{' '}
+                  <span className="font-semibold text-slate-700">
+                    {new Date(entitlement.endsAt).toLocaleDateString()}
+                  </span>
+                  .
+                </div>
+              ) : null}
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-white p-4">
@@ -118,17 +109,16 @@ function CheckoutSuccessPageContent() {
                 <Package className="h-4 w-4 text-emerald-700" />
                 Bundle order
               </div>
-              <div className="mt-2 text-[12px] text-slate-600">
-                {offer === 'bundle_40_free_year'
-                  ? 'Bundle marked confirmed. Delivery steps can be managed in Orders (when you add it).'
-                  : 'Not applicable for this offer.'}
-              </div>
+              <div className="mt-2 text-[12px] text-slate-600">{bundleCopy}</div>
             </div>
           </div>
 
           {summary ? (
             <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
-              <div className="text-xs font-black text-slate-700">Receipt snapshot</div>
+              <div className="text-xs font-black text-slate-700">Checkout snapshot</div>
+              <div className="mt-1 text-[11px] text-slate-500">
+                Presentation-only browser cache. It does not prove payment or plan entitlement.
+              </div>
               <pre className="mt-2 overflow-auto rounded-2xl bg-slate-50 p-3 text-[11px] text-slate-700">
 {JSON.stringify(
   {
@@ -155,9 +145,8 @@ function CheckoutSuccessPageContent() {
               Go to dashboard
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
-
             <div className="text-[11px] text-slate-500">
-              If Premium doesn’t reflect immediately, refresh once.
+              Plan access is read from your server-verified account entitlement.
             </div>
           </div>
         </div>
@@ -165,6 +154,7 @@ function CheckoutSuccessPageContent() {
     </main>
   );
 }
+
 export default function CheckoutSuccessPage() {
   return (
     <React.Suspense fallback={null}>

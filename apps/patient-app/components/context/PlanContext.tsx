@@ -1,71 +1,140 @@
 // apps/patient-app/components/context/PlanContext.tsx
 'use client';
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import type { Plan } from '../../lib/plans';
-import { getEffectivePlan, loadEntitlements, maybeActivatePremiumCreditWhenEligible } from '../../lib/entitlements';
+import {
+  parsePatientPlanEntitlement,
+  type PatientPlanEntitlement,
+} from '../../lib/entitlements';
 
 type Ctx = {
-  plan: Plan;               // base subscription plan (free/premium/family)
-  effectivePlan: Plan;      // includes promos/entitlements
-  isPremium: boolean;       // true for premium OR family OR active entitlement
+  plan: Plan;
+  effectivePlan: Plan;
+  isPremium: boolean;
+  entitlement: PatientPlanEntitlement | null;
+  loading: boolean;
+  error: string | null;
   setPlan: (p: Plan) => void;
-  refreshEntitlements: () => void;
+  refreshEntitlements: () => Promise<PatientPlanEntitlement | null>;
 };
 
 const PlanCtx = createContext<Ctx | null>(null);
-const LS_KEY = 'ambulant.plan';
 
-export function PlanProvider({ children }: { children: React.ReactNode }) {
-  const [plan, setPlanState] = useState<Plan>('free');
-  const [entTick, setEntTick] = useState(0);
+export function PlanProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [entitlement, setEntitlement] =
+    useState<PatientPlanEntitlement | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    try {
-      const saved = (localStorage.getItem(LS_KEY) || 'free') as Plan;
-      setPlanState(saved === 'premium' || saved === 'family' ? saved : 'free');
-    } catch {}
-  }, []);
+  const refreshEntitlements = useCallback(async () => {
+    setLoading(true);
 
-  // Keep in sync if another tab redeems / updates entitlements
-  useEffect(() => {
-    function onStorage(e: StorageEvent) {
-      if (!e.key) return;
-      if (e.key === 'ambulant.entitlements.v1' || e.key === LS_KEY) setEntTick((n) => n + 1);
+    const response = await fetch('/api/plan/entitlement', {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      credentials: 'same-origin',
+      cache: 'no-store',
+    }).catch(() => null);
+
+    if (!response) {
+      setEntitlement(null);
+      setError('entitlement_unavailable');
+      setLoading(false);
+      return null;
     }
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok || !payload?.ok) {
+      setEntitlement(null);
+      setError(
+        response.status === 401
+          ? null
+          : String(payload?.error || 'entitlement_unavailable'),
+      );
+      setLoading(false);
+      return null;
+    }
+
+    const next = parsePatientPlanEntitlement(payload);
+
+    if (!next) {
+      setEntitlement(null);
+      setError('invalid_entitlement_response');
+      setLoading(false);
+      return null;
+    }
+
+    setEntitlement(next);
+    setError(null);
+    setLoading(false);
+    return next;
   }, []);
 
-  const refreshEntitlements = () => setEntTick((n) => n + 1);
+  useEffect(() => {
+    void refreshEntitlements();
+  }, [refreshEntitlements]);
 
-  const setPlan = (p: Plan) => {
-    const next = p === 'premium' || p === 'family' ? p : 'free';
-    setPlanState(next);
-    try {
-      localStorage.setItem(LS_KEY, next);
-    } catch {}
+  useEffect(() => {
+    const refresh = () => {
+      void refreshEntitlements();
+    };
 
-    // If user leaves Family and has Premium credit, auto-activate it.
-    const res = maybeActivatePremiumCreditWhenEligible(next);
-    if (res.didActivate) refreshEntitlements();
-  };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
 
-  const effectivePlan = useMemo(() => {
-    const ent = loadEntitlements();
-    return getEffectivePlan(plan, ent);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan, entTick]);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [refreshEntitlements]);
+
+  const effectivePlan: Plan = entitlement?.plan ?? 'free';
+
+  // Compatibility surface only. Browser callers cannot set plan authority.
+  const setPlan = useCallback(
+    (_p: Plan) => {
+      void refreshEntitlements();
+    },
+    [refreshEntitlements],
+  );
 
   const value = useMemo<Ctx>(
     () => ({
-      plan,
+      plan: effectivePlan,
       effectivePlan,
-      isPremium: effectivePlan === 'premium' || effectivePlan === 'family',
+      isPremium:
+        effectivePlan === 'premium' || effectivePlan === 'family',
+      entitlement,
+      loading,
+      error,
       setPlan,
       refreshEntitlements,
     }),
-    [plan, effectivePlan]
+    [
+      effectivePlan,
+      entitlement,
+      loading,
+      error,
+      setPlan,
+      refreshEntitlements,
+    ],
   );
 
   return <PlanCtx.Provider value={value}>{children}</PlanCtx.Provider>;
