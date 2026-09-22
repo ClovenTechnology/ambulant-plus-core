@@ -13,14 +13,6 @@ type RedeemResp =
     }
   | { ok: false; error?: string };
 
-function clientUid() {
-  try {
-    return localStorage.getItem('ambulant.uid') || localStorage.getItem('x-uid') || 'patient-local-001';
-  } catch {
-    return 'patient-local-001';
-  }
-}
-
 export default function RedeemCodeModal(props: {
   open: boolean;
   onClose: () => void;
@@ -44,11 +36,10 @@ export default function RedeemCodeModal(props: {
     setErr(null);
     setBusy(true);
 
-    const uid = clientUid();
-
     const r = await fetch('/api/plan/redeem', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-uid': uid },
+      headers: { 'content-type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ code: code.trim(), currentPlan }),
     }).catch(() => null);
 
