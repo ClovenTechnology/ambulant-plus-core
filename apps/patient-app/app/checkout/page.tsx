@@ -17,6 +17,11 @@ type Appt = {
 
 type PaymentMethod = 'self-pay-card' | 'medical-aid' | 'voucher-promo';
 
+type AuthMe = {
+  ok?: boolean;
+  patientId?: string | null;
+};
+
 function CheckoutPageContent() {
   const sp = useSearchParams();
   const router = useRouter();
@@ -39,8 +44,47 @@ function CheckoutPageContent() {
   // Optional: show voucher redeem result (nice UX)
   const [voucherHint, setVoucherHint] = useState<string>('');
 
-  // For this demo we use a fixed patientId; in real auth we'd read it from the session/profile.
-  const patientId = 'pt-za-001';
+  // Resolve the canonical patient identity from the authenticated session.
+  const [patientId, setPatientId] = useState('');
+  const [authResolved, setAuthResolved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const r = await fetch('/api/auth/me', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        });
+
+        if (!r.ok) {
+          if (!cancelled) {
+            setPatientId('');
+            setAuthResolved(true);
+          }
+          return;
+        }
+
+        const j = (await r.json().catch(() => null)) as AuthMe | null;
+        const resolved = j?.ok === true ? String(j.patientId ?? '').trim() : '';
+
+        if (!cancelled) {
+          setPatientId(resolved);
+          setAuthResolved(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setPatientId('');
+          setAuthResolved(true);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -253,7 +297,25 @@ function CheckoutPageContent() {
           </section>
 
           {/* Tiny Medical Aid section reusing same list + modal */}
-          <MedicalAidManager patientId={patientId} compact />
+          {!authResolved ? (
+            <section
+              className="border rounded-lg p-3 bg-slate-50"
+              aria-live="polite"
+              aria-busy="true"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600"
+                  aria-hidden="true"
+                />
+                <span className="text-sm text-slate-600">
+                  Loading medical aid details…
+                </span>
+              </div>
+            </section>
+          ) : patientId ? (
+            <MedicalAidManager patientId={patientId} compact />
+          ) : null}
 
           <div className="mt-4 flex items-center gap-3">
             <button

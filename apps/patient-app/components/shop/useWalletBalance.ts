@@ -3,16 +3,8 @@
 
 import useSWR from 'swr';
 
-function uid() {
-  try {
-    return localStorage.getItem('ambulant.uid') || localStorage.getItem('x-uid') || 'demo-patient';
-  } catch {
-    return 'demo-patient';
-  }
-}
-
 async function fetcher(url: string) {
-  const r = await fetch(url, { headers: { 'x-uid': uid() }, cache: 'no-store' });
+  const r = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
   const j = await r.json().catch(() => null);
   if (!r.ok || !j || j.ok === false) throw new Error(j?.error || 'Wallet fetch failed');
   return j;
