@@ -2061,6 +2061,7 @@ model PatientProfile {
   reminders                      Reminder[]
   pushSubscriptions              ReminderPushSubscription[]
   vaccinations                   Vaccination[]
+  planEntitlement                PatientPlanEntitlement?
 
   @@index([city])
   @@index([postalCode])
@@ -2702,6 +2703,52 @@ model WalletHold {
   @@index([orgId])
 }
 
+model PatientPlanEntitlement {
+  id                String                        @id @default(cuid())
+  patientId         String                        @unique
+  plan              String                        @default("free")
+  cycle             String?
+  status            String                        @default("active")
+  startsAt          DateTime?
+  endsAt            DateTime?
+  premiumCreditDays Int                           @default(0)
+  familyCreditDays  Int                           @default(0)
+  sourceType        String                        @default("system")
+  sourceRef         String?
+  orgId             String                        @default("org-default")
+  metadata          Json?
+  createdAt         DateTime                      @default(now())
+  updatedAt         DateTime                      @updatedAt
+  patient           PatientProfile                @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  events            PatientPlanEntitlementEvent[]
+
+  @@index([plan, status])
+  @@index([endsAt])
+  @@index([orgId])
+  @@index([sourceType, sourceRef])
+}
+
+model PatientPlanEntitlementEvent {
+  id             String                 @id @default(cuid())
+  entitlementId  String
+  patientId      String
+  eventType      String
+  fromPlan       String?
+  toPlan         String?
+  cycle          String?
+  startsAt       DateTime?
+  endsAt         DateTime?
+  sourceType     String?
+  sourceRef      String?
+  idempotencyKey String?                @unique
+  metadata       Json?
+  createdAt      DateTime               @default(now())
+  entitlement    PatientPlanEntitlement @relation(fields: [entitlementId], references: [id], onDelete: Cascade)
+
+  @@index([entitlementId, createdAt])
+  @@index([patientId, createdAt])
+  @@index([sourceType, sourceRef])
+}
 model VoucherCode {
   id              String              @id @default(cuid())
   codeHash        String              @unique
