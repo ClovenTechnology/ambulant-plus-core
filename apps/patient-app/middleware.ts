@@ -24,6 +24,9 @@ const PUBLIC_PREFIXES = [
   '/icons',
 ];
 
+const TOKEN_AUTHENTICATED_PATHS = new Set([
+  '/api/iomt/ingest',
+]);
 const IDENTITY_HEADERS = [
   'x-uid',
   'x-user-id',
@@ -205,6 +208,13 @@ export async function middleware(request: NextRequest) {
 
   // Caller-supplied identity is never authoritative inside patient-app.
   for (const name of IDENTITY_HEADERS) headers.delete(name);
+
+  // Device/bridge ingestion uses its own route-level Bearer-token
+  // authentication. Permit only the exact ingest path through the
+  // patient-session perimeter while preserving the sanitised headers.
+  if (TOKEN_AUTHENTICATED_PATHS.has(pathname)) {
+    return NextResponse.next({ request: { headers } });
+  }
 
   const session = await verifyPatientSession(request);
 
