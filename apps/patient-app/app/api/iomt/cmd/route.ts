@@ -1,39 +1,32 @@
-﻿import mqtt from "mqtt";
+import { NextResponse } from 'next/server';
 
-export const runtime = "nodejs";
-process.env.WS_NO_BUFFER_UTIL = "1";
-process.env.WS_NO_UTF_8_VALIDATE = "1";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-const URL  = process.env.MQTT_URL!;
-const USER = process.env.MQTT_USERNAME;
-const PASS = process.env.MQTT_PASSWORD;
-const ROOT = process.env.MQTT_TOPIC_ROOT || "iomt";
-
-let mq: mqtt.MqttClient | null = null;
-function getClient() {
-  if (mq) return mq;
-  mq = mqtt.connect(URL, { username: USER, password: PASS, keepalive: 30 });
-  mq.on("error", (e) => console.error("[mqtt:error]", e?.message || e));
-  return mq;
-}
-
-export async function POST(req: Request) {
-  const body = await req.json().catch(() => null);
-  const id  = body?.id ?? body?.deviceId; // < tolerate either
-  const cmd = body?.cmd;
-  const payload = body?.payload;
-
-  if (!id || !cmd) {
-    return new Response(JSON.stringify({ ok: false, message: "id and cmd required" }), { status: 400 });
-  }
-
-  const client = getClient();
-  const topic = `${ROOT}/cmd/${id}`;
-
-  const msg = JSON.stringify({ cmd, payload, ts: Date.now() });
-  try { client.publish(topic, msg); } catch (e: any) {
-    return new Response(JSON.stringify({ ok: false, message: e?.message || String(e) }), { status: 500 });
-  }
-
-  return Response.json({ ok: true });
+/**
+ * Legacy Patient App MQTT command surface.
+ *
+ * This endpoint previously accepted a browser-supplied device/topic identifier
+ * and published directly to MQTT. The only in-repo callers are unused legacy
+ * components, so the surface is intentionally retired rather than preserving
+ * an unauthorised actuation path.
+ *
+ * Future remote device command/control must be reintroduced through a
+ * canonical server-side device-authority contract that resolves the
+ * authenticated actor, persisted device ownership, and command policy before
+ * any broker publication occurs.
+ */
+export async function POST() {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: 'iomt_command_surface_retired',
+    },
+    {
+      status: 410,
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    },
+  );
 }
